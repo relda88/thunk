@@ -55,7 +55,7 @@ fn read_that_file_again_dispatches_one_read_to_anchor() {
     fs::create_dir_all(tmp.path().join("src")).unwrap();
     fs::write(tmp.path().join("src/anchor.rs"), "fn anchor() {}\n").unwrap();
 
-    let mut rt = make_runtime_in(vec!["Anchored read complete."], tmp.path());
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -95,7 +95,7 @@ fn read_that_file_again_dispatches_one_read_to_anchor() {
         .rev()
         .find(|m| m.role == crate::llm::backend::Role::Assistant)
         .map(|m| m.content.as_str());
-    assert_eq!(last_assistant, Some("Anchored read complete."));
+    assert_eq!(last_assistant, Some("[1 lines]\nfn anchor() {}"));
 }
 
 #[test]
@@ -303,20 +303,15 @@ fn unsupported_anchor_phrases_do_not_resolve_last_read_file() {
 }
 
 #[test]
-fn anchored_read_replay_starts_in_answer_only_and_blocks_follow_up_retrieval() {
+fn anchored_read_replay_returns_raw_content_without_synthesis() {
     use std::fs;
     use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
     fs::write(tmp.path().join("src/anchor.rs"), "fn anchor() {}\n").unwrap();
-    fs::write(tmp.path().join("src/b.rs"), "fn b() {}\n").unwrap();
 
-    let final_answer = "Read both files.";
-    let mut rt = make_runtime_in(
-        vec!["[search_code: anchor][read_file: src/b.rs]", final_answer],
-        tmp.path(),
-    );
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -335,42 +330,36 @@ fn anchored_read_replay_starts_in_answer_only_and_blocks_follow_up_retrieval() {
         !has_failed(&events),
         "turn must complete without failure: {events:?}"
     );
-    let snapshot = rt.messages_snapshot();
-    let all_user: String = snapshot
+
+    let read_starts = events
         .iter()
-        .filter(|m| m.role == crate::llm::backend::Role::User)
-        .map(|m| m.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
+        .filter(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "read_file"))
+        .count();
+    assert_eq!(read_starts, 1, "anchor replay must dispatch exactly one read");
 
-    assert_eq!(
-        all_user.matches("=== tool_result: read_file ===").count(),
-        2,
-        "turn 1 anchor plus anchor replay should be the only executed reads"
-    );
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
     assert!(
-        all_user.contains("The file was already read this turn"),
-        "anchor replay must start in answer-only mode and correct the first retrieval attempt"
-    );
-    assert_eq!(
-        all_user.matches("=== tool_result: search_code ===").count(),
-        0,
-        "follow-up search must be blocked before dispatch during anchor replay"
-    );
-    assert_eq!(
-        all_user
-            .matches("=== tool_result: read_file ===\n[1 lines]\nfn b() {}\n")
-            .count(),
-        0,
-        "follow-up read_file must also be blocked before dispatch during anchor replay"
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "anchor replay must produce a tool-assisted answer, not a synthesis round: {answer_source:?}"
     );
 
+    let snapshot = rt.messages_snapshot();
     let last_assistant = snapshot
         .iter()
         .rev()
         .find(|m| m.role == crate::llm::backend::Role::Assistant)
         .map(|m| m.content.as_str());
-    assert_eq!(last_assistant, Some(final_answer));
+    assert_eq!(
+        last_assistant,
+        Some("[1 lines]\nfn anchor() {}"),
+        "anchor replay must return raw file contents without model synthesis"
+    );
 }
 
 // Search anchor tests
