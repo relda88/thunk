@@ -133,28 +133,42 @@ Key architectural rules reflected in the code:
 
 ---
 
+## Installation
+
+Build and install to PATH:
+```bash
+cargo build --release
+cargo install --path .
+```
+
+Once installed, run from any project directory:
+```bash
+cd /your/project
+thunk
+```
+
+thunk walks upward from the current directory to find `config.toml` and `.git`. Copy `config.toml.example` to your project root and edit `model_path` to point to your local `.gguf` model.
+
+---
+
 ## Running
 
 Requirements:
-
 - Rust stable
 - Interactive terminal (`stdout` must be a TTY and `TERM` must not be `dumb`)
 - A local `.gguf` model if using `llama_cpp`
 
-Run the app:
-
+Run during development:
 ```bash
 cargo run
 ```
 
 Run tests:
-
 ```bash
 cargo test
 ```
 
-Configuration lives in `config.toml`.
-
+Configuration lives in `config.toml`. See `config.toml.example` for all available options.
 - `llm.provider = "mock"` uses the built-in mock backend.
 - `llm.provider = "llama_cpp"` uses the local llama.cpp backend.
 - `llama_cpp.model_path` points to the local `.gguf` file to load.
