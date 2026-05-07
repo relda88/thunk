@@ -18,11 +18,24 @@ fn make_mock(config: &Config) -> Result<Box<dyn ModelBackend>> {
 }
 
 fn make_llama_cpp(config: &Config) -> Result<Box<dyn ModelBackend>> {
+    if config.llama_cpp.model_path.is_none() {
+        return Err(AppError::Config(
+            "llama_cpp provider requires model_path in config".to_string(),
+        ));
+    }
     Ok(Box::new(LlamaCppBackend::new(config.llama_cpp.clone())))
 }
 
 fn make_openai(config: &Config) -> Result<Box<dyn ModelBackend>> {
-    Ok(Box::new(OpenAiBackend::new(config.openai.clone())))
+    if config.openai.model.is_empty() {
+        return Err(AppError::Config(
+            "openai provider requires openai.model in config".to_string(),
+        ));
+    }
+    let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| {
+        AppError::Config("OPENAI_API_KEY environment variable is not set".to_string())
+    })?;
+    Ok(Box::new(OpenAiBackend::new(config.openai.clone(), api_key)))
 }
 
 const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
@@ -47,4 +60,95 @@ pub fn build_backend(config: &Config) -> Result<Box<dyn ModelBackend>> {
                 "Unknown llm.provider `{name}`. Expected one of: {known}."
             )))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::config::{Config, LlmConfig, OpenAiConfig};
+    use crate::app::AppError;
+
+    use super::build_backend;
+
+    fn config_with_provider(provider: &str) -> Config {
+        Config {
+            llm: LlmConfig {
+                provider: provider.to_string(),
+            },
+            ..Default::default()
+        }
+    }
+
+    fn unwrap_config_err(
+        result: crate::app::Result<Box<dyn crate::llm::backend::ModelBackend>>,
+    ) -> AppError {
+        match result {
+            Err(e) => e,
+            Ok(_) => panic!("expected Err, got Ok"),
+        }
+    }
+
+    #[test]
+    fn llama_cpp_without_model_path_fails_at_startup() {
+        let config = config_with_provider("llama_cpp");
+        // model_path defaults to None
+        let err = unwrap_config_err(build_backend(&config));
+        assert!(
+            matches!(err, AppError::Config(_)),
+            "expected Config error, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("model_path"),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[test]
+    fn openai_with_empty_model_fails_at_startup() {
+        let config = Config {
+            llm: LlmConfig {
+                provider: "openai".to_string(),
+            },
+            openai: OpenAiConfig {
+                model: String::new(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = unwrap_config_err(build_backend(&config));
+        assert!(
+            matches!(err, AppError::Config(_)),
+            "expected Config error, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("openai.model"),
+            "unexpected message: {err}"
+        );
+    }
+
+    #[test]
+    fn openai_without_api_key_fails_at_startup() {
+        // Only meaningful when OPENAI_API_KEY is absent; skip if the test environment has it set.
+        if std::env::var("OPENAI_API_KEY").is_ok() {
+            return;
+        }
+        let config = Config {
+            llm: LlmConfig {
+                provider: "openai".to_string(),
+            },
+            openai: OpenAiConfig {
+                model: "gpt-4o".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = unwrap_config_err(build_backend(&config));
+        assert!(
+            matches!(err, AppError::Config(_)),
+            "expected Config error, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("OPENAI_API_KEY"),
+            "unexpected message: {err}"
+        );
+    }
 }

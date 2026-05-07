@@ -1,4 +1,3 @@
-use std::env;
 use std::io::BufRead;
 
 use serde_json::{json, Value};
@@ -12,14 +11,16 @@ use crate::llm::backend::{
 pub struct OpenAiBackend {
     config: OpenAiConfig,
     display_name: String,
+    api_key: String,
 }
 
 impl OpenAiBackend {
-    pub fn new(config: OpenAiConfig) -> Self {
+    pub fn new(config: OpenAiConfig, api_key: String) -> Self {
         let display_name = format!("openai/{}", config.model);
         Self {
             config,
             display_name,
+            api_key,
         }
     }
 }
@@ -41,16 +42,6 @@ impl ModelBackend for OpenAiBackend {
         request: GenerateRequest,
         on_event: &mut dyn FnMut(BackendEvent),
     ) -> Result<()> {
-        if self.config.model.is_empty() {
-            return Err(AppError::Config(
-                "openai.model must not be empty".to_string(),
-            ));
-        }
-
-        let api_key = env::var("OPENAI_API_KEY").map_err(|_| {
-            AppError::Config("OPENAI_API_KEY environment variable is not set".to_string())
-        })?;
-
         let messages: Vec<Value> = request
             .messages
             .iter()
@@ -68,7 +59,7 @@ impl ModelBackend for OpenAiBackend {
         let url = format!("{}/chat/completions", self.config.base_url);
 
         let response = ureq::post(&url)
-            .set("Authorization", &format!("Bearer {api_key}"))
+            .set("Authorization", &format!("Bearer {}", self.api_key))
             .set("Content-Type", "application/json")
             .send_string(&body.to_string())
             .map_err(|e| AppError::Runtime(format!("OpenAI request failed: {e}")))?;
