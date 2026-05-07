@@ -242,6 +242,10 @@ pub(super) fn run_generation(
         stage: BackendTimingStage::GenerationDone,
         elapsed_ms: t_gen_start.elapsed().as_millis() as u64,
     });
+    on_event(BackendEvent::TokenCounts {
+        prompt: tokens.len() as u32,
+        completion: generated as u32,
+    });
     on_event(BackendEvent::Finished);
     Ok(())
 }
