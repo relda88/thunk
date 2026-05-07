@@ -228,10 +228,13 @@ struct TurnPerformance {
     generation_ms: u64,
     model_load_ms: u64,
     tool_ms: u64,
+    tokens_prompt: u64,
+    tokens_completion: u64,
+    context_window_tokens: Option<u32>,
 }
 
 impl TurnPerformance {
-    fn new() -> Self {
+    fn new(context_window_tokens: Option<u32>) -> Self {
         let enabled = std::env::var_os(RUNTIME_TRACE_ENV).is_some();
         Self {
             enabled,
@@ -246,6 +249,9 @@ impl TurnPerformance {
             generation_ms: 0,
             model_load_ms: 0,
             tool_ms: 0,
+            tokens_prompt: 0,
+            tokens_completion: 0,
+            context_window_tokens,
         }
     }
 
@@ -295,6 +301,14 @@ impl TurnPerformance {
         self.tool_ms += elapsed_ms;
     }
 
+    fn record_token_counts(&mut self, prompt: u32, completion: u32) {
+        if !self.enabled {
+            return;
+        }
+        self.tokens_prompt += u64::from(prompt);
+        self.tokens_completion += u64::from(completion);
+    }
+
     fn emit_summary(&self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         if !self.enabled {
             return;
@@ -334,8 +348,8 @@ impl TurnPerformance {
             .map(|t| t.elapsed().as_millis() as u64)
             .unwrap_or(0);
 
-        on_event(RuntimeEvent::RuntimeTrace(format!(
-            "[runtime:perf] rounds={} round_labels={} causes={} prompt_sizes={} prefill_ms={} generation_ms={} ctx_ms={} tokenize_ms={} model_load_ms={} tool_ms={} model_ms={} total_turn_ms={}",
+        let mut line = format!(
+            "[runtime:perf] rounds={} round_labels={} causes={} prompt_sizes={} prefill_ms={} generation_ms={} ctx_ms={} tokenize_ms={} model_load_ms={} tool_ms={} model_ms={} total_turn_ms={} tokens_prompt={} tokens_completion={}",
             self.rounds,
             round_labels,
             causes,
@@ -347,8 +361,17 @@ impl TurnPerformance {
             self.model_load_ms,
             self.tool_ms,
             model_ms,
-            total_turn_ms
-        )));
+            total_turn_ms,
+            self.tokens_prompt,
+            self.tokens_completion,
+        );
+        if let Some(ctx) = self.context_window_tokens {
+            if ctx > 0 {
+                let pct = self.tokens_prompt * 100 / u64::from(ctx);
+                line.push_str(&format!(" context_used_pct={pct}"));
+            }
+        }
+        on_event(RuntimeEvent::RuntimeTrace(line));
     }
 }
 
@@ -1098,7 +1121,7 @@ impl Runtime {
         let mut pending_runtime_call: Option<PendingRuntimeCall> = None;
         let mut search_budget = SearchBudget::new();
         let mut investigation = InvestigationState::new();
-        let mut turn_perf = TurnPerformance::new();
+        let mut turn_perf = TurnPerformance::new(self.backend.capabilities().context_window_tokens);
         let mut next_round_label = GenerationRoundLabel::Initial;
         let mut next_round_cause = GenerationRoundCause::Initial;
         let mut requested_read_completed = false;
@@ -1316,6 +1339,9 @@ impl Runtime {
                         let mut perf_on_event = |event| {
                             if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
                                 turn_perf.record_backend_timing(*stage, *elapsed_ms);
+                            }
+                            if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
+                                turn_perf.record_token_counts(*prompt, *completion);
                             }
                             on_event(event);
                         };
@@ -2571,7 +2597,7 @@ mod tests {
         // Uses env-var isolation: set before constructing TurnPerformance (which captures
         // enabled at construction), removed immediately after so parallel tests are unaffected.
         std::env::set_var(RUNTIME_TRACE_ENV, "1");
-        let mut perf = TurnPerformance::new();
+        let mut perf = TurnPerformance::new(None);
         std::env::remove_var(RUNTIME_TRACE_ENV);
 
         perf.record_backend_timing(BackendTimingStage::ModelLoad, 4200);
@@ -2607,6 +2633,72 @@ mod tests {
         assert!(
             summary.contains("total_turn_ms="),
             "wall-clock turn time missing: {summary}"
+        );
+    }
+
+    #[test]
+    fn perf_token_counts_accumulate_across_rounds() {
+        std::env::set_var(RUNTIME_TRACE_ENV, "1");
+        let mut perf = TurnPerformance::new(None);
+        std::env::remove_var(RUNTIME_TRACE_ENV);
+
+        perf.record_token_counts(100, 50);
+        perf.record_token_counts(200, 75);
+
+        assert_eq!(perf.tokens_prompt, 300);
+        assert_eq!(perf.tokens_completion, 125);
+    }
+
+    #[test]
+    fn perf_summary_includes_token_fields_when_available() {
+        std::env::set_var(RUNTIME_TRACE_ENV, "1");
+        let mut perf = TurnPerformance::new(None);
+        std::env::remove_var(RUNTIME_TRACE_ENV);
+
+        perf.record_token_counts(512, 128);
+
+        let mut lines = Vec::new();
+        perf.emit_summary(&mut |e| {
+            if let RuntimeEvent::RuntimeTrace(line) = e {
+                lines.push(line);
+            }
+        });
+
+        assert_eq!(lines.len(), 1, "expect exactly one summary line");
+        let summary = &lines[0];
+        assert!(
+            summary.contains("tokens_prompt=512"),
+            "tokens_prompt missing: {summary}"
+        );
+        assert!(
+            summary.contains("tokens_completion=128"),
+            "tokens_completion missing: {summary}"
+        );
+        assert!(
+            !summary.contains("context_used_pct"),
+            "context_used_pct must be absent when context_window_tokens is None: {summary}"
+        );
+    }
+
+    #[test]
+    fn perf_summary_omits_context_used_pct_when_context_window_unknown() {
+        std::env::set_var(RUNTIME_TRACE_ENV, "1");
+        let mut perf = TurnPerformance::new(None);
+        std::env::remove_var(RUNTIME_TRACE_ENV);
+
+        perf.record_token_counts(1000, 200);
+
+        let mut lines = Vec::new();
+        perf.emit_summary(&mut |e| {
+            if let RuntimeEvent::RuntimeTrace(line) = e {
+                lines.push(line);
+            }
+        });
+
+        let summary = &lines[0];
+        assert!(
+            !summary.contains("context_used_pct"),
+            "context_used_pct must not appear when context_window_tokens is None: {summary}"
         );
     }
 

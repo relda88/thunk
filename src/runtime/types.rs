@@ -133,6 +133,12 @@ pub enum RuntimeEvent {
         stage: BackendTimingStage,
         elapsed_ms: u64,
     },
+    /// Advisory token count event routed from the backend. Consumed by the logging layer only;
+    /// must not be forwarded to the TUI or drive any control flow.
+    BackendTokenCounts {
+        prompt: u32,
+        completion: u32,
+    },
     /// Advisory runtime decision trace. Consumed by the application logging layer only;
     /// must not be forwarded to the TUI or drive any control flow.
     RuntimeTrace(String),

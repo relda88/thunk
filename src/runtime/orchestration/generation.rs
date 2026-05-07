@@ -40,6 +40,9 @@ pub(super) fn run_generate_turn(
         BackendEvent::Timing { stage, elapsed_ms } => {
             on_event(RuntimeEvent::BackendTiming { stage, elapsed_ms });
         }
+        BackendEvent::TokenCounts { prompt, completion } => {
+            on_event(RuntimeEvent::BackendTokenCounts { prompt, completion });
+        }
         BackendEvent::Finished => {}
     });
 

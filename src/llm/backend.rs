@@ -116,6 +116,13 @@ pub enum BackendEvent {
         stage: BackendTimingStage,
         elapsed_ms: u64,
     },
+    /// Token counts for the completed generation — emitted once per generate() call,
+    /// alongside or before Finished. Consumers may route this to logging; it must
+    /// not affect control flow.
+    TokenCounts {
+        prompt: u32,
+        completion: u32,
+    },
 }
 
 /// Static capabilities exposed by a backend so callers can make informed decisions

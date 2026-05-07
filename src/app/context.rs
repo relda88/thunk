@@ -159,6 +159,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         | RuntimeEvent::ToolCallFinished { .. }
         | RuntimeEvent::AssistantMessageChunk(_)
         | RuntimeEvent::BackendTiming { .. }
+        | RuntimeEvent::BackendTokenCounts { .. }
         | RuntimeEvent::RuntimeTrace(_) => None,
     }
 }

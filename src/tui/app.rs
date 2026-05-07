@@ -339,6 +339,7 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
+        RuntimeEvent::BackendTokenCounts { .. } => {}
         RuntimeEvent::RuntimeTrace(_) => {}
     }
 }
