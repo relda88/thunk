@@ -232,6 +232,7 @@ pub(crate) fn requested_simple_edit(text: &str) -> Option<SimpleEditRequest> {
         ("edit the file ", " replace the content ", " with "),
         ("edit ", " replace ", " with "),
         ("edit ", " and change ", " to "),
+        ("edit ", " change ", " to "),
         ("edit ", " to change ", " to "),
         ("in ", " change ", " to "),
     ];
@@ -901,6 +902,16 @@ mod tests {
         assert_eq!(edit.path, "baseline_test.txt");
         assert_eq!(edit.search, "hello world");
         assert_eq!(edit.replace, "hello thunk");
+    }
+
+    #[test]
+    fn requested_simple_edit_detects_bare_change_form() {
+        let edit =
+            requested_simple_edit("Edit src/config.rs change default_timeout to request_timeout")
+                .expect("expected simple edit");
+        assert_eq!(edit.path, "src/config.rs");
+        assert_eq!(edit.search, "default_timeout");
+        assert_eq!(edit.replace, "request_timeout");
     }
 
     #[test]
