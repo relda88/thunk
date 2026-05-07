@@ -1139,10 +1139,10 @@ impl InvestigationState {
                 );
                 // Correction already issued: fall through without accepting.
             }
-            // Gate 6a (LoadLookup): load candidates whose load-term lines are all definition
-            // sites are structurally insufficient when call-site load candidates exist.
+            // Gate 6a (LoadLookup | General): load candidates whose load-term lines are all
+            // definition sites are structurally insufficient when call-site load candidates exist.
             // Fire once; fall through if no call-site load candidates exist.
-            else if matches!(mode, InvestigationMode::LoadLookup)
+            else if matches!(mode, InvestigationMode::LoadLookup | InvestigationMode::General)
                 && is_load_candidate
                 && is_load_def_only
                 && self.has_non_definition_load_candidates

@@ -1229,3 +1229,122 @@ fn load_lookup_no_call_site_candidate_produces_insufficient_evidence() {
         "LoadLookup with no call-site candidate and no reads must produce InsufficientEvidence: {answer_source:?}"
     );
 }
+
+#[test]
+fn general_mode_load_definition_only_read_dispatches_to_call_site_candidate() {
+    // General mode (query has no load/save/config/etc terms; "handled" triggers investigation
+    // without triggering any specific lookup mode).
+    // File A (session_loader.py): search match on a definition line containing "load" → load_definition_only candidate.
+    // File B (session_service.py): search match on a call-site line containing "load" → non-definition load candidate.
+    // Model searches for "load_session" then reads A first.
+    // Gate 6a fires in General mode: A is a load_definition_only candidate and a non-definition load candidate exists.
+    // Runtime dispatches directly to B. Dispatched read satisfies evidence → ToolAssisted.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+    fs::write(
+        tmp.path().join("services").join("session_loader.py"),
+        "def load_session(session_id):\n    return None\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("services").join("session_service.py"),
+        "result = load_session(user_id)\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: load_session]",
+            "[read_file: services/session_loader.py]",
+            "Sessions are handled in services/session_service.py.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where are sessions handled?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "turn must not fail: {events:?}");
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "General mode dispatch from load-definition-only to call-site candidate must complete as ToolAssisted: {answer_source:?}"
+    );
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_eq!(
+        last_assistant,
+        Some("Sessions are handled in services/session_service.py.")
+    );
+}
+
+#[test]
+fn general_mode_no_call_site_candidate_produces_insufficient_evidence() {
+    // General mode (query has no load/save/config/etc terms; "handled" triggers investigation
+    // without triggering any specific lookup mode).
+    // Only candidate has load terms exclusively on definition lines.
+    // has_non_definition_load_candidates = false — Gate 6a never fires (no call-site to dispatch to).
+    // Model answers twice without reading → correction exhausted → InsufficientEvidence.
+    use crate::runtime::types::RuntimeTerminalReason;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+    fs::write(
+        tmp.path().join("services").join("session_loader.py"),
+        "def load_session(session_id):\n    return None\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: load_session]",
+            "Sessions are handled in services/session_loader.py.",
+            "Sessions are handled in services/session_loader.py.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where are sessions handled?".into(),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "General mode with no call-site candidate and no reads must produce InsufficientEvidence: {answer_source:?}"
+    );
+}

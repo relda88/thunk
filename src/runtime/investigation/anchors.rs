@@ -112,9 +112,13 @@ pub(crate) fn is_last_read_file_anchor_prompt(text: &str) -> bool {
         "read that file"
             | "read that file again"
             | "read the last file"
+            | "read that again"
             | "open that file"
             | "open that file again"
             | "open the last file"
+            | "open that again"
+            | "show that again"
+            | "show it again"
     )
 }
 
@@ -192,4 +196,31 @@ fn normalize_anchor_prompt(text: &str) -> String {
         .join(" ")
         .trim_matches(|c: char| matches!(c, '.' | '?' | '!' | ',' | ';' | ':'))
         .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_last_read_file_anchor_prompt;
+
+    #[test]
+    fn natural_language_followup_phrases_match() {
+        assert!(is_last_read_file_anchor_prompt("read that again"));
+        assert!(is_last_read_file_anchor_prompt("open that again"));
+        assert!(is_last_read_file_anchor_prompt("show that again"));
+        assert!(is_last_read_file_anchor_prompt("show it again"));
+    }
+
+    #[test]
+    fn natural_language_followup_phrases_match_with_punctuation_and_case() {
+        assert!(is_last_read_file_anchor_prompt("Read that again."));
+        assert!(is_last_read_file_anchor_prompt("Open that again!"));
+        assert!(is_last_read_file_anchor_prompt("Show that again?"));
+        assert!(is_last_read_file_anchor_prompt("Show it again."));
+    }
+
+    #[test]
+    fn adjacent_phrases_do_not_match() {
+        assert!(!is_last_read_file_anchor_prompt("read it again"));
+        assert!(!is_last_read_file_anchor_prompt("show that file"));
+    }
 }
