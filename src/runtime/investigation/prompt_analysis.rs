@@ -223,51 +223,67 @@ pub(crate) struct SimpleEditRequest {
 /// Accepted forms only:
 /// - "Edit the file <path> replace the content <old> with <new>"
 /// - "Edit <path> replace <old> with <new>"
+/// - "Edit <path> and change <old> to <new>"
+/// - "Edit <path> to change <old> to <new>"
+/// - "In <path> change <old> to <new>"
 pub(crate) fn requested_simple_edit(text: &str) -> Option<SimpleEditRequest> {
-    const LONG_PREFIX: &str = "edit the file ";
-    const SHORT_PREFIX: &str = "edit ";
-    const LONG_REPLACE_MARKER: &str = " replace the content ";
-    const SHORT_REPLACE_MARKER: &str = " replace ";
-    const WITH_MARKER: &str = " with ";
+    // (prefix, change_marker, end_marker)
+    const PATTERNS: &[(&str, &str, &str)] = &[
+        ("edit the file ", " replace the content ", " with "),
+        ("edit ", " replace ", " with "),
+        ("edit ", " and change ", " to "),
+        ("edit ", " to change ", " to "),
+        ("in ", " change ", " to "),
+    ];
 
     let trimmed = text.trim();
     let lower = trimmed.to_ascii_lowercase();
 
-    let (prefix_len, replace_marker) = if lower.starts_with(LONG_PREFIX) {
-        (LONG_PREFIX.len(), LONG_REPLACE_MARKER)
-    } else if lower.starts_with(SHORT_PREFIX) {
-        (SHORT_PREFIX.len(), SHORT_REPLACE_MARKER)
-    } else {
-        return None;
-    };
+    for &(prefix, change_marker, end_marker) in PATTERNS {
+        if !lower.starts_with(prefix) {
+            continue;
+        }
+        let rest = &trimmed[prefix.len()..];
+        let lower_rest = &lower[prefix.len()..];
 
-    let rest = &trimmed[prefix_len..];
-    let lower_rest = &lower[prefix_len..];
-    let replace_index = lower_rest.find(replace_marker)?;
-    let path = rest[..replace_index].trim_matches(|c: char| {
-        matches!(
-            c,
-            '`' | '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
-        )
-    });
-    if path.is_empty() || path.chars().any(char::is_whitespace) || !looks_like_file_path(path) {
-        return None;
+        let change_index = match lower_rest.find(change_marker) {
+            Some(i) => i,
+            None => continue,
+        };
+
+        let path = rest[..change_index].trim_matches(|c: char| {
+            matches!(
+                c,
+                '`' | '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
+            )
+        });
+        if path.is_empty() || path.chars().any(char::is_whitespace) || !looks_like_file_path(path)
+        {
+            continue;
+        }
+
+        let remainder = &rest[change_index + change_marker.len()..];
+        let lower_remainder = &lower_rest[change_index + change_marker.len()..];
+
+        let end_index = match lower_remainder.find(end_marker) {
+            Some(i) => i,
+            None => continue,
+        };
+
+        let search = remainder[..end_index].trim();
+        let replace = remainder[end_index + end_marker.len()..].trim();
+        if search.is_empty() || replace.is_empty() {
+            continue;
+        }
+
+        return Some(SimpleEditRequest {
+            path: path.to_string(),
+            search: search.to_string(),
+            replace: replace.to_string(),
+        });
     }
 
-    let remainder = &rest[replace_index + replace_marker.len()..];
-    let lower_remainder = &lower_rest[replace_index + replace_marker.len()..];
-    let with_index = lower_remainder.find(WITH_MARKER)?;
-    let search = remainder[..with_index].trim();
-    let replace = remainder[with_index + WITH_MARKER.len()..].trim();
-    if search.is_empty() || replace.is_empty() {
-        return None;
-    }
-
-    Some(SimpleEditRequest {
-        path: path.to_string(),
-        search: search.to_string(),
-        replace: replace.to_string(),
-    })
+    None
 }
 
 /// Extracts a single relative path scope from an investigation prompt.
@@ -875,6 +891,35 @@ mod tests {
         assert_eq!(edit.path, "hello.txt");
         assert_eq!(edit.search, "hello root");
         assert_eq!(edit.replace, "hello runtime");
+    }
+
+    #[test]
+    fn requested_simple_edit_detects_and_change_form() {
+        let edit =
+            requested_simple_edit("Edit baseline_test.txt and change hello world to hello thunk")
+                .expect("expected simple edit");
+        assert_eq!(edit.path, "baseline_test.txt");
+        assert_eq!(edit.search, "hello world");
+        assert_eq!(edit.replace, "hello thunk");
+    }
+
+    #[test]
+    fn requested_simple_edit_detects_to_change_form() {
+        let edit =
+            requested_simple_edit("Edit config.txt to change old_value to new_value")
+                .expect("expected simple edit");
+        assert_eq!(edit.path, "config.txt");
+        assert_eq!(edit.search, "old_value");
+        assert_eq!(edit.replace, "new_value");
+    }
+
+    #[test]
+    fn requested_simple_edit_detects_in_path_change_form() {
+        let edit = requested_simple_edit("In notes.txt change draft to final")
+            .expect("expected simple edit");
+        assert_eq!(edit.path, "notes.txt");
+        assert_eq!(edit.search, "draft");
+        assert_eq!(edit.replace, "final");
     }
 
     #[test]

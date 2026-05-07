@@ -712,7 +712,7 @@ mod tests {
         let submit_events = collect_events(
             &mut rt,
             RuntimeRequest::Submit {
-                text: "Edit f.rs and change hello world to hello thunk".into(),
+                text: "edit f.rs".into(),
             },
         );
         assert!(

@@ -430,6 +430,45 @@ fn simple_edit_prompt_outside_root_is_rejected_before_approval() {
 }
 
 #[test]
+fn and_change_form_goes_straight_to_approval() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("baseline_test.txt");
+    fs::write(&file, "hello world").unwrap();
+
+    let (mut rt, requests) =
+        make_runtime_in_with_recorded_requests(vec!["should not be used"], tmp.path());
+    let submit_events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Edit baseline_test.txt and change hello world to hello thunk".into(),
+        },
+    );
+
+    assert!(
+        !has_failed(&submit_events),
+        "submit failed: {submit_events:?}"
+    );
+    assert!(
+        submit_events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(p) if p.tool_name == "edit_file")),
+        "and-change form must request edit_file approval: {submit_events:?}"
+    );
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "and-change form must reach approval before any model generation"
+    );
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "hello world",
+        "file must not change before approval"
+    );
+}
+
+#[test]
 fn approve_produces_runtime_owned_answer_after_successful_mutation() {
     // After approving a mutation, the runtime must finalize directly without
     // re-entering model generation. The answer is built from the tool output summary.
