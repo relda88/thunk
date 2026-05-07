@@ -356,7 +356,7 @@ pub(crate) fn extract_investigation_path_scope(text: &str) -> Option<String> {
 }
 
 /// Extracts a bare filename (no slash) with a recognized code extension from an
-/// explanation-verb prompt, for use as an investigation search seed.
+/// explanation-verb prompt, to be used as a direct-read target.
 ///
 /// Fires only on "what does", "explain", or "describe" prefixes — not on lookup
 /// verbs like "find" or "where", which follow a different investigation path.
@@ -368,10 +368,10 @@ pub(crate) fn extract_investigation_path_scope(text: &str) -> Option<String> {
 ///   "Describe config.toml"           → Some("config.toml")
 ///
 /// Examples that do not match:
-///   "What does sandbox/services/task_service.py do?"  → None  (has slash)
+///   "What does sandbox/services/task_service.py do?"  → None  (has slash, handled by path_from_explicit_file_prompt)
 ///   "What does task_service.py and user_service.py do?" → None (ambiguous)
 ///   "Find task_service.py in the codebase"             → None  (wrong verb)
-pub(crate) fn extract_filename_search_hint(text: &str) -> Option<String> {
+fn path_from_bare_filename_explain_prompt(text: &str) -> Option<String> {
     let lower = text.trim_start().to_ascii_lowercase();
     if !(lower.starts_with("what does ")
         || lower.starts_with("explain ")
@@ -428,6 +428,7 @@ pub(crate) fn requested_read_path(text: &str) -> Option<String> {
     path_from_read_verb(text)
         .or_else(|| path_from_what_is_in_query(text))
         .or_else(|| path_from_explicit_file_prompt(text))
+        .or_else(|| path_from_bare_filename_explain_prompt(text))
 }
 
 fn path_from_read_verb(text: &str) -> Option<String> {
@@ -1122,53 +1123,55 @@ mod tests {
     }
 
     #[test]
-    fn extract_filename_search_hint_fires_on_explanation_verbs() {
+    fn path_from_bare_filename_explain_prompt_fires_on_explanation_verbs() {
         assert_eq!(
-            extract_filename_search_hint("What does task_service.py do?"),
+            path_from_bare_filename_explain_prompt("What does task_service.py do?"),
             Some("task_service.py".into())
         );
         assert_eq!(
-            extract_filename_search_hint("Explain engine.rs"),
+            path_from_bare_filename_explain_prompt("Explain engine.rs"),
             Some("engine.rs".into())
         );
         assert_eq!(
-            extract_filename_search_hint("Describe config.toml please"),
+            path_from_bare_filename_explain_prompt("Describe config.toml please"),
             Some("config.toml".into())
         );
     }
 
     #[test]
-    fn extract_filename_search_hint_rejects_path_qualified_tokens() {
+    fn path_from_bare_filename_explain_prompt_rejects_path_qualified_tokens() {
         assert_eq!(
-            extract_filename_search_hint("What does sandbox/services/task_service.py do?"),
+            path_from_bare_filename_explain_prompt(
+                "What does sandbox/services/task_service.py do?"
+            ),
             None
         );
         assert_eq!(
-            extract_filename_search_hint("Explain src/runtime/engine.rs"),
-            None
-        );
-    }
-
-    #[test]
-    fn extract_filename_search_hint_rejects_non_explanation_verbs() {
-        assert_eq!(
-            extract_filename_search_hint("Find task_service.py in the codebase"),
-            None
-        );
-        assert_eq!(
-            extract_filename_search_hint("Where is task_service.py used?"),
-            None
-        );
-        assert_eq!(
-            extract_filename_search_hint("Read task_service.py"),
+            path_from_bare_filename_explain_prompt("Explain src/runtime/engine.rs"),
             None
         );
     }
 
     #[test]
-    fn extract_filename_search_hint_returns_none_for_multiple_filenames() {
+    fn path_from_bare_filename_explain_prompt_rejects_non_explanation_verbs() {
         assert_eq!(
-            extract_filename_search_hint(
+            path_from_bare_filename_explain_prompt("Find task_service.py in the codebase"),
+            None
+        );
+        assert_eq!(
+            path_from_bare_filename_explain_prompt("Where is task_service.py used?"),
+            None
+        );
+        assert_eq!(
+            path_from_bare_filename_explain_prompt("Read task_service.py"),
+            None
+        );
+    }
+
+    #[test]
+    fn path_from_bare_filename_explain_prompt_returns_none_for_multiple_filenames() {
+        assert_eq!(
+            path_from_bare_filename_explain_prompt(
                 "What does task_service.py and user_service.py do?"
             ),
             None
@@ -1176,26 +1179,52 @@ mod tests {
     }
 
     #[test]
-    fn extract_filename_search_hint_rejects_non_code_extensions() {
+    fn path_from_bare_filename_explain_prompt_rejects_non_code_extensions() {
         assert_eq!(
-            extract_filename_search_hint("What does version 3.14 mean?"),
+            path_from_bare_filename_explain_prompt("What does version 3.14 mean?"),
             None
         );
         assert_eq!(
-            extract_filename_search_hint("Explain v1.2 syntax"),
+            path_from_bare_filename_explain_prompt("Explain v1.2 syntax"),
             None
         );
     }
 
     #[test]
-    fn extract_filename_search_hint_strips_trailing_punctuation() {
+    fn path_from_bare_filename_explain_prompt_strips_trailing_punctuation() {
         assert_eq!(
-            extract_filename_search_hint("What does engine.rs?"),
+            path_from_bare_filename_explain_prompt("What does engine.rs?"),
             Some("engine.rs".into())
         );
         assert_eq!(
-            extract_filename_search_hint("Explain main.py!"),
+            path_from_bare_filename_explain_prompt("Explain main.py!"),
             Some("main.py".into())
+        );
+    }
+
+    #[test]
+    fn requested_read_path_detects_bare_filename_explain_prompts() {
+        assert_eq!(
+            requested_read_path("What does task_service.py do?").as_deref(),
+            Some("task_service.py")
+        );
+        assert_eq!(
+            requested_read_path("Explain engine.rs").as_deref(),
+            Some("engine.rs")
+        );
+        assert_eq!(
+            requested_read_path("Describe config.toml").as_deref(),
+            Some("config.toml")
+        );
+        // path-qualified form still handled by earlier arm
+        assert_eq!(
+            requested_read_path("What does sandbox/services/task_service.py do?").as_deref(),
+            Some("sandbox/services/task_service.py")
+        );
+        // ambiguous — two filenames
+        assert_eq!(
+            requested_read_path("What does task_service.py and user_service.py do?").as_deref(),
+            None
         );
     }
 }

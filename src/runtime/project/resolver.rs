@@ -6,6 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::dirs::DEFAULT_SKIP_DIRS;
 use crate::tools::{ToolError, ToolInput};
 
 use super::{
@@ -97,9 +98,60 @@ pub fn resolve(
     }
 }
 
+const MAX_FILENAME_SEARCH_NODES: usize = 500;
+
+/// Walks the project tree looking for a file whose name matches `filename`.
+///
+/// Uses a depth-first stack walk capped at `MAX_FILENAME_SEARCH_NODES` entries.
+/// Skips `DEFAULT_SKIP_DIRS` at every level. Returns `None` when zero matches
+/// are found, when more than one match is found (ambiguous), or when the node
+/// budget is exhausted before the walk completes.
+fn find_unique_file_in_project(root: &Path, filename: &str) -> Option<PathBuf> {
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    let mut found: Option<PathBuf> = None;
+    let mut nodes = 0usize;
+
+    while let Some(dir) = stack.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if nodes >= MAX_FILENAME_SEARCH_NODES {
+                return None;
+            }
+            nodes += 1;
+
+            let path = entry.path();
+            let name = match entry.file_name().into_string() {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+
+            if path.is_dir() {
+                if DEFAULT_SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                stack.push(path);
+            } else if name == filename {
+                if found.is_some() {
+                    return None; // ambiguous
+                }
+                found = Some(path);
+            }
+        }
+    }
+
+    found
+}
+
 fn resolve_read_path(root: &ProjectRoot, raw: &str) -> Result<ProjectPath, PathResolutionError> {
     let raw_path = Path::new(raw);
-    let candidate = if raw_path.is_absolute() {
+    let candidate = if !raw.contains('/') && !raw.contains('\\') && raw_path.extension().is_some()
+    {
+        find_unique_file_in_project(root.path(), raw)
+            .ok_or_else(|| PathResolutionError::NotFound { raw: raw.to_string() })?
+    } else if raw_path.is_absolute() {
         raw_path.to_path_buf()
     } else {
         root.path().join(raw_path)
@@ -589,5 +641,56 @@ mod tests {
             tool_error.to_string(),
             "invalid tool input: path escapes project root: '../secret.txt' is outside /project"
         );
+    }
+
+    #[test]
+    fn bare_filename_resolves_when_unique() {
+        let (_dir, root) = make_root();
+        write_file(
+            &root.path().join("sandbox/services/task_service.py"),
+            "def filtered_tasks(tasks): pass\n",
+        );
+
+        let resolved = resolve_read_path(&root, "task_service.py").unwrap();
+
+        assert_eq!(
+            resolved.absolute(),
+            root.path().join("sandbox/services/task_service.py")
+        );
+        assert_eq!(resolved.display(), "sandbox/services/task_service.py");
+    }
+
+    #[test]
+    fn bare_filename_returns_not_found_when_ambiguous() {
+        let (_dir, root) = make_root();
+        write_file(
+            &root.path().join("sandbox/services/task_service.py"),
+            "# service a\n",
+        );
+        write_file(
+            &root.path().join("sandbox/cli/task_service.py"),
+            "# service b\n",
+        );
+
+        let err = resolve_read_path(&root, "task_service.py").unwrap_err();
+
+        assert!(
+            matches!(err, PathResolutionError::NotFound { .. }),
+            "ambiguous bare filename must return NotFound: {err:?}"
+        );
+    }
+
+    #[test]
+    fn bare_filename_skips_default_skip_dirs() {
+        let (_dir, root) = make_root();
+        // File only exists inside a skip dir — must not be found.
+        write_file(
+            &root.path().join("target/debug/build_artifact.py"),
+            "# should be skipped\n",
+        );
+
+        let err = resolve_read_path(&root, "build_artifact.py").unwrap_err();
+
+        assert!(matches!(err, PathResolutionError::NotFound { .. }));
     }
 }

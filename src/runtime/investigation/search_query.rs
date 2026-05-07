@@ -52,13 +52,28 @@ pub(crate) fn simplify_search_query(query: &str) -> String {
 /// Applies query simplification in-place for SearchCode inputs.
 ///
 /// Ensures the runtime always sends a minimally useful query to the tool.
+/// Skips simplification when the query is already a bare filename — the
+/// dot-splitter in simplify_search_query would strip the extension, turning
+/// "task_service.py" into "task_service" and broadening the search.
 pub(crate) fn simplify_search_input(input: &mut ToolInput) {
     if let ToolInput::SearchCode { query, .. } = input {
+        if query_is_bare_filename(query) {
+            return;
+        }
         let simplified = simplify_search_query(query);
         if !simplified.is_empty() && simplified != *query {
             *query = simplified;
         }
     }
+}
+
+fn query_is_bare_filename(query: &str) -> bool {
+    !query.contains(char::is_whitespace)
+        && std::path::Path::new(query)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|ext| ext.chars().all(|c| c.is_ascii_alphabetic()))
+            .unwrap_or(false)
 }
 
 /// Classifies weak search queries for runtime guardrails.
@@ -121,5 +136,31 @@ mod tests {
         assert_eq!(simplify_search_query("sessions saved"), "sessions");
         assert_eq!(simplify_search_query("fn main"), "main");
         assert_eq!(simplify_search_query(r"logging\.init\(\)"), "logging");
+    }
+
+    #[test]
+    fn simplify_search_input_preserves_bare_filename_query() {
+        let mut input = ToolInput::SearchCode {
+            query: "task_service.py".into(),
+            path: None,
+        };
+        simplify_search_input(&mut input);
+        assert!(
+            matches!(&input, ToolInput::SearchCode { query, .. } if query == "task_service.py"),
+            "filename query must not be simplified: {input:?}"
+        );
+    }
+
+    #[test]
+    fn simplify_search_input_still_simplifies_natural_language_queries() {
+        let mut input = ToolInput::SearchCode {
+            query: "logging initialization".into(),
+            path: None,
+        };
+        simplify_search_input(&mut input);
+        assert!(
+            matches!(&input, ToolInput::SearchCode { query, .. } if query == "logging"),
+            "multi-word query must still be simplified: {input:?}"
+        );
     }
 }
