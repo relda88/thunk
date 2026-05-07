@@ -1807,6 +1807,7 @@ impl Runtime {
                             sorted.join(",")
                         };
                         let can_dispatch = !answer_guard_retry_entered
+                            && !investigation.evidence_ready()
                             && investigation.is_search_candidate_path(
                                 &normalize_evidence_path(bad_path),
                             )
@@ -3838,12 +3839,13 @@ mod tests {
         );
     }
 
-    // ── 18.4 answer guard dispatch ────────────────────────────────────────────
+    // ── 18.4 → 18.2 answer guard retry on EvidenceReady ─────────────────────
 
-    /// Guard fires on an unread search candidate → dispatch reads it → clean synthesis.
-    /// Verifies Phase 18.4 happy path: no correction injected, two reads in conversation.
+    /// Guard fires on an unread search candidate when evidence is already ready.
+    /// Phase 18.2: no tool dispatch is issued; a text-only correction names the
+    /// allowed read set and the model synthesizes correctly on the retry.
     #[test]
-    fn answer_guard_dispatches_unread_candidate_and_allows_grounded_synthesis() {
+    fn answer_guard_evidence_ready_text_retry_allows_grounded_synthesis() {
         use std::fs;
         use tempfile::TempDir;
 
@@ -3852,16 +3854,19 @@ mod tests {
         fs::write(tmp.path().join("src/a.rs"), "fn run_turns() {}\n").unwrap();
         fs::write(
             tmp.path().join("src/b.rs"),
-            "fn run_turns() {} // dispatch entry\n",
+            "fn run_turns() {} // also a candidate\n",
         )
         .unwrap();
 
+        // Model reads a.rs (evidence ready) then cites the unread candidate b.rs.
+        // Guard fires: evidence_ready → can_dispatch blocked → text correction injected.
+        // Model answers correctly from a.rs only on the retry → ToolAssisted.
         let mut rt = make_runtime_in(
             vec![
                 "[search_code: run_turns]",
                 "[read_file: src/a.rs]",
-                "run_turns is in src/b.rs.",
-                "run_turns is in src/a.rs and src/b.rs.",
+                "run_turns is in src/b.rs.",    // guard rejects, correction injected
+                "run_turns is in src/a.rs.",    // cites only the read file, admitted
             ],
             tmp.path(),
         );
@@ -3881,7 +3886,7 @@ mod tests {
         });
         assert!(
             matches!(source, Some(AnswerSource::ToolAssisted { .. })),
-            "dispatch must allow grounded synthesis: {source:?}"
+            "text retry must allow grounded synthesis: {source:?}"
         );
         let snapshot = rt.messages_snapshot();
         let read_results = snapshot
@@ -3889,14 +3894,14 @@ mod tests {
             .filter(|m| m.content.contains("=== tool_result: read_file ==="))
             .count();
         assert_eq!(
-            read_results, 2,
-            "dispatch must produce a second read_file result: {snapshot:?}"
+            read_results, 1,
+            "no tool dispatch must occur during retry: {snapshot:?}"
         );
         assert!(
-            !snapshot
+            snapshot
                 .iter()
                 .any(|m| m.content.contains("which was not read this turn")),
-            "dispatch path must not inject answer_guard correction: {snapshot:?}"
+            "text correction must be injected naming the unread path: {snapshot:?}"
         );
     }
 

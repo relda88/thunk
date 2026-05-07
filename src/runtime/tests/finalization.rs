@@ -285,20 +285,23 @@ fn answer_citing_unread_path_triggers_insufficient_evidence() {
         "pub fn route_request() {}\n",
     )
     .unwrap();
+    // handlers.rs also defines route_request so it appears as a search candidate.
+    // This exercises the !evidence_ready() gate in can_dispatch: even though handlers.rs
+    // is a candidate, the guard must not issue a tool read after evidence is already ready.
     fs::write(
         tmp.path().join("src/handlers.rs"),
-        "pub fn handle_auth() {}\n",
+        "pub fn route_request() {}\n",
     )
     .unwrap();
 
-    // Model: search → read the candidate → answer citing the unread file (twice).
-    // 18.2: first guard rejection triggers a retry; second rejection is terminal.
+    // Model: search → read one candidate (evidence ready) → answer citing the unread
+    // candidate twice. First rejection triggers a text-only retry; second is terminal.
     let hallucinated = "route_request is defined in src/handlers.rs.";
     let mut rt = make_runtime_in(
         vec![
             "[search_code: route_request]",
             "[read_file: src/router.rs]",
-            hallucinated, // attempt 1 — guard rejects, retry issued
+            hallucinated, // attempt 1 — guard rejects, retry issued (no tool dispatch)
             hallucinated, // attempt 2 — guard rejects, terminal
         ],
         tmp.path(),
@@ -343,6 +346,81 @@ fn answer_citing_unread_path_triggers_insufficient_evidence() {
     assert!(
         !matches!(last_assistant, Some(s) if s.contains("route_request is defined in src/handlers.rs")),
         "hallucinated sentence must not be emitted as final answer: {last_assistant:?}"
+    );
+}
+
+// Phase 18.2 — Answer-Guard Retry on EvidenceReady: recovery success
+#[test]
+fn answer_guard_retry_succeeds_when_second_answer_is_correct() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/router.rs"),
+        "pub fn route_request() {}\n",
+    )
+    .unwrap();
+    // handlers.rs is also a search candidate (contains the query term).
+    fs::write(
+        tmp.path().join("src/handlers.rs"),
+        "pub fn route_request() {}\n",
+    )
+    .unwrap();
+
+    // Model: search → read router.rs (evidence ready) → first answer cites the unread
+    // handlers.rs (guard rejects, retry issued, no tool dispatch) → second answer cites
+    // only the read file (passes guard) → ToolAssisted.
+    let hallucinated = "route_request is defined in src/handlers.rs.";
+    let correct = "route_request is defined in src/router.rs.";
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: route_request]",
+            "[read_file: src/router.rs]",
+            hallucinated, // attempt 1 — guard rejects, retry issued
+            correct,      // attempt 2 — cites only the read file, admitted
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is route_request defined in src/".into(),
+        },
+    );
+
+    assert!(
+        !has_failed(&events),
+        "retry must not produce a runtime failure: {events:?}"
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "correct second answer must be admitted as ToolAssisted: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert!(
+        matches!(last_assistant, Some(s) if s.contains("src/router.rs")),
+        "correct answer must be the final assistant message: {last_assistant:?}"
+    );
+    assert!(
+        !matches!(last_assistant, Some(s) if s.contains("src/handlers.rs")),
+        "hallucinated sentence must not survive into the final answer: {last_assistant:?}"
     );
 }
 
