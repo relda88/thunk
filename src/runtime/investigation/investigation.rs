@@ -351,6 +351,8 @@ pub(crate) enum RecoveryKind {
     Register,
     /// The file lacked load-term matches when load candidates exist.
     Load,
+    /// The file had load-term matches only on definition lines when call-site load candidates exist.
+    LoadDefinitionOnly,
     /// The file lacked save-term matches when save candidates exist.
     Save,
     /// The file was a lockfile when a matched source candidate exists.
@@ -368,6 +370,7 @@ impl RecoveryKind {
             RecoveryKind::Create => "Create",
             RecoveryKind::Register => "Register",
             RecoveryKind::Load => "Load",
+            RecoveryKind::LoadDefinitionOnly => "LoadDefinitionOnly",
             RecoveryKind::Save => "Save",
             RecoveryKind::Lockfile => "Lockfile",
         }
@@ -484,6 +487,13 @@ pub(crate) struct InvestigationState {
     has_non_load_candidates: bool,
     /// True after the load recovery correction has been issued once this turn.
     load_correction_issued: bool,
+    /// Candidate paths in load_candidates where every load-term matched line is also a
+    /// definition site. Populated during record_search_results alongside load_candidates.
+    load_definition_only_candidates: HashSet<String>,
+    /// True if at least one load candidate has a load-term match on a non-definition line.
+    has_non_definition_load_candidates: bool,
+    /// True after the load-definition-only recovery correction has been issued once this turn.
+    load_definition_only_correction_issued: bool,
     /// Candidate paths where at least one matched line contains a save term.
     /// Populated during record_search_results alongside search_candidate_paths.
     save_candidates: HashSet<String>,
@@ -535,6 +545,9 @@ impl InvestigationState {
             load_candidates: HashSet::new(),
             has_non_load_candidates: false,
             load_correction_issued: false,
+            load_definition_only_candidates: HashSet::new(),
+            has_non_definition_load_candidates: false,
+            load_definition_only_correction_issued: false,
             save_candidates: HashSet::new(),
             save_correction_issued: false,
             lockfile_candidates: HashSet::new(),
@@ -679,6 +692,8 @@ impl InvestigationState {
             self.has_non_register_candidates = false;
             self.load_candidates.clear();
             self.has_non_load_candidates = false;
+            self.load_definition_only_candidates.clear();
+            self.has_non_definition_load_candidates = false;
             self.save_candidates.clear();
             self.lockfile_candidates.clear();
             self.useful_accepted_candidate_reads = 0;
@@ -707,6 +722,7 @@ impl InvestigationState {
             let mut file_has_create: HashSet<String> = HashSet::new();
             let mut file_has_register: HashSet<String> = HashSet::new();
             let mut file_has_load: HashSet<String> = HashSet::new();
+            let mut file_has_non_definition_load: HashSet<String> = HashSet::new();
             let mut file_has_save: HashSet<String> = HashSet::new();
             for m in &results.matches {
                 if match query {
@@ -737,6 +753,13 @@ impl InvestigationState {
                 }
                 if contains_load_term(&m.line) {
                     file_has_load.insert(m.file.clone());
+                    let is_def = match query {
+                        Some(sym) => looks_like_definition_of_symbol(&m.line, sym),
+                        None => looks_like_definition(&m.line),
+                    };
+                    if !is_def {
+                        file_has_non_definition_load.insert(m.file.clone());
+                    }
                 }
                 if contains_save_term(&m.line) {
                     file_has_save.insert(m.file.clone());
@@ -782,6 +805,11 @@ impl InvestigationState {
                 }
                 if file_has_load.contains(path) {
                     self.load_candidates.insert(path.clone());
+                    if file_has_non_definition_load.contains(path) {
+                        self.has_non_definition_load_candidates = true;
+                    } else {
+                        self.load_definition_only_candidates.insert(path.clone());
+                    }
                 } else {
                     self.has_non_load_candidates = true;
                 }
@@ -840,6 +868,14 @@ impl InvestigationState {
                 ),
                 ("load_files", self.load_candidates.len().to_string()),
                 ("has_non_load", self.has_non_load_candidates.to_string()),
+                (
+                    "load_definition_only",
+                    self.load_definition_only_candidates.len().to_string(),
+                ),
+                (
+                    "has_non_definition_load",
+                    self.has_non_definition_load_candidates.to_string(),
+                ),
                 ("save_files", self.save_candidates.len().to_string()),
                 ("lockfiles", self.lockfile_candidates.len().to_string()),
                 (
@@ -904,6 +940,10 @@ impl InvestigationState {
                 .any(|c| normalize_evidence_path(c) == read_path);
             let is_load_candidate = self
                 .load_candidates
+                .iter()
+                .any(|c| normalize_evidence_path(c) == read_path);
+            let is_load_def_only = self
+                .load_definition_only_candidates
                 .iter()
                 .any(|c| normalize_evidence_path(c) == read_path);
             let is_save_candidate = self
@@ -1095,6 +1135,46 @@ impl InvestigationState {
                         ("path", read_path.clone()),
                         ("accepted", "false".into()),
                         ("reason", "register_recovery_already_issued".into()),
+                    ],
+                );
+                // Correction already issued: fall through without accepting.
+            }
+            // Gate 6a (LoadLookup): load candidates whose load-term lines are all definition
+            // sites are structurally insufficient when call-site load candidates exist.
+            // Fire once; fall through if no call-site load candidates exist.
+            else if matches!(mode, InvestigationMode::LoadLookup)
+                && is_load_candidate
+                && is_load_def_only
+                && self.has_non_definition_load_candidates
+            {
+                if !self.load_definition_only_correction_issued {
+                    let suggested_path =
+                        self.first_non_definition_load_candidate().map(str::to_string);
+                    if suggested_path.is_some() {
+                        self.load_definition_only_correction_issued = true;
+                    }
+                    trace_runtime_decision(
+                        on_event,
+                        "read_evidence",
+                        &[
+                            ("path", read_path.clone()),
+                            ("accepted", "false".into()),
+                            ("reason", "load_definition_only_candidate".into()),
+                            (
+                                "recovery_path",
+                                suggested_path.clone().unwrap_or_else(|| "none".into()),
+                            ),
+                        ],
+                    );
+                    return suggested_path.map(|p| (p, RecoveryKind::LoadDefinitionOnly));
+                }
+                trace_runtime_decision(
+                    on_event,
+                    "read_evidence",
+                    &[
+                        ("path", read_path.clone()),
+                        ("accepted", "false".into()),
+                        ("reason", "load_definition_only_recovery_already_issued".into()),
                     ],
                 );
                 // Correction already issued: fall through without accepting.
@@ -1441,6 +1521,16 @@ impl InvestigationState {
         self.search_candidate_paths
             .iter()
             .find(|path| self.load_candidates.contains(*path))
+            .map(String::as_str)
+    }
+
+    fn first_non_definition_load_candidate(&self) -> Option<&str> {
+        self.search_candidate_paths
+            .iter()
+            .find(|path| {
+                self.load_candidates.contains(*path)
+                    && !self.load_definition_only_candidates.contains(*path)
+            })
             .map(String::as_str)
     }
 

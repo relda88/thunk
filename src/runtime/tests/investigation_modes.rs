@@ -1114,3 +1114,118 @@ fn initialization_lookup_wrong_candidate_dispatches_to_init_candidate() {
         Some("The app is initialized in services/app_boot.py.")
     );
 }
+
+#[test]
+fn load_lookup_definition_only_read_dispatches_to_call_site_candidate() {
+    // File A (session_loader.py): load term only on a definition line — load_definition_only candidate.
+    // File B (session_service.py): load term on a call-site line — non-definition load candidate.
+    // Model searches for "load_session" then reads A first.
+    // Gate 6a fires: A is a load candidate but all its load-term lines are definitions.
+    // Runtime dispatches directly to B. Dispatched read satisfies evidence → ToolAssisted.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+    fs::write(
+        tmp.path().join("services").join("session_loader.py"),
+        "def load_session(session_id):\n    return None\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("services").join("session_service.py"),
+        "result = load_session(user_id)\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: load_session]",
+            "[read_file: services/session_loader.py]",
+            "Sessions are loaded in services/session_service.py.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where are sessions loaded?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "turn must not fail: {events:?}");
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "dispatch from load-definition-only to call-site candidate must complete as ToolAssisted: {answer_source:?}"
+    );
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_eq!(
+        last_assistant,
+        Some("Sessions are loaded in services/session_service.py.")
+    );
+}
+
+#[test]
+fn load_lookup_no_call_site_candidate_produces_insufficient_evidence() {
+    // Only candidate has load terms exclusively on definition lines.
+    // has_non_definition_load_candidates = false — Gate 6a never fires (no call-site to dispatch to).
+    // Model answers twice without reading → correction exhausted → InsufficientEvidence.
+    use crate::runtime::types::RuntimeTerminalReason;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+    fs::write(
+        tmp.path().join("services").join("session_loader.py"),
+        "def load_session(session_id):\n    return None\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: load_session]",
+            "load_session is defined in services/session_loader.py.",
+            "load_session is defined in services/session_loader.py.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where are sessions loaded?".into(),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "LoadLookup with no call-site candidate and no reads must produce InsufficientEvidence: {answer_source:?}"
+    );
+}
