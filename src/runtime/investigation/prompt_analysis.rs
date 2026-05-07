@@ -1,5 +1,10 @@
 use super::super::paths::normalize_evidence_path;
 
+const CODE_EXTENSIONS: &[&str] = &[
+    "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h", "hpp", "yaml", "yml",
+    "toml", "json", "ini", "cfg", "conf", "md",
+];
+
 /// Determines whether a prompt should enter investigation mode.
 ///
 /// Uses structural signals first (identifier-like tokens), then falls back to
@@ -52,10 +57,6 @@ pub(crate) fn prompt_requires_investigation(text: &str) -> bool {
 /// Intentionally narrow: only fires on recognized extensions so that version
 /// strings like "3.14" or "v2.3" do not match.
 fn prompt_contains_code_file_token(text: &str) -> bool {
-    const CODE_EXTENSIONS: &[&str] = &[
-        "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h", "hpp", "yaml", "yml",
-        "toml", "json", "ini", "cfg", "conf", "md",
-    ];
     for token in text.split_whitespace() {
         let stripped = token.trim_end_matches(|c: char| {
             matches!(
@@ -349,6 +350,64 @@ pub(crate) fn extract_investigation_path_scope(text: &str) -> Option<String> {
             }
             found = Some(normalize_evidence_path(stripped));
         }
+    }
+
+    found
+}
+
+/// Extracts a bare filename (no slash) with a recognized code extension from an
+/// explanation-verb prompt, for use as an investigation search seed.
+///
+/// Fires only on "what does", "explain", or "describe" prefixes — not on lookup
+/// verbs like "find" or "where", which follow a different investigation path.
+/// Returns None when zero or more than one qualifying token is found.
+///
+/// Examples that match:
+///   "What does task_service.py do?"  → Some("task_service.py")
+///   "Explain engine.rs"              → Some("engine.rs")
+///   "Describe config.toml"           → Some("config.toml")
+///
+/// Examples that do not match:
+///   "What does sandbox/services/task_service.py do?"  → None  (has slash)
+///   "What does task_service.py and user_service.py do?" → None (ambiguous)
+///   "Find task_service.py in the codebase"             → None  (wrong verb)
+pub(crate) fn extract_filename_search_hint(text: &str) -> Option<String> {
+    let lower = text.trim_start().to_ascii_lowercase();
+    if !(lower.starts_with("what does ")
+        || lower.starts_with("explain ")
+        || lower.starts_with("describe "))
+    {
+        return None;
+    }
+
+    let mut found: Option<String> = None;
+    for token in text.split_whitespace() {
+        let stripped = token
+            .trim_matches(|c: char| {
+                matches!(
+                    c,
+                    '`' | '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
+                )
+            })
+            .trim_end_matches(|c: char| matches!(c, '.' | '?' | '!'));
+
+        if stripped.is_empty() || stripped.contains('/') || stripped.contains('\\') {
+            continue;
+        }
+        let ext = match std::path::Path::new(stripped)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
+            Some(e) => e.to_ascii_lowercase(),
+            None => continue,
+        };
+        if !CODE_EXTENSIONS.contains(&ext.as_str()) {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(stripped.to_string());
     }
 
     found
@@ -1059,6 +1118,84 @@ mod tests {
         assert_eq!(
             extract_investigation_path_scope("Find X in sandbox/services/."),
             Some("sandbox/services/".into())
+        );
+    }
+
+    #[test]
+    fn extract_filename_search_hint_fires_on_explanation_verbs() {
+        assert_eq!(
+            extract_filename_search_hint("What does task_service.py do?"),
+            Some("task_service.py".into())
+        );
+        assert_eq!(
+            extract_filename_search_hint("Explain engine.rs"),
+            Some("engine.rs".into())
+        );
+        assert_eq!(
+            extract_filename_search_hint("Describe config.toml please"),
+            Some("config.toml".into())
+        );
+    }
+
+    #[test]
+    fn extract_filename_search_hint_rejects_path_qualified_tokens() {
+        assert_eq!(
+            extract_filename_search_hint("What does sandbox/services/task_service.py do?"),
+            None
+        );
+        assert_eq!(
+            extract_filename_search_hint("Explain src/runtime/engine.rs"),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_filename_search_hint_rejects_non_explanation_verbs() {
+        assert_eq!(
+            extract_filename_search_hint("Find task_service.py in the codebase"),
+            None
+        );
+        assert_eq!(
+            extract_filename_search_hint("Where is task_service.py used?"),
+            None
+        );
+        assert_eq!(
+            extract_filename_search_hint("Read task_service.py"),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_filename_search_hint_returns_none_for_multiple_filenames() {
+        assert_eq!(
+            extract_filename_search_hint(
+                "What does task_service.py and user_service.py do?"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_filename_search_hint_rejects_non_code_extensions() {
+        assert_eq!(
+            extract_filename_search_hint("What does version 3.14 mean?"),
+            None
+        );
+        assert_eq!(
+            extract_filename_search_hint("Explain v1.2 syntax"),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_filename_search_hint_strips_trailing_punctuation() {
+        assert_eq!(
+            extract_filename_search_hint("What does engine.rs?"),
+            Some("engine.rs".into())
+        );
+        assert_eq!(
+            extract_filename_search_hint("Explain main.py!"),
+            Some("main.py".into())
         );
     }
 }

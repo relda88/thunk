@@ -450,8 +450,9 @@ fn is_definition_only_usage_answer(text: &str) -> bool {
 /// Returns true if the prompt contains a token that looks like a code identifier.
 /// Only two structural patterns are checked — no NLP, no heuristics.
 use super::super::investigation::prompt_analysis::{
-    classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
-    requested_simple_edit, user_requested_mutation, DirectReadMode, RetrievalIntent,
+    classify_retrieval_intent, extract_filename_search_hint, extract_investigation_path_scope,
+    prompt_requires_investigation, requested_simple_edit, user_requested_mutation, DirectReadMode,
+    RetrievalIntent,
 };
 
 pub struct Runtime {
@@ -1271,6 +1272,17 @@ impl Runtime {
                     }
                     RetrievalIntent::None => {}
                 }
+            }
+        }
+        if investigation_required {
+            if let Some(hint) = original_user_prompt.and_then(extract_filename_search_hint) {
+                pending_runtime_call = Some(PendingRuntimeCall {
+                    input: ToolInput::SearchCode {
+                        query: hint,
+                        path: None,
+                    },
+                    seeded_pre_generation: true,
+                });
             }
         }
         loop {
@@ -2372,6 +2384,55 @@ mod tests {
             .find(|m| m.role == crate::llm::backend::Role::Assistant)
             .map(|m| m.content.as_str());
         assert_eq!(last_assistant, Some(final_answer));
+    }
+
+    #[test]
+    fn what_does_bare_filename_seeds_search_before_generation() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("sandbox/services")).unwrap();
+        fs::write(
+            tmp.path().join("sandbox/services/task_service.py"),
+            "def filtered_tasks(tasks): pass\n",
+        )
+        .unwrap();
+
+        // The backend receives no synthesizable responses — the turn will eventually
+        // terminate on an evidence guard. What we verify is that search_code is the
+        // very first tool the runtime calls (i.e., the seeded pre-generation search
+        // fired before any model generation round).
+        let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
+        let events = collect_events(
+            &mut rt,
+            RuntimeRequest::Submit {
+                text: "What does task_service.py do?".into(),
+            },
+        );
+
+        let first_tool = events.iter().find_map(|e| {
+            if let RuntimeEvent::ToolCallStarted { name } = e {
+                Some(name.as_str())
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            first_tool,
+            Some("search_code"),
+            "bare filename hint must seed search_code as the first tool call; events: {events:?}"
+        );
+
+        // The seeded search result must appear in the conversation before any
+        // generation — confirmed by the tool_result block being committed.
+        let snapshot = rt.messages_snapshot();
+        assert!(
+            snapshot
+                .iter()
+                .any(|m| m.content.contains("=== tool_result: search_code ===")),
+            "search_code tool_result must be committed to conversation; snapshot: {snapshot:?}"
+        );
     }
 
     #[test]
