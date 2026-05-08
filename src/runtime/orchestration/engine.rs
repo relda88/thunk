@@ -283,6 +283,49 @@ impl Runtime {
         self.conversation.extend_history(messages);
     }
 
+    /// Restores anchor state persisted from a prior session.
+    /// Called once at startup after session restore, parallel to load_history.
+    /// Uses the existing anchor update mechanism so invariants are preserved.
+    pub fn restore_anchors(
+        &mut self,
+        last_read_file: Option<String>,
+        last_search_query: Option<String>,
+        last_search_scope: Option<String>,
+    ) {
+        if let Some(path) = last_read_file {
+            let output =
+                crate::tools::ToolOutput::FileContents(crate::tools::types::FileContentsOutput {
+                    path,
+                    contents: String::new(),
+                    total_lines: 0,
+                    truncated: false,
+                });
+            self.anchors.record_successful_read(&output);
+        }
+        if let Some(query) = last_search_query {
+            let output = crate::tools::ToolOutput::SearchResults(
+                crate::tools::types::SearchResultsOutput {
+                    query: query.clone(),
+                    matches: vec![],
+                    total_matches: 0,
+                    truncated: false,
+                },
+            );
+            self.anchors
+                .record_successful_search(&output, query, last_search_scope);
+        }
+    }
+
+    /// Returns a snapshot of the current anchor state for persistence.
+    pub fn anchors_snapshot(&self) -> (Option<String>, Option<String>, Option<String>) {
+        let last_read_file = self.anchors.last_read_file().map(str::to_string);
+        let (last_search_query, last_search_scope) = match self.anchors.last_search() {
+            Some((q, s)) => (Some(q), s),
+            None => (None, None),
+        };
+        (last_read_file, last_search_query, last_search_scope)
+    }
+
     /// Handles a RuntimeRequest by updating the conversation, invoking the backend,
     /// and firing RuntimeEvents to drive the UI. Each request type has its own
     /// handler method for clarity.

@@ -28,7 +28,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
     let registry = default_registry().with_project_root(project_root.as_path_buf());
     let log = crate::logging::SessionLog::open(&paths.logs_dir);
 
-    let (active_session, history) =
+    let (active_session, history, anchors) =
         session::ActiveSession::open_or_restore(&paths.session_db, &project_root)?;
     let app = AppContext::build(
         &config,
@@ -37,6 +37,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         registry,
         active_session,
         history,
+        anchors,
         log,
     )?;
 

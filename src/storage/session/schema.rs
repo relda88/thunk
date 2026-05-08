@@ -2,15 +2,18 @@ use rusqlite::Connection;
 
 use crate::app::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 2;
+const CURRENT_VERSION: i32 = 3;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
-        id          TEXT PRIMARY KEY,
-        project_root TEXT,
-        created_at  INTEGER NOT NULL,
-        updated_at  INTEGER NOT NULL,
-        msg_count   INTEGER NOT NULL DEFAULT 0
+        id                TEXT PRIMARY KEY,
+        project_root      TEXT,
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL,
+        msg_count         INTEGER NOT NULL DEFAULT 0,
+        last_read_file    TEXT,
+        last_search_query TEXT,
+        last_search_scope TEXT
     );
 
     CREATE TABLE IF NOT EXISTS session_messages (
@@ -39,6 +42,21 @@ pub(super) fn initialize(conn: &Connection) -> Result<()> {
     if version < 2 && !has_column(conn, "sessions", "project_root")? {
         conn.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT", [])
             .map_err(|e| AppError::Storage(e.to_string()))?;
+    }
+
+    if version < 3 {
+        if !has_column(conn, "sessions", "last_read_file")? {
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_read_file TEXT", [])
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if !has_column(conn, "sessions", "last_search_query")? {
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_search_query TEXT", [])
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        if !has_column(conn, "sessions", "last_search_scope")? {
+            conn.execute("ALTER TABLE sessions ADD COLUMN last_search_scope TEXT", [])
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
     }
 
     if version < CURRENT_VERSION {

@@ -17,22 +17,24 @@ pub struct ActiveSession {
 }
 
 impl ActiveSession {
-    /// Opens the session database and returns the active session plus any
-    /// previously stored messages to restore into the runtime. Returns an
-    /// empty vec if no prior session exists.
+    /// Opens the session database and returns the active session, previously stored messages,
+    /// and restored anchor state. Returns empty messages and None anchors if no prior session exists.
     pub fn open_or_restore(
         db_path: &Path,
         project_root: &ProjectRoot,
-    ) -> Result<(Self, Vec<Message>)> {
+    ) -> Result<(Self, Vec<Message>, (Option<String>, Option<String>, Option<String>))> {
         let store = SessionStore::open(db_path)?;
         let current_root = project_root.path();
         let current_root_str = current_root.to_string_lossy();
 
-        match store.load_most_recent()? {
-            Some(saved)
-                if saved.meta.project_root.as_deref() == Some(current_root_str.as_ref()) =>
-            {
+        match store.load_most_recent_for_project(current_root_str.as_ref())? {
+            Some(saved) => {
                 let messages = from_stored(&saved);
+                let anchors = (
+                    saved.meta.last_read_file.clone(),
+                    saved.meta.last_search_query.clone(),
+                    saved.meta.last_search_scope.clone(),
+                );
                 let session_id = saved.meta.id;
                 Ok((
                     Self {
@@ -41,9 +43,10 @@ impl ActiveSession {
                         project_root: current_root.to_path_buf(),
                     },
                     messages,
+                    anchors,
                 ))
             }
-            Some(_) | None => {
+            None => {
                 let meta = store.create(current_root)?;
                 Ok((
                     Self {
@@ -52,16 +55,28 @@ impl ActiveSession {
                         project_root: current_root.to_path_buf(),
                     },
                     vec![],
+                    (None, None, None),
                 ))
             }
         }
     }
 
-    /// Persists the current conversation state. The caller provides the full
-    /// runtime message list; system messages are stripped before storage.
-    pub fn save(&self, runtime_messages: &[Message]) -> Result<()> {
+    /// Persists the current conversation state and anchor fields.
+    /// The caller provides the full runtime message list; system messages are stripped before storage.
+    pub fn save(
+        &self,
+        runtime_messages: &[Message],
+        anchors: (Option<String>, Option<String>, Option<String>),
+    ) -> Result<()> {
         let stored = to_stored(runtime_messages);
-        self.store.save(&self.session_id, &stored)?;
+        let (lrf, lsq, lss) = anchors;
+        self.store.save(
+            &self.session_id,
+            &stored,
+            lrf.as_deref(),
+            lsq.as_deref(),
+            lss.as_deref(),
+        )?;
         Ok(())
     }
 
@@ -195,6 +210,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: stored.len(),
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages: stored,
         };
@@ -226,6 +244,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: 14,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages,
         };
@@ -252,6 +273,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: 1,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages: vec![StoredMessage {
                 role: "user".into(),
@@ -278,6 +302,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: 3,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages: vec![
                 StoredMessage {
@@ -314,6 +341,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: 2,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages: vec![
                 StoredMessage {
@@ -347,6 +377,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: 3,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages: vec![
                 StoredMessage {
@@ -381,6 +414,9 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 message_count: 1,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
             },
             messages: vec![StoredMessage {
                 role: "unknown_role".into(),
@@ -426,10 +462,13 @@ mod tests {
                         content: "hi there".into(),
                     },
                 ],
+                None,
+                None,
+                None,
             )
             .unwrap();
 
-        let (_session, history) = ActiveSession::open_or_restore(&db_path, &root).unwrap();
+        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &root).unwrap();
 
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "hello");
@@ -458,10 +497,13 @@ mod tests {
                     role: "user".into(),
                     content: "stale history".into(),
                 }],
+                None,
+                None,
+                None,
             )
             .unwrap();
 
-        let (_session, history) = ActiveSession::open_or_restore(&db_path, &current_root).unwrap();
+        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &current_root).unwrap();
 
         assert!(history.is_empty());
 
@@ -474,6 +516,56 @@ mod tests {
             Some(current_root.path().to_string_lossy().as_ref())
         );
         assert_eq!(sessions[0].message_count, 0);
+    }
+
+    #[test]
+    fn open_or_restore_restores_project_a_session_when_project_b_is_more_recent() {
+        let db_dir = tempfile::TempDir::new().unwrap();
+        let root_a_dir = temp_project_root();
+        let root_b_dir = temp_project_root();
+        let root_a = canonical_project_root(&root_a_dir);
+        let root_b = canonical_project_root(&root_b_dir);
+        let db_path = session_db_path(&db_dir);
+
+        let store = SessionStore::open(&db_path).unwrap();
+        let meta_a = store.create(root_a.path()).unwrap();
+        let meta_b = store.create(root_b.path()).unwrap();
+
+        store
+            .save(
+                &meta_a.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "project a history".into(),
+                }],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        // Save to B last so it is globally most recent
+        store
+            .save(
+                &meta_b.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "project b history".into(),
+                }],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        // Returning to project A must restore A's session, not start fresh
+        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &root_a).unwrap();
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].content, "project a history");
+
+        // No new session should have been created
+        let store = SessionStore::open(&db_path).unwrap();
+        assert_eq!(store.list().unwrap().len(), 2);
     }
 
     #[test]
@@ -527,7 +619,7 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let (_session, history) = ActiveSession::open_or_restore(&db_path, &root).unwrap();
+        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &root).unwrap();
         assert!(history.is_empty());
 
         let store = SessionStore::open(&db_path).unwrap();
@@ -541,5 +633,56 @@ mod tests {
             Some(root.path().to_string_lossy().as_ref())
         );
         assert_eq!(sessions[0].message_count, 0);
+    }
+
+    #[test]
+    fn anchors_restored_after_session_restore() {
+        let db_dir = tempfile::TempDir::new().unwrap();
+        let root_dir = temp_project_root();
+        let root = canonical_project_root(&root_dir);
+        let db_path = session_db_path(&db_dir);
+
+        let store = SessionStore::open(&db_path).unwrap();
+        let meta = store.create(root.path()).unwrap();
+        store
+            .save(
+                &meta.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "hello".into(),
+                }],
+                Some("src/lib.rs"),
+                Some("fn main"),
+                Some("src/"),
+            )
+            .unwrap();
+
+        let (_session, _history, anchors) =
+            ActiveSession::open_or_restore(&db_path, &root).unwrap();
+
+        assert_eq!(anchors.0.as_deref(), Some("src/lib.rs"));
+        assert_eq!(anchors.1.as_deref(), Some("fn main"));
+        assert_eq!(anchors.2.as_deref(), Some("src/"));
+    }
+
+    #[test]
+    fn missing_anchor_data_in_session_defaults_to_none() {
+        let db_dir = tempfile::TempDir::new().unwrap();
+        let root_dir = temp_project_root();
+        let root = canonical_project_root(&root_dir);
+        let db_path = session_db_path(&db_dir);
+
+        let store = SessionStore::open(&db_path).unwrap();
+        let meta = store.create(root.path()).unwrap();
+        store
+            .save(&meta.id, &[], None, None, None)
+            .unwrap();
+
+        let (_session, _history, anchors) =
+            ActiveSession::open_or_restore(&db_path, &root).unwrap();
+
+        assert_eq!(anchors.0, None);
+        assert_eq!(anchors.1, None);
+        assert_eq!(anchors.2, None);
     }
 }

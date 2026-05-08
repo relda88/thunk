@@ -94,7 +94,8 @@ impl AppContext {
         self.log = log;
 
         if should_save {
-            self.session.save(&self.runtime.messages_snapshot())?;
+            let anchors = self.runtime.anchors_snapshot();
+            self.session.save(&self.runtime.messages_snapshot(), anchors)?;
         }
         Ok(())
     }
@@ -107,7 +108,7 @@ impl AppContext {
         Ok(())
     }
 
-    /// Initializes the AppContext by building a Runtime and loading the session history.
+    /// Initializes the AppContext by building a Runtime and loading the session history and anchors.
     pub fn build(
         config: &Config,
         project_root: ProjectRoot,
@@ -115,11 +116,16 @@ impl AppContext {
         registry: ToolRegistry,
         session: ActiveSession,
         history: Vec<crate::llm::backend::Message>,
+        anchors: (Option<String>, Option<String>, Option<String>),
         log: Option<SessionLog>,
     ) -> Result<Self> {
         let mut runtime = Runtime::new(config, project_root, backend, registry);
         if !history.is_empty() {
             runtime.load_history(history);
+        }
+        let (lrf, lsq, lss) = anchors;
+        if lrf.is_some() || lsq.is_some() {
+            runtime.restore_anchors(lrf, lsq, lss);
         }
         Ok(Self {
             runtime,
