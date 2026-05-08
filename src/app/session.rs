@@ -111,7 +111,12 @@ impl ActiveSession {
 
 /// Maximum number of messages to inject into a fresh conversation on restore.
 /// Prevents large accumulated histories from overflowing the model's context window.
-const RESTORE_WINDOW: usize = 10;
+const RESTORE_WINDOW: usize = 40;
+const SUMMARY_GOAL_CAP: usize = 4;
+const SUMMARY_DECISION_CAP: usize = 4;
+const SUMMARY_FILE_CAP: usize = 8;
+const SUMMARY_SEARCH_CAP: usize = 6;
+const SUMMARY_ITEM_MAX_CHARS: usize = 120;
 
 /// Converts runtime messages to storable form, excluding system messages.
 fn to_stored(messages: &[Message]) -> Vec<StoredMessage> {
@@ -141,19 +146,48 @@ fn to_stored(messages: &[Message]) -> Vec<StoredMessage> {
 ///    fresh tool use when the user re-requests the same operation.
 fn from_stored(session: &SavedSession) -> Vec<Message> {
     let total = session.messages.len();
+    let exclude = build_restore_exclusions(&session.messages);
     let start = total.saturating_sub(RESTORE_WINDOW);
-    let slice = &session.messages[start..];
-    let n = slice.len();
+    let mut restored = Vec::new();
 
-    let mut exclude = vec![false; n];
-    for (i, m) in slice.iter().enumerate() {
-        if m.role == "user" && is_tool_exchange(&m.content) {
+    if total > RESTORE_WINDOW {
+        let summary = build_restore_summary(&session.messages[..start], &exclude[..start]);
+        restored.push(Message::system(summary));
+    }
+
+    restored.extend(
+        session.messages[start..]
+            .iter()
+            .zip(exclude[start..].iter())
+            .filter(|(_, &ex)| !ex)
+            .filter_map(|(m, _)| match m.role.as_str() {
+                "user" => Some(Message::user(m.content.clone())),
+                "assistant" => Some(Message::assistant(m.content.clone())),
+                _ => None,
+            }),
+    );
+
+    restored
+}
+
+/// Returns true when a user message is a tool result, tool error, or runtime correction
+/// injected by the engine — none of which should be re-injected into a restored context.
+fn is_tool_exchange(content: &str) -> bool {
+    content.starts_with("=== tool_result:")
+        || content.starts_with("=== tool_error:")
+        || content.starts_with("[runtime:correction]")
+}
+
+fn build_restore_exclusions(messages: &[StoredMessage]) -> Vec<bool> {
+    let mut exclude = vec![false; messages.len()];
+    for (i, message) in messages.iter().enumerate() {
+        if message.role == "user" && is_tool_exchange(&message.content) {
             exclude[i] = true;
             // Drop the preceding assistant message too if it contains no conversational
             // text — only a bare tool call or fabricated result block. Without the result
             // it has no value and would leave an orphaned exchange in context.
-            if i > 0 && slice[i - 1].role == "assistant" {
-                let prev = slice[i - 1].content.trim_start();
+            if i > 0 && messages[i - 1].role == "assistant" {
+                let prev = messages[i - 1].content.trim_start();
                 let is_bare_action = prev.starts_with('[')
                     || prev.starts_with("=== tool_result:")
                     || prev.starts_with("=== tool_error:");
@@ -163,25 +197,189 @@ fn from_stored(session: &SavedSession) -> Vec<Message> {
             }
         }
     }
-
-    slice
-        .iter()
-        .zip(exclude.iter())
-        .filter(|(_, &ex)| !ex)
-        .filter_map(|(m, _)| match m.role.as_str() {
-            "user" => Some(Message::user(m.content.clone())),
-            "assistant" => Some(Message::assistant(m.content.clone())),
-            _ => None,
-        })
-        .collect()
+    exclude
 }
 
-/// Returns true when a user message is a tool result, tool error, or runtime correction
-/// injected by the engine — none of which should be re-injected into a restored context.
-fn is_tool_exchange(content: &str) -> bool {
-    content.starts_with("=== tool_result:")
-        || content.starts_with("=== tool_error:")
-        || content.starts_with("[runtime:correction]")
+fn build_restore_summary(messages: &[StoredMessage], exclude: &[bool]) -> String {
+    let mut goals = Vec::new();
+    let mut decisions = Vec::new();
+    let mut files = Vec::new();
+    let mut searches = Vec::new();
+
+    for (message, &is_excluded) in messages.iter().zip(exclude.iter()) {
+        if is_excluded {
+            continue;
+        }
+        if !matches!(message.role.as_str(), "user" | "assistant") {
+            continue;
+        }
+
+        let content = message.content.trim();
+        if content.is_empty()
+            || content.starts_with("=== tool_result:")
+            || content.starts_with("=== tool_error:")
+            || content.starts_with("[runtime:correction]")
+            || content.starts_with('[')
+        {
+            continue;
+        }
+
+        if message.role == "user" {
+            if let Some(goal) = summarized_line(content) {
+                push_unique_limited(&mut goals, goal, SUMMARY_GOAL_CAP);
+            }
+            if let Some(query) = extract_search_query(content) {
+                push_unique_limited(&mut searches, query, SUMMARY_SEARCH_CAP);
+            }
+        }
+
+        if looks_like_decision(content) {
+            if let Some(decision) = summarized_line(content) {
+                push_unique_limited(&mut decisions, decision, SUMMARY_DECISION_CAP);
+            }
+        }
+
+        for file in extract_file_references(content) {
+            push_unique_limited(&mut files, file, SUMMARY_FILE_CAP);
+        }
+    }
+
+    format!(
+        "[Session Summary]\nGoals:\n{}\nKey Decisions:\n{}\nFiles Referenced:\n{}\nSearches:\n{}",
+        render_summary_items(&goals),
+        render_summary_items(&decisions),
+        render_summary_items(&files),
+        render_summary_items(&searches),
+    )
+}
+
+fn render_summary_items(items: &[String]) -> String {
+    if items.is_empty() {
+        "* none".to_string()
+    } else {
+        items
+            .iter()
+            .map(|item| format!("* {item}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+fn summarized_line(content: &str) -> Option<String> {
+    let line = content.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let normalized = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(truncate_chars(&normalized, SUMMARY_ITEM_MAX_CHARS))
+    }
+}
+
+fn looks_like_decision(content: &str) -> bool {
+    let lower = content.to_ascii_lowercase();
+    [
+        "do not ",
+        "don't ",
+        "must ",
+        "should ",
+        "keep ",
+        "preserve ",
+        "use ",
+        "avoid ",
+        "instead ",
+        "only ",
+        "leave ",
+        "rebuild ",
+    ]
+    .iter()
+    .any(|pattern| lower.contains(pattern))
+}
+
+fn extract_search_query(content: &str) -> Option<String> {
+    let line = summarized_line(content)?;
+    let lower = line.to_ascii_lowercase();
+    for pattern in ["search for ", "search ", "grep ", "ripgrep ", "rg "] {
+        if let Some(query) = extract_phrase_suffix(&line, &lower, pattern) {
+            let cleaned = query
+                .trim()
+                .trim_matches(|c: char| matches!(c, '`' | '"' | '\''))
+                .trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!' | '?'))
+                .trim();
+            if !cleaned.is_empty() {
+                return Some(truncate_chars(cleaned, SUMMARY_ITEM_MAX_CHARS));
+            }
+        }
+    }
+    None
+}
+
+fn extract_phrase_suffix<'a>(original: &'a str, lower: &str, pattern: &str) -> Option<&'a str> {
+    let start = lower.find(pattern)?;
+    if start > 0 && !lower.as_bytes()[start - 1].is_ascii_whitespace() {
+        return None;
+    }
+    Some(&original[start + pattern.len()..])
+}
+
+fn extract_file_references(content: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    for token in content.split_whitespace() {
+        let trimmed = token.trim_matches(|c: char| {
+            matches!(
+                c,
+                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ','
+                    | ';'
+            )
+        });
+        let trimmed = trimmed
+            .trim_start_matches("path:")
+            .trim_start_matches("file:")
+            .trim();
+        let cleaned = trimmed.trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!' | '?'));
+        if cleaned.is_empty() || cleaned.contains("://") {
+            continue;
+        }
+        if is_file_reference(cleaned) {
+            push_unique_limited(
+                &mut files,
+                truncate_chars(cleaned, SUMMARY_ITEM_MAX_CHARS),
+                SUMMARY_FILE_CAP,
+            );
+        }
+    }
+    files
+}
+
+fn is_file_reference(candidate: &str) -> bool {
+    const FILE_EXTENSIONS: &[&str] = &[
+        ".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".json",
+        ".jsx", ".kt", ".lock", ".md", ".py", ".rs", ".scss", ".sh", ".sql", ".toml", ".ts",
+        ".tsx", ".txt", ".yaml", ".yml",
+    ];
+
+    if candidate == "." || candidate == ".." {
+        return false;
+    }
+
+    let lower = candidate.to_ascii_lowercase();
+    candidate.contains('/') || FILE_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
+}
+
+fn push_unique_limited(items: &mut Vec<String>, value: String, cap: usize) {
+    if value.is_empty() || items.len() >= cap || items.iter().any(|existing| existing == &value) {
+        return;
+    }
+    items.push(value);
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
 }
 
 #[cfg(test)]
@@ -244,8 +442,8 @@ mod tests {
     fn from_stored_trims_to_restore_window() {
         use crate::storage::session::{SavedSession, SessionMeta, StoredMessage};
 
-        // Create 14 messages — more than RESTORE_WINDOW (10)
-        let messages: Vec<StoredMessage> = (0..14)
+        let total = RESTORE_WINDOW + 4;
+        let messages: Vec<StoredMessage> = (0..total)
             .map(|i| StoredMessage {
                 role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
                 content: format!("msg {i}"),
@@ -258,7 +456,7 @@ mod tests {
                 project_root: Some("/tmp/project".into()),
                 created_at: 0,
                 updated_at: 0,
-                message_count: 14,
+                message_count: total,
                 last_read_file: None,
                 last_search_query: None,
                 last_search_scope: None,
@@ -267,10 +465,11 @@ mod tests {
         };
 
         let restored = from_stored(&saved);
-        assert_eq!(restored.len(), RESTORE_WINDOW);
-        // Should be the last 10 messages (indices 4–13)
-        assert_eq!(restored[0].content, "msg 4");
-        assert_eq!(restored[9].content, "msg 13");
+        assert_eq!(restored.len(), RESTORE_WINDOW + 1);
+        assert_eq!(restored[0].role, Role::System);
+        assert!(restored[0].content.contains("[Session Summary]"));
+        assert_eq!(restored[1].content, "msg 4");
+        assert_eq!(restored[RESTORE_WINDOW].content, format!("msg {}", total - 1));
     }
 
     #[test]
@@ -441,6 +640,206 @@ mod tests {
 
         let restored = from_stored(&saved);
         assert!(restored.is_empty());
+    }
+
+    #[test]
+    fn from_stored_injects_summary_as_system_message_for_trimmed_history() {
+        use crate::storage::session::{SavedSession, SessionMeta, StoredMessage};
+
+        let mut messages = vec![
+            StoredMessage {
+                role: "user".into(),
+                content: "search for RESTORE_WINDOW in src/app/session.rs".into(),
+            },
+            StoredMessage {
+                role: "assistant".into(),
+                content: "We should keep restore filtering before summarization.".into(),
+            },
+        ];
+        messages.extend((0..RESTORE_WINDOW).map(|i| StoredMessage {
+            role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+            content: format!("tail {i}"),
+        }));
+
+        let saved = SavedSession {
+            meta: SessionMeta {
+                id: "summary".into(),
+                project_root: Some("/tmp/project".into()),
+                created_at: 0,
+                updated_at: 0,
+                message_count: messages.len(),
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
+            },
+            messages,
+        };
+
+        let restored = from_stored(&saved);
+        assert_eq!(restored[0].role, Role::System);
+        assert!(restored[0].content.contains("[Session Summary]"));
+        assert!(restored[0].content.contains("Goals:"));
+        assert!(restored[0].content.contains("Key Decisions:"));
+        assert!(restored[0].content.contains("Files Referenced:"));
+        assert!(restored[0].content.contains("Searches:"));
+        assert!(restored[0].content.contains("RESTORE_WINDOW in src/app/session.rs"));
+        assert!(restored[0].content.contains("src/app/session.rs"));
+        assert!(
+            restored[0]
+                .content
+                .contains("We should keep restore filtering before summarization.")
+        );
+    }
+
+    #[test]
+    fn from_stored_does_not_inject_summary_when_message_count_matches_window() {
+        use crate::storage::session::{SavedSession, SessionMeta, StoredMessage};
+
+        let messages: Vec<StoredMessage> = (0..RESTORE_WINDOW)
+            .map(|i| StoredMessage {
+                role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+                content: format!("msg {i}"),
+            })
+            .collect();
+
+        let saved = SavedSession {
+            meta: SessionMeta {
+                id: "exact".into(),
+                project_root: Some("/tmp/project".into()),
+                created_at: 0,
+                updated_at: 0,
+                message_count: messages.len(),
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
+            },
+            messages,
+        };
+
+        let restored = from_stored(&saved);
+        assert_eq!(restored.len(), RESTORE_WINDOW);
+        assert!(restored.iter().all(|message| message.role != Role::System));
+    }
+
+    #[test]
+    fn from_stored_short_sessions_do_not_get_summary_blocks() {
+        let restored = from_stored(&SavedSession {
+            meta: SessionMeta {
+                id: "short".into(),
+                project_root: Some("/tmp/project".into()),
+                created_at: 0,
+                updated_at: 0,
+                message_count: 2,
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
+            },
+            messages: vec![
+                StoredMessage {
+                    role: "user".into(),
+                    content: "hello".into(),
+                },
+                StoredMessage {
+                    role: "assistant".into(),
+                    content: "hi there".into(),
+                },
+            ],
+        });
+
+        assert_eq!(restored.len(), 2);
+        assert!(restored.iter().all(|message| message.role != Role::System));
+    }
+
+    #[test]
+    fn from_stored_excludes_stripped_tool_exchanges_from_summary() {
+        use crate::storage::session::{SavedSession, SessionMeta, StoredMessage};
+
+        let mut messages = vec![
+            StoredMessage {
+                role: "user".into(),
+                content: "please investigate the restore flow".into(),
+            },
+            StoredMessage {
+                role: "assistant".into(),
+                content: "[read_file: secret.rs]".into(),
+            },
+            StoredMessage {
+                role: "user".into(),
+                content: "=== tool_result: read_file ===\npath: secret.rs\nsuper secret\n=== /tool_result ===\n\n"
+                    .into(),
+            },
+        ];
+        messages.extend((0..RESTORE_WINDOW).map(|i| StoredMessage {
+            role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+            content: format!("tail {i}"),
+        }));
+
+        let saved = SavedSession {
+            meta: SessionMeta {
+                id: "strip-summary".into(),
+                project_root: Some("/tmp/project".into()),
+                created_at: 0,
+                updated_at: 0,
+                message_count: messages.len(),
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
+            },
+            messages,
+        };
+
+        let restored = from_stored(&saved);
+        let summary = &restored[0];
+        assert_eq!(summary.role, Role::System);
+        assert!(summary.content.contains("please investigate the restore flow"));
+        assert!(!summary.content.contains("secret.rs"));
+        assert!(!summary.content.contains("super secret"));
+        assert!(!summary.content.contains("tool_result"));
+        assert!(!summary.content.contains("[read_file:"));
+    }
+
+    #[test]
+    fn restore_summary_is_not_persisted() {
+        use crate::storage::session::{SavedSession, SessionMeta, StoredMessage};
+
+        let mut messages = vec![
+            StoredMessage {
+                role: "user".into(),
+                content: "search for RESTORE_WINDOW in src/app/session.rs".into(),
+            },
+            StoredMessage {
+                role: "assistant".into(),
+                content: "We should keep restore filtering before summarization.".into(),
+            },
+        ];
+        messages.extend((0..RESTORE_WINDOW).map(|i| StoredMessage {
+            role: if i % 2 == 0 { "user" } else { "assistant" }.into(),
+            content: format!("tail {i}"),
+        }));
+
+        let saved = SavedSession {
+            meta: SessionMeta {
+                id: "persist".into(),
+                project_root: Some("/tmp/project".into()),
+                created_at: 0,
+                updated_at: 0,
+                message_count: messages.len(),
+                last_read_file: None,
+                last_search_query: None,
+                last_search_scope: None,
+            },
+            messages,
+        };
+
+        let restored = from_stored(&saved);
+        let stored = to_stored(&restored);
+        assert_eq!(stored.len(), RESTORE_WINDOW);
+        assert!(stored.iter().all(|message| message.role != "system"));
+        assert!(
+            stored
+                .iter()
+                .all(|message| !message.content.contains("[Session Summary]"))
+        );
     }
 
     fn temp_project_root() -> tempfile::TempDir {
