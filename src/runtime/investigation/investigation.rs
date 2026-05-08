@@ -189,6 +189,21 @@ pub(crate) fn looks_like_definition_of_symbol(line: &str, symbol: &str) -> bool 
     false
 }
 
+/// Returns true if the line contains a call expression for the exact identifier `symbol`.
+/// Detection: `symbol(` anywhere on the line, excluding lines that define the symbol.
+/// Covers direct calls (`symbol(args)`) and method calls (`.symbol(args)`).
+/// No regex — substring matching only.
+pub(crate) fn looks_like_call_expression_of_symbol(line: &str, symbol: &str) -> bool {
+    if looks_like_definition_of_symbol(line, symbol) {
+        return false;
+    }
+    line.contains(&format!("{symbol}("))
+}
+
+fn looks_like_call_expression(line: &str) -> bool {
+    !looks_like_definition(line) && line.contains('(')
+}
+
 /// Returns true if the line (after stripping leading whitespace) looks like a symbol definition.
 /// Coverage: Rust, Python, Go, TypeScript, JavaScript.
 /// C/C++ patterns are excluded — too many false positives without a type parser.
@@ -228,6 +243,9 @@ fn looks_like_definition(line: &str) -> bool {
 pub(crate) enum InvestigationMode {
     /// No mode-specific gating. Any search-candidate read satisfies evidence.
     General,
+    /// Prompt signals a call-site lookup (where X is called/invoked/used by).
+    /// Non-call-site reads are structurally insufficient when call-site candidates exist.
+    CallSiteLookup,
     /// Prompt signals a usage lookup (where X is used/referenced/appears).
     /// Definition-only reads are structurally insufficient when usage candidates exist.
     UsageLookup,
@@ -258,6 +276,7 @@ impl InvestigationMode {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             InvestigationMode::General => "General",
+            InvestigationMode::CallSiteLookup => "CallSiteLookup",
             InvestigationMode::UsageLookup => "UsageLookup",
             InvestigationMode::DefinitionLookup => "DefinitionLookup",
             InvestigationMode::ConfigLookup => "ConfigLookup",
@@ -272,9 +291,16 @@ impl InvestigationMode {
 
 /// Detects the structural investigation mode from the prompt text.
 /// Evaluated in priority order so each prompt maps to exactly one mode.
-/// Priority: UsageLookup > ConfigLookup > InitializationLookup > CreateLookup > RegisterLookup > LoadLookup > SaveLookup > DefinitionLookup > General.
+/// Priority: CallSiteLookup > UsageLookup > ConfigLookup > InitializationLookup > CreateLookup > RegisterLookup > LoadLookup > SaveLookup > DefinitionLookup > General.
 pub(crate) fn detect_investigation_mode(text: &str) -> InvestigationMode {
     let lower = text.to_ascii_lowercase();
+    if ["called", "invoked", "calls", "invoke", "invocation"]
+        .iter()
+        .any(|term| contains_word(&lower, term))
+        || lower.contains("used by")
+    {
+        return InvestigationMode::CallSiteLookup;
+    }
     if [
         "use",
         "used",
@@ -349,6 +375,8 @@ pub(crate) enum RecoveryKind {
     Create,
     /// The file lacked register-term matches when register candidates exist.
     Register,
+    /// The file lacked call-expression matches when call-site candidates exist.
+    CallSite,
     /// The file lacked load-term matches when load candidates exist.
     Load,
     /// The file had load-term matches only on definition lines when call-site load candidates exist.
@@ -369,6 +397,7 @@ impl RecoveryKind {
             RecoveryKind::Initialization => "Initialization",
             RecoveryKind::Create => "Create",
             RecoveryKind::Register => "Register",
+            RecoveryKind::CallSite => "CallSite",
             RecoveryKind::Load => "Load",
             RecoveryKind::LoadDefinitionOnly => "LoadDefinitionOnly",
             RecoveryKind::Save => "Save",
@@ -479,6 +508,14 @@ pub(crate) struct InvestigationState {
     has_non_register_candidates: bool,
     /// True after the register recovery correction has been issued once this turn.
     register_correction_issued: bool,
+    /// Candidate paths where at least one matched line contains a call expression.
+    /// Populated during record_search_results alongside search_candidate_paths.
+    call_site_candidates: HashSet<String>,
+    /// True if at least one candidate in the current search results has no call-expression
+    /// match line (i.e. a definition-only or non-call file is available alongside a call-site file).
+    has_non_call_site_candidates: bool,
+    /// True after the call-site recovery correction has been issued once this turn.
+    call_site_correction_issued: bool,
     /// Candidate paths where at least one matched line contains a load term.
     /// Populated during record_search_results alongside search_candidate_paths.
     load_candidates: HashSet<String>,
@@ -542,6 +579,9 @@ impl InvestigationState {
             register_candidates: HashSet::new(),
             has_non_register_candidates: false,
             register_correction_issued: false,
+            call_site_candidates: HashSet::new(),
+            has_non_call_site_candidates: false,
+            call_site_correction_issued: false,
             load_candidates: HashSet::new(),
             has_non_load_candidates: false,
             load_correction_issued: false,
@@ -624,6 +664,7 @@ impl InvestigationState {
             InvestigationMode::ConfigLookup => self.first_config_candidate(),
             InvestigationMode::CreateLookup => self.first_create_candidate(),
             InvestigationMode::RegisterLookup => self.first_register_candidate(),
+            InvestigationMode::CallSiteLookup => self.first_call_site_candidate(),
             InvestigationMode::LoadLookup => self.first_load_candidate(),
             InvestigationMode::SaveLookup => self.first_save_candidate(),
             InvestigationMode::DefinitionLookup => self.first_definition_candidate(),
@@ -690,6 +731,8 @@ impl InvestigationState {
             self.has_non_create_candidates = false;
             self.register_candidates.clear();
             self.has_non_register_candidates = false;
+            self.call_site_candidates.clear();
+            self.has_non_call_site_candidates = false;
             self.load_candidates.clear();
             self.has_non_load_candidates = false;
             self.load_definition_only_candidates.clear();
@@ -721,6 +764,7 @@ impl InvestigationState {
             let mut file_has_initialization: HashSet<String> = HashSet::new();
             let mut file_has_create: HashSet<String> = HashSet::new();
             let mut file_has_register: HashSet<String> = HashSet::new();
+            let mut file_has_call_site: HashSet<String> = HashSet::new();
             let mut file_has_load: HashSet<String> = HashSet::new();
             let mut file_has_non_definition_load: HashSet<String> = HashSet::new();
             let mut file_has_save: HashSet<String> = HashSet::new();
@@ -750,6 +794,13 @@ impl InvestigationState {
                 }
                 if contains_register_term(&m.line) {
                     file_has_register.insert(m.file.clone());
+                }
+                let is_call_site_line = match query {
+                    Some(sym) => looks_like_call_expression_of_symbol(&m.line, sym),
+                    None => looks_like_call_expression(&m.line),
+                };
+                if is_call_site_line {
+                    file_has_call_site.insert(m.file.clone());
                 }
                 if contains_load_term(&m.line) {
                     file_has_load.insert(m.file.clone());
@@ -802,6 +853,11 @@ impl InvestigationState {
                     self.register_candidates.insert(path.clone());
                 } else {
                     self.has_non_register_candidates = true;
+                }
+                if file_has_call_site.contains(path) {
+                    self.call_site_candidates.insert(path.clone());
+                } else {
+                    self.has_non_call_site_candidates = true;
                 }
                 if file_has_load.contains(path) {
                     self.load_candidates.insert(path.clone());
@@ -865,6 +921,14 @@ impl InvestigationState {
                 (
                     "has_non_register",
                     self.has_non_register_candidates.to_string(),
+                ),
+                (
+                    "call_site_files",
+                    self.call_site_candidates.len().to_string(),
+                ),
+                (
+                    "has_non_call_site",
+                    self.has_non_call_site_candidates.to_string(),
                 ),
                 ("load_files", self.load_candidates.len().to_string()),
                 ("has_non_load", self.has_non_load_candidates.to_string()),
@@ -936,6 +1000,10 @@ impl InvestigationState {
                 .any(|c| normalize_evidence_path(c) == read_path);
             let is_register_candidate = self
                 .register_candidates
+                .iter()
+                .any(|c| normalize_evidence_path(c) == read_path);
+            let is_call_site_candidate = self
+                .call_site_candidates
                 .iter()
                 .any(|c| normalize_evidence_path(c) == read_path);
             let is_load_candidate = self
@@ -1135,6 +1203,41 @@ impl InvestigationState {
                         ("path", read_path.clone()),
                         ("accepted", "false".into()),
                         ("reason", "register_recovery_already_issued".into()),
+                    ],
+                );
+                // Correction already issued: fall through without accepting.
+            }
+            // Gate 5.5 (CallSiteLookup): non-call-site reads are structurally insufficient when
+            // call-site candidates exist. Fire once; fallback accepts if no call-site candidates.
+            else if matches!(mode, InvestigationMode::CallSiteLookup)
+                && !is_call_site_candidate
+                && !self.call_site_candidates.is_empty()
+            {
+                if !self.call_site_correction_issued {
+                    self.call_site_correction_issued = true;
+                    let suggested_path = self.first_call_site_candidate().map(str::to_string);
+                    trace_runtime_decision(
+                        on_event,
+                        "read_evidence",
+                        &[
+                            ("path", read_path.clone()),
+                            ("accepted", "false".into()),
+                            ("reason", "call_site_non_call_site_candidate".into()),
+                            (
+                                "recovery_path",
+                                suggested_path.clone().unwrap_or_else(|| "none".into()),
+                            ),
+                        ],
+                    );
+                    return suggested_path.map(|p| (p, RecoveryKind::CallSite));
+                }
+                trace_runtime_decision(
+                    on_event,
+                    "read_evidence",
+                    &[
+                        ("path", read_path.clone()),
+                        ("accepted", "false".into()),
+                        ("reason", "call_site_recovery_already_issued".into()),
                     ],
                 );
                 // Correction already issued: fall through without accepting.
@@ -1397,6 +1500,10 @@ impl InvestigationState {
             && self.register_candidates.is_empty()
         {
             "register_fallback_no_register_candidates".into()
+        } else if matches!(mode, InvestigationMode::CallSiteLookup)
+            && self.call_site_candidates.is_empty()
+        {
+            "call_site_fallback_no_call_site_candidates".into()
         } else if matches!(mode, InvestigationMode::LoadLookup) && self.load_candidates.is_empty() {
             "load_fallback_no_load_candidates".into()
         } else if matches!(mode, InvestigationMode::SaveLookup) && self.save_candidates.is_empty() {
@@ -1517,6 +1624,13 @@ impl InvestigationState {
             .map(String::as_str)
     }
 
+    fn first_call_site_candidate(&self) -> Option<&str> {
+        self.search_candidate_paths
+            .iter()
+            .find(|path| self.call_site_candidates.contains(*path))
+            .map(String::as_str)
+    }
+
     fn first_load_candidate(&self) -> Option<&str> {
         self.search_candidate_paths
             .iter()
@@ -1615,6 +1729,14 @@ impl InvestigationState {
                 let path = self.first_register_candidate()?;
                 Some(format!(
                     "[register match found in {path} — read this file first]"
+                ))
+            }
+            InvestigationMode::CallSiteLookup
+                if !self.call_site_candidates.is_empty() && self.has_non_call_site_candidates =>
+            {
+                let path = self.first_call_site_candidate()?;
+                Some(format!(
+                    "[call site found in {path} — read this file first]"
                 ))
             }
             InvestigationMode::LoadLookup
@@ -2579,5 +2701,199 @@ mod tests {
         assert_eq!(state.candidate_reads_count, 1);
         assert_eq!(state.direct_reads_count, 0);
         assert!(state.direct_read_paths.is_empty());
+    }
+
+    // CallSiteLookup tests
+
+    #[test]
+    fn detect_investigation_mode_returns_call_site_lookup() {
+        assert!(matches!(
+            detect_investigation_mode("Where is process_task called?"),
+            InvestigationMode::CallSiteLookup
+        ));
+        assert!(matches!(
+            detect_investigation_mode("Find where process_task is invoked"),
+            InvestigationMode::CallSiteLookup
+        ));
+        assert!(matches!(
+            detect_investigation_mode("What calls run_turn?"),
+            InvestigationMode::CallSiteLookup
+        ));
+        assert!(matches!(
+            detect_investigation_mode("Show the invocation of dispatch"),
+            InvestigationMode::CallSiteLookup
+        ));
+        assert!(matches!(
+            detect_investigation_mode("What is used by the scheduler?"),
+            InvestigationMode::CallSiteLookup
+        ));
+    }
+
+    #[test]
+    fn detect_investigation_mode_call_site_priority_over_usage() {
+        assert!(matches!(
+            detect_investigation_mode("Where is run_task called and used?"),
+            InvestigationMode::CallSiteLookup
+        ));
+        assert!(matches!(
+            detect_investigation_mode("Find functions that invoke and reference process_task"),
+            InvestigationMode::CallSiteLookup
+        ));
+    }
+
+    #[test]
+    fn detect_investigation_mode_call_site_priority_over_definition() {
+        assert!(matches!(
+            detect_investigation_mode("Where is dispatch called and defined?"),
+            InvestigationMode::CallSiteLookup
+        ));
+    }
+
+    #[test]
+    fn looks_like_call_expression_of_symbol_accepts_direct_call() {
+        assert!(looks_like_call_expression_of_symbol(
+            "    process_task(my_task)",
+            "process_task"
+        ));
+        assert!(looks_like_call_expression_of_symbol(
+            "let result = process_task(args);",
+            "process_task"
+        ));
+        assert!(looks_like_call_expression_of_symbol(
+            "self.process_task(args)",
+            "process_task"
+        ));
+    }
+
+    #[test]
+    fn looks_like_call_expression_of_symbol_rejects_definition() {
+        assert!(!looks_like_call_expression_of_symbol(
+            "pub fn process_task(t: Task) {",
+            "process_task"
+        ));
+        assert!(!looks_like_call_expression_of_symbol(
+            "fn process_task(t: Task) -> Result<()> {",
+            "process_task"
+        ));
+        assert!(!looks_like_call_expression_of_symbol(
+            "def process_task(self, task):",
+            "process_task"
+        ));
+    }
+
+    #[test]
+    fn looks_like_call_expression_of_symbol_rejects_non_call_reference() {
+        // Reference without parentheses — not a call expression
+        assert!(!looks_like_call_expression_of_symbol(
+            "let f = process_task;",
+            "process_task"
+        ));
+        assert!(!looks_like_call_expression_of_symbol(
+            "// calls process_task somewhere",
+            "process_task"
+        ));
+    }
+
+    #[test]
+    fn call_site_gate_dispatches_to_call_site_candidate() {
+        let mut state = InvestigationState::new();
+        let search_output = make_search_output_for_hint(vec![
+            ("src/definitions.rs", "pub fn process_task(t: Task) {"),
+            ("src/callers.rs", "process_task(my_task)"),
+        ]);
+        state.record_search_results(&search_output, Some("process_task"), &mut |_| {});
+
+        assert!(
+            state.call_site_candidates.contains("src/callers.rs"),
+            "callers.rs must be classified as a call-site candidate"
+        );
+        assert!(
+            !state.call_site_candidates.contains("src/definitions.rs"),
+            "definitions.rs must not be classified as a call-site candidate"
+        );
+
+        let read_output =
+            make_file_contents_output("src/definitions.rs", "pub fn process_task(t: Task) {}");
+        let recovery = state.record_read_result(
+            &read_output,
+            InvestigationMode::CallSiteLookup,
+            ReadClassification::Candidate,
+            &mut |_| {},
+        );
+        assert!(
+            recovery.is_some(),
+            "gate must fire a recovery for a non-call-site read"
+        );
+        let (path, _) = recovery.unwrap();
+        assert_eq!(
+            path, "src/callers.rs",
+            "recovery must redirect to the call-site candidate"
+        );
+    }
+
+    #[test]
+    fn call_site_gate_accepts_when_no_call_site_candidates() {
+        let mut state = InvestigationState::new();
+        let search_output = make_search_output_for_hint(vec![(
+            "src/definitions.rs",
+            "pub fn process_task(t: Task) {",
+        )]);
+        state.record_search_results(&search_output, Some("process_task"), &mut |_| {});
+
+        assert!(
+            state.call_site_candidates.is_empty(),
+            "call_site_candidates must be empty when no call-expression lines exist"
+        );
+
+        let read_output =
+            make_file_contents_output("src/definitions.rs", "pub fn process_task(t: Task) {}");
+        let recovery = state.record_read_result(
+            &read_output,
+            InvestigationMode::CallSiteLookup,
+            ReadClassification::Candidate,
+            &mut |_| {},
+        );
+        assert!(
+            recovery.is_none(),
+            "gate must not fire when no call-site candidates exist"
+        );
+        assert_eq!(
+            state.useful_accepted_candidate_reads, 1,
+            "read must be accepted as useful evidence when no call-site candidates exist"
+        );
+    }
+
+    #[test]
+    fn candidate_preference_hint_call_site_fires_with_mixed_candidates() {
+        let mut state = InvestigationState::new();
+        let output = make_search_output_for_hint(vec![
+            ("src/definitions.rs", "pub fn process_task(t: Task) {"),
+            ("src/callers.rs", "process_task(my_task)"),
+        ]);
+        state.record_search_results(&output, Some("process_task"), &mut |_| {});
+        let hint = state.candidate_preference_hint(InvestigationMode::CallSiteLookup);
+        assert!(
+            hint.is_some(),
+            "hint must fire when call-site candidate exists alongside non-call-site"
+        );
+        assert!(
+            hint.unwrap().contains("src/callers.rs"),
+            "hint must name the call-site candidate"
+        );
+    }
+
+    #[test]
+    fn candidate_preference_hint_call_site_suppressed_when_all_call_sites() {
+        let mut state = InvestigationState::new();
+        let output = make_search_output_for_hint(vec![
+            ("src/a.rs", "process_task(task_a)"),
+            ("src/b.rs", "process_task(task_b)"),
+        ]);
+        state.record_search_results(&output, Some("process_task"), &mut |_| {});
+        let hint = state.candidate_preference_hint(InvestigationMode::CallSiteLookup);
+        assert!(
+            hint.is_none(),
+            "hint must not fire when all candidates are call-site files"
+        );
     }
 }
