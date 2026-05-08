@@ -8,6 +8,7 @@ use crate::app::paths::AppPaths;
 use crate::app::AppContext;
 use crate::app::Result;
 use crate::runtime::{AnswerSource, RuntimeEvent, RuntimeRequest};
+use crate::storage::session::SessionMeta;
 
 use super::commands;
 use super::render::render;
@@ -153,6 +154,8 @@ enum CommandAction {
     Quit,
     ShowHelp,
     ClearSession,
+    ListSessions,
+    ClearProjectSessions,
     Runtime(RuntimeRequest),
 }
 
@@ -170,6 +173,8 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
         commands::Command::Search(query) => {
             CommandAction::Runtime(RuntimeRequest::SearchCode { query })
         }
+        commands::Command::Sessions => CommandAction::ListSessions,
+        commands::Command::SessionClear => CommandAction::ClearProjectSessions,
     }
 }
 
@@ -182,7 +187,7 @@ fn handle_command(
     match resolve_command(cmd) {
         CommandAction::ShowHelp => {
             state.add_system_message(
-                "Commands: /help — show this message  |  /clear — clear history  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history",
+                "Commands: /help — show this message  |  /clear — clear history  |  /sessions — list current project sessions  |  /session clear — delete current project sessions and start fresh  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history",
             );
         }
         CommandAction::Quit => {
@@ -192,6 +197,28 @@ fn handle_command(
             state.clear_messages();
             if let Err(e) = app.reset() {
                 state.add_system_message(format!("session reset failed: {e}"));
+            }
+        }
+        CommandAction::ListSessions => match app.list_sessions() {
+            Ok(sessions) => state.add_system_message(format_sessions_list(&sessions)),
+            Err(e) => {
+                state.set_status("error");
+                state.add_system_message(format!("session list failed: {e}"));
+            }
+        },
+        CommandAction::ClearProjectSessions => {
+            state.clear_messages();
+            match app.clear_sessions() {
+                Ok(()) => {
+                    state.set_status("ready");
+                    state.add_system_message(
+                        "current project sessions cleared; started fresh session",
+                    );
+                }
+                Err(e) => {
+                    state.set_status("error");
+                    state.add_system_message(format!("session clear failed: {e}"));
+                }
             }
         }
         CommandAction::Runtime(req) => {
@@ -303,6 +330,58 @@ fn parse_read_file_header(line: &str) -> Option<(usize, bool)> {
     Some((n, truncated))
 }
 
+fn format_sessions_list(sessions: &[SessionMeta]) -> String {
+    if sessions.is_empty() {
+        return "current project sessions: none".to_string();
+    }
+
+    let mut lines = vec!["current project sessions:".to_string()];
+    for session in sessions {
+        lines.push(format!(
+            "{}  |  {}  |  {} messages",
+            session.id,
+            format_session_updated_at(session.updated_at),
+            session.message_count
+        ));
+    }
+    lines.join("\n")
+}
+
+fn format_session_updated_at(updated_at: u64) -> String {
+    let seconds = normalize_session_timestamp_seconds(updated_at);
+    let days = seconds.div_euclid(86_400);
+    let secs_of_day = seconds.rem_euclid(86_400);
+    let hour = secs_of_day / 3_600;
+    let minute = (secs_of_day % 3_600) / 60;
+    let second = secs_of_day % 60;
+    let (year, month, day) = civil_from_unix_days(days);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
+}
+
+fn normalize_session_timestamp_seconds(timestamp: u64) -> i64 {
+    if timestamp >= 1_000_000_000_000_000 {
+        (timestamp / 1_000_000_000) as i64
+    } else if timestamp >= 10_000_000_000 {
+        (timestamp / 1_000) as i64
+    } else {
+        timestamp as i64
+    }
+}
+
+fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+    (year as i32, month as u32, day as u32)
+}
+
 fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ActivityChanged(activity) => state.set_status(activity.label()),
@@ -346,7 +425,26 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_read_file_header, summarize_command_output};
+    use std::fs;
+    use std::io;
+
+    use tempfile::TempDir;
+
+    use crate::app::config::Config;
+    use crate::app::paths::AppPaths;
+    use crate::app::session::ActiveSession;
+    use crate::app::AppContext;
+    use crate::llm::providers::build_backend;
+    use crate::runtime::{ProjectRoot, RuntimeRequest};
+    use crate::storage::session::{SessionStore, StoredMessage};
+    use crate::tools::default_registry;
+
+    use super::{
+        format_session_updated_at, format_sessions_list, handle_command, parse_read_file_header,
+        summarize_command_output,
+    };
+    use crate::tui::commands::Command;
+    use crate::tui::state::AppState;
 
     fn tool_result(name: &str, body: &str) -> String {
         format!("=== tool_result: {name} ===\n{body}\n=== /tool_result ===\n\n")
@@ -432,5 +530,171 @@ mod tests {
     fn unknown_tool_passes_through_raw() {
         let raw = tool_result("git_status", "clean");
         assert_eq!(summarize_command_output(&raw), raw);
+    }
+
+    #[test]
+    fn session_timestamp_formats_as_utc_datetime() {
+        let ts = 1_778_198_400_000_000_000_u64;
+        assert_eq!(
+            format_session_updated_at(ts),
+            "2026-05-08 00:00:00 UTC"
+        );
+    }
+
+    #[test]
+    fn sessions_list_includes_id_timestamp_and_message_count() {
+        let sessions = vec![crate::storage::session::SessionMeta {
+            id: "abc123".into(),
+            project_root: Some("/tmp/project".into()),
+            created_at: 0,
+            updated_at: 1_778_198_400_000_000_000,
+            message_count: 3,
+            last_read_file: None,
+            last_search_query: None,
+            last_search_scope: None,
+        }];
+
+        let text = format_sessions_list(&sessions);
+        assert!(text.contains("current project sessions:"));
+        assert!(text.contains("abc123"));
+        assert!(text.contains("2026-05-08 00:00:00 UTC"));
+        assert!(text.contains("3 messages"));
+    }
+
+    #[test]
+    fn session_clear_removes_old_project_sessions_and_leaves_fresh_active_session() {
+        let mut harness = TestHarness::new();
+        let mut stdout = io::stdout();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        state.add_user_message("stale user message");
+        state.add_assistant_message("stale assistant message");
+
+        harness
+            .app
+            .handle(
+                RuntimeRequest::Submit {
+                    text: "before clear".into(),
+                },
+                &mut |_| {},
+            )
+            .unwrap();
+        harness.app.reset().unwrap();
+        harness
+            .app
+            .handle(
+                RuntimeRequest::Submit {
+                    text: "second session".into(),
+                },
+                &mut |_| {},
+            )
+            .unwrap();
+
+        let other_root = TempDir::new().unwrap();
+        let other_root = other_root.path().canonicalize().unwrap();
+        let store = SessionStore::open(&harness.paths.session_db).unwrap();
+        let foreign = store.create(&other_root).unwrap();
+        store
+            .save(
+                &foreign.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "foreign session".into(),
+                }],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        handle_command(
+            &mut stdout,
+            &mut state,
+            &mut harness.app,
+            Command::SessionClear,
+        )
+        .unwrap();
+
+        assert_eq!(state.messages.len(), 2);
+        assert!(state.messages[0].content.contains("ready. Root:"));
+        assert_eq!(
+            state.messages[1].content,
+            "current project sessions cleared; started fresh session"
+        );
+        assert_eq!(state.status, "ready");
+        assert!(state
+            .messages
+            .iter()
+            .all(|m| !m.content.contains("stale user message")));
+        assert!(state
+            .messages
+            .iter()
+            .all(|m| !m.content.contains("stale assistant message")));
+
+        let sessions_after_clear = harness.app.list_sessions().unwrap();
+        assert_eq!(sessions_after_clear.len(), 1);
+        assert_eq!(sessions_after_clear[0].message_count, 0);
+
+        harness
+            .app
+            .handle(
+                RuntimeRequest::Submit {
+                    text: "after clear".into(),
+                },
+                &mut |_| {},
+            )
+            .unwrap();
+
+        let sessions_after_submit = harness.app.list_sessions().unwrap();
+        assert_eq!(sessions_after_submit.len(), 1);
+        assert_eq!(sessions_after_submit[0].message_count, 2);
+        assert_eq!(store.list_for_project(other_root.to_string_lossy().as_ref()).unwrap().len(), 1);
+    }
+
+    struct TestHarness {
+        _root_dir: TempDir,
+        config: Config,
+        paths: AppPaths,
+        app: AppContext,
+    }
+
+    impl TestHarness {
+        fn new() -> Self {
+            let root_dir = TempDir::new().unwrap();
+            fs::create_dir_all(root_dir.path().join("data")).unwrap();
+            fs::create_dir_all(root_dir.path().join("logs")).unwrap();
+
+            let project_root = ProjectRoot::new(root_dir.path().to_path_buf()).unwrap();
+            let paths = AppPaths {
+                root_dir: root_dir.path().to_path_buf(),
+                project_root: root_dir.path().to_path_buf(),
+                config_file: root_dir.path().join("config.toml"),
+                data_dir: root_dir.path().join("data"),
+                logs_dir: root_dir.path().join("logs"),
+                session_db: root_dir.path().join("data").join("sessions.db"),
+            };
+            let config = Config::default();
+            let backend = build_backend(&config).unwrap();
+            let registry = default_registry().with_project_root(project_root.as_path_buf());
+            let (session, history, anchors) =
+                ActiveSession::open_or_restore(&paths.session_db, &project_root).unwrap();
+            let app = AppContext::build(
+                &config,
+                project_root,
+                backend,
+                registry,
+                session,
+                history,
+                anchors,
+                None,
+            )
+            .unwrap();
+
+            Self {
+                _root_dir: root_dir,
+                config,
+                paths,
+                app,
+            }
+        }
     }
 }

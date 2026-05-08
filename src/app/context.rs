@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use crate::logging::SessionLog;
 use crate::runtime::{ProjectRoot, Runtime, RuntimeEvent, RuntimeRequest};
+use crate::storage::session::SessionMeta;
 use crate::tools::ToolRegistry;
 
 use super::config::Config;
@@ -106,6 +107,18 @@ impl AppContext {
         self.runtime.handle(RuntimeRequest::Reset, &mut |_| {});
         self.session.begin_new()?;
         Ok(())
+    }
+
+    /// Returns metadata for all sessions belonging to the current project, newest first.
+    pub fn list_sessions(&self) -> Result<Vec<SessionMeta>> {
+        self.session.list_for_project()
+    }
+
+    /// Deletes all sessions for the current project, resets the runtime, and starts fresh.
+    /// The TUI handles its own message-list clearing separately.
+    pub fn clear_sessions(&mut self) -> Result<()> {
+        self.runtime.handle(RuntimeRequest::Reset, &mut |_| {});
+        self.session.clear_for_project()
     }
 
     /// Initializes the AppContext by building a Runtime and loading the session history and anchors.

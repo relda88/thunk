@@ -12,6 +12,8 @@ pub enum Command {
     History,
     Read(String),
     Search(String),
+    Sessions,
+    SessionClear,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -66,6 +68,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
         "/search" => match arg {
             Some(query) => Some(Ok(Command::Search(query.to_string()))),
             None => Some(Err(ParseError::MissingArgument { command: "/search" })),
+        },
+        "/sessions" => Some(Ok(Command::Sessions)),
+        "/session" => match arg {
+            Some("clear") => Some(Ok(Command::SessionClear)),
+            Some(_) => Some(Err(ParseError::UnknownCommand)),
+            None => Some(Err(ParseError::MissingArgument { command: "/session" })),
         },
         _ => Some(Err(ParseError::UnknownCommand)),
     }
@@ -174,6 +182,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_sessions() {
+        assert_eq!(parse("/sessions"), Some(Ok(Command::Sessions)));
+    }
+
+    #[test]
+    fn parses_session_clear() {
+        assert_eq!(parse("/session clear"), Some(Ok(Command::SessionClear)));
+    }
+
+    #[test]
     fn read_without_arg_returns_missing_argument() {
         assert_eq!(
             parse("/read"),
@@ -195,5 +213,20 @@ mod tests {
             parse("/search   "),
             Some(Err(ParseError::MissingArgument { command: "/search" }))
         );
+    }
+
+    #[test]
+    fn session_without_subcommand_returns_missing_argument() {
+        assert_eq!(
+            parse("/session"),
+            Some(Err(ParseError::MissingArgument {
+                command: "/session"
+            }))
+        );
+    }
+
+    #[test]
+    fn unknown_session_subcommand_returns_unknown_command() {
+        assert_eq!(parse("/session list"), Some(Err(ParseError::UnknownCommand)));
     }
 }

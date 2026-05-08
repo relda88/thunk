@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::llm::backend::{Message, Role};
 use crate::runtime::ProjectRoot;
-use crate::storage::session::{SavedSession, SessionId, SessionStore, StoredMessage};
+use crate::storage::session::{SavedSession, SessionId, SessionMeta, SessionStore, StoredMessage};
 
 use super::Result;
 
@@ -83,6 +83,21 @@ impl ActiveSession {
     /// Creates a new session and makes it the active one.
     /// Called when the user explicitly starts a fresh conversation.
     pub fn begin_new(&mut self) -> Result<()> {
+        let meta = self.store.create(&self.project_root)?;
+        self.session_id = meta.id;
+        Ok(())
+    }
+
+    /// Returns metadata for all sessions belonging to the current project, newest first.
+    pub fn list_for_project(&self) -> Result<Vec<SessionMeta>> {
+        let root = self.project_root.to_string_lossy();
+        self.store.list_for_project(root.as_ref())
+    }
+
+    /// Deletes all sessions for the current project and starts a fresh one.
+    pub fn clear_for_project(&mut self) -> Result<()> {
+        let root = self.project_root.to_string_lossy().into_owned();
+        self.store.delete_for_project(&root)?;
         let meta = self.store.create(&self.project_root)?;
         self.session_id = meta.id;
         Ok(())
@@ -684,5 +699,83 @@ mod tests {
         assert_eq!(anchors.0, None);
         assert_eq!(anchors.1, None);
         assert_eq!(anchors.2, None);
+    }
+
+    #[test]
+    fn list_for_project_returns_only_current_project_sessions() {
+        let db_dir = tempfile::TempDir::new().unwrap();
+        let root_a_dir = temp_project_root();
+        let root_b_dir = temp_project_root();
+        let root_a = canonical_project_root(&root_a_dir);
+        let root_b = canonical_project_root(&root_b_dir);
+        let db_path = session_db_path(&db_dir);
+
+        let (session_a, _history, _anchors) =
+            ActiveSession::open_or_restore(&db_path, &root_a).unwrap();
+        let store = SessionStore::open(&db_path).unwrap();
+        let other = store.create(root_b.path()).unwrap();
+        store
+            .save(
+                &other.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "project b".into(),
+                }],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let listed = session_a.list_for_project().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].project_root.as_deref(),
+            Some(root_a.path().to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn clear_for_project_removes_old_sessions_and_starts_fresh_one() {
+        let db_dir = tempfile::TempDir::new().unwrap();
+        let root_a_dir = temp_project_root();
+        let root_b_dir = temp_project_root();
+        let root_a = canonical_project_root(&root_a_dir);
+        let root_b = canonical_project_root(&root_b_dir);
+        let db_path = session_db_path(&db_dir);
+
+        let (mut session_a, _history, _anchors) =
+            ActiveSession::open_or_restore(&db_path, &root_a).unwrap();
+        session_a.begin_new().unwrap();
+
+        let store = SessionStore::open(&db_path).unwrap();
+        let other = store.create(root_b.path()).unwrap();
+        store
+            .save(
+                &other.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "project b".into(),
+                }],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        session_a.clear_for_project().unwrap();
+
+        let current_sessions = session_a.list_for_project().unwrap();
+        assert_eq!(current_sessions.len(), 1);
+        assert_eq!(current_sessions[0].message_count, 0);
+        assert_eq!(
+            current_sessions[0].project_root.as_deref(),
+            Some(root_a.path().to_string_lossy().as_ref())
+        );
+
+        let store = SessionStore::open(&db_path).unwrap();
+        let other_sessions = store.list_for_project(root_b.path().to_string_lossy().as_ref()).unwrap();
+        assert_eq!(other_sessions.len(), 1);
+        assert_eq!(other_sessions[0].id, other.id);
     }
 }

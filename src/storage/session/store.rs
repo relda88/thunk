@@ -144,6 +144,57 @@ impl SessionStore {
         }
     }
 
+    /// Lists all sessions for a project root, ordered by most recently updated.
+    pub fn list_for_project(&self, project_root: &str) -> Result<Vec<SessionMeta>> {
+        self.conn
+            .prepare(
+                "SELECT id, project_root, created_at, updated_at, msg_count,
+                        last_read_file, last_search_query, last_search_scope
+                 FROM sessions
+                 WHERE project_root = ?1
+                 ORDER BY updated_at DESC",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?
+            .query_map(params![project_root], |row| {
+                Ok(SessionMeta {
+                    id: row.get(0)?,
+                    project_root: row.get(1)?,
+                    created_at: row.get::<_, i64>(2)? as u64,
+                    updated_at: row.get::<_, i64>(3)? as u64,
+                    message_count: row.get::<_, i64>(4)? as usize,
+                    last_read_file: row.get(5)?,
+                    last_search_query: row.get(6)?,
+                    last_search_scope: row.get(7)?,
+                })
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| AppError::Storage(e.to_string()))
+    }
+
+    /// Deletes all sessions and their messages for a project root.
+    pub fn delete_for_project(&self, project_root: &str) -> Result<()> {
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        tx.execute(
+            "DELETE FROM session_messages WHERE session_id IN
+             (SELECT id FROM sessions WHERE project_root = ?1)",
+            params![project_root],
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        tx.execute(
+            "DELETE FROM sessions WHERE project_root = ?1",
+            params![project_root],
+        )
+        .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        tx.commit().map_err(|e| AppError::Storage(e.to_string()))
+    }
+
     /// Lists all sessions ordered by most recently updated.
     pub fn list(&self) -> Result<Vec<SessionMeta>> {
         self.conn
@@ -495,5 +546,66 @@ mod tests {
     fn load_unknown_id_returns_none() {
         let store = in_memory();
         assert!(store.load("does-not-exist").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_for_project_returns_only_matching_project() {
+        let store = in_memory();
+        let a1 = store.create(Path::new("/tmp/project-a")).unwrap();
+        let a2 = store.create(Path::new("/tmp/project-a")).unwrap();
+        store.create(Path::new("/tmp/project-b")).unwrap();
+
+        let sessions = store.list_for_project("/tmp/project-a").unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.id == a1.id));
+        assert!(sessions.iter().any(|s| s.id == a2.id));
+        assert!(sessions
+            .iter()
+            .all(|s| s.project_root.as_deref() == Some("/tmp/project-a")));
+    }
+
+    #[test]
+    fn list_for_project_empty_when_no_match() {
+        let store = in_memory();
+        store.create(Path::new("/tmp/project-a")).unwrap();
+
+        let sessions = store.list_for_project("/tmp/other").unwrap();
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn delete_for_project_removes_only_matching_sessions() {
+        let store = in_memory();
+        let a = store.create(Path::new("/tmp/project-a")).unwrap();
+        store
+            .save(
+                &a.id,
+                &[StoredMessage {
+                    role: "user".into(),
+                    content: "a message".into(),
+                }],
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let b = store.create(Path::new("/tmp/project-b")).unwrap();
+
+        store.delete_for_project("/tmp/project-a").unwrap();
+
+        assert!(store.load(&a.id).unwrap().is_none());
+        assert!(store.list_for_project("/tmp/project-a").unwrap().is_empty());
+        assert!(store.load(&b.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn list_for_project_empty_after_delete_for_project() {
+        let store = in_memory();
+        store.create(Path::new("/tmp/project")).unwrap();
+        store.create(Path::new("/tmp/project")).unwrap();
+
+        store.delete_for_project("/tmp/project").unwrap();
+
+        assert!(store.list_for_project("/tmp/project").unwrap().is_empty());
     }
 }
