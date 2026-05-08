@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::app::config::Config;
-use crate::llm::backend::{BackendCapabilities, ModelBackend, Role};
+use crate::llm::backend::{ModelBackend, Role};
 use crate::tools::{
     PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
 };
@@ -25,6 +25,7 @@ use super::super::resolve;
 use super::super::types::{
     Activity, AnswerSource, RuntimeEvent, RuntimeRequest, RuntimeTerminalReason,
 };
+use super::context_policy::ContextPolicy;
 use super::generation::{emit_visible_assistant_message, run_generate_turn};
 use super::tool_round::{
     run_tool_round, SearchBudget, ToolRoundOutcome, MAX_CANDIDATE_READS_PER_INVESTIGATION,
@@ -48,41 +49,6 @@ const MAX_CORRECTIONS: usize = 1;
 const MAX_HISTORY_MESSAGES: usize = 10;
 const MAX_MESSAGE_CHARS: usize = 200;
 
-/// Policy values derived once from backend capabilities at construction time.
-/// Both layers of capability-aware context management read from this struct.
-struct ContextPolicy {
-    /// Message count threshold at which conversation trimming fires (Layer 2).
-    trim_threshold: usize,
-    /// Maximum content lines per tool result block before it is capped (Layer 1).
-    tool_result_max_lines: usize,
-}
-
-impl ContextPolicy {
-    fn from_capabilities(caps: BackendCapabilities) -> Self {
-        match caps.context_window_tokens {
-            Some(t) if t >= 16_384 => Self {
-                trim_threshold: 40,
-                tool_result_max_lines: 200,
-            },
-            Some(t) if t >= 8_192 => Self {
-                trim_threshold: 30,
-                tool_result_max_lines: 150,
-            },
-            Some(t) if t >= 4_096 => Self {
-                trim_threshold: 20,
-                tool_result_max_lines: 80,
-            },
-            Some(_) => Self {
-                trim_threshold: 12,
-                tool_result_max_lines: 40,
-            },
-            None => Self {
-                trim_threshold: 40,
-                tool_result_max_lines: 200,
-            },
-        }
-    }
-}
 
 /// Explicit allowlist of tools that slash commands may invoke via the runtime.
 /// All command-to-registry dispatch passes through this type — no command handler
@@ -2096,48 +2062,6 @@ mod tests {
             ),
             "explain-mode repeated-tool fallback must not dump raw file contents"
         );
-    }
-
-    // ContextPolicy tests
-
-    #[test]
-    fn context_policy_none_uses_defaults() {
-        let policy = ContextPolicy::from_capabilities(BackendCapabilities {
-            context_window_tokens: None,
-            max_output_tokens: None,
-        });
-        assert_eq!(policy.trim_threshold, 40);
-        assert_eq!(policy.tool_result_max_lines, 200);
-    }
-
-    #[test]
-    fn context_policy_small_context_uses_tight_limits() {
-        let policy = ContextPolicy::from_capabilities(BackendCapabilities {
-            context_window_tokens: Some(2048),
-            max_output_tokens: None,
-        });
-        assert_eq!(policy.trim_threshold, 12);
-        assert_eq!(policy.tool_result_max_lines, 40);
-    }
-
-    #[test]
-    fn context_policy_mid_context_uses_intermediate_limits() {
-        let policy = ContextPolicy::from_capabilities(BackendCapabilities {
-            context_window_tokens: Some(4096),
-            max_output_tokens: None,
-        });
-        assert_eq!(policy.trim_threshold, 20);
-        assert_eq!(policy.tool_result_max_lines, 80);
-    }
-
-    #[test]
-    fn context_policy_large_context_uses_defaults() {
-        let policy = ContextPolicy::from_capabilities(BackendCapabilities {
-            context_window_tokens: Some(32768),
-            max_output_tokens: None,
-        });
-        assert_eq!(policy.trim_threshold, 40);
-        assert_eq!(policy.tool_result_max_lines, 200);
     }
 
     // cap_tool_result_blocks tests
