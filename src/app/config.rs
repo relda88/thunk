@@ -122,6 +122,13 @@ fn validate_command_names(commands: &HashMap<String, CustomCommandDef>) -> Resul
     Ok(())
 }
 
+/// Per-project settings that customize runtime behavior for a specific codebase.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct ProjectConfig {
+    pub test_command: Option<String>,
+}
+
 /// Main configuration struct for the application
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -132,6 +139,7 @@ pub struct Config {
     pub llama_cpp: LlamaCppConfig,
     pub openai: OpenAiConfig,
     pub commands: HashMap<String, CustomCommandDef>,
+    pub project: ProjectConfig,
 }
 
 /// Application configuration for the app
@@ -415,6 +423,17 @@ mod tests {
     fn empty_commands_map_is_valid() {
         let cfg = parse_config("[app]\nname = \"thunk\"");
         assert!(cfg.commands.is_empty());
+    }
+
+    #[test]
+    fn project_test_command_deserializes_correctly() {
+        let cfg = parse_config(
+            r#"
+            [project]
+            test_command = "cargo test"
+        "#,
+        );
+        assert_eq!(cfg.project.test_command.as_deref(), Some("cargo test"));
     }
 
     #[test]

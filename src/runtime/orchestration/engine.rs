@@ -168,6 +168,11 @@ fn infer_post_tool_round_cause(results: &str) -> GenerationRoundCause {
 
 use super::super::investigation::tool_surface::{select_tool_surface, ToolSurface};
 
+struct PendingRuntimeCall {
+    input: ToolInput,
+    seeded_pre_generation: bool,
+}
+
 /// Extracts relative file-path tokens cited in a model answer.
 /// Returns only tokens that look like project source paths: relative,
 /// slash-separated, with a recognized file extension, no URL scheme, no `..`.
@@ -243,6 +248,10 @@ pub struct Runtime {
     /// Set when a tool round suspends; cleared by Approve or Reject.
     /// At most one pending action exists at any time.
     pending_action: Option<PendingAction>,
+    config: Config,
+    /// Queued runtime-owned tool call to execute at the start of the next run_turns invocation.
+    /// Set by handle_approve when a post-mutation follow-up (e.g. test run) is configured.
+    pending_runtime_call: Option<PendingRuntimeCall>,
 }
 
 impl Runtime {
@@ -266,6 +275,8 @@ impl Runtime {
             context_policy,
             project_snapshot_cache: ProjectStructureSnapshotCache::default(),
             pending_action: None,
+            config: config.clone(),
+            pending_runtime_call: None,
         }
     }
 
@@ -647,6 +658,27 @@ impl Runtime {
                     AnswerSource::ToolAssisted { rounds: 1 },
                     on_event,
                 );
+                if matches!(tool_name.as_str(), "edit_file" | "write_file") {
+                    let test_cmd = self.config.project.test_command.clone();
+                    if let Some(cmd) = test_cmd {
+                        let input = ToolInput::Shell { command: cmd };
+                        if let Ok(resolved) = resolve(&self.project_root, &input) {
+                            match self.registry.dispatch(resolved) {
+                                Ok(ToolRunResult::Approval(pending)) => {
+                                    self.pending_action = Some(pending.clone());
+                                    on_event(RuntimeEvent::ApprovalRequired(pending));
+                                }
+                                Ok(ToolRunResult::Immediate(output)) => {
+                                    self.invalidate_project_snapshot_if_needed(&output);
+                                    self.commit_tool_results(
+                                        tool_codec::format_tool_result("shell", &output),
+                                    );
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                }
             }
             Err(e) => {
                 on_event(RuntimeEvent::ToolCallFinished {
@@ -708,11 +740,6 @@ impl Runtime {
         start_in_post_read_answer_phase: bool,
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) {
-        struct PendingRuntimeCall {
-            input: ToolInput,
-            seeded_pre_generation: bool,
-        }
-
         #[derive(Clone, Copy)]
         enum AnswerPhaseKind {
             PostRead,
@@ -730,7 +757,7 @@ impl Runtime {
         let mut corrections = 0usize;
         let mut engine_local_escalation = EngineLocalEscalation::default();
         let mut last_call_key: Option<String> = None;
-        let mut pending_runtime_call: Option<PendingRuntimeCall> = None;
+        let mut pending_runtime_call: Option<PendingRuntimeCall> = self.pending_runtime_call.take();
         let mut search_budget = SearchBudget::new();
         let mut investigation = InvestigationState::new();
         let mut turn_perf = TurnPerformance::new(self.backend.capabilities().context_window_tokens);

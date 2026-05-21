@@ -35,3 +35,6 @@ args = { query = "{input}" }
 [commands.show]
 tool = "read_file"
 args = { path = "{input}" }
+
+[project]
+test_command = "cargo test"
