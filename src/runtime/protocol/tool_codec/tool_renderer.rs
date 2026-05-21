@@ -573,8 +573,10 @@ path: path/to/file.rs
 full file content
 [/write_file]
 
-Run a shell command in the project root (requires approval):
+To run a build or test command, use shell — never use search_code for this:
 [shell: cargo check]
+[shell: cargo test my_filter]
+[shell: cargo clippy]
 
 When you have enough information, respond directly in plain text with no tool tags."#
 }

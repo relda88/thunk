@@ -225,7 +225,8 @@ fn is_definition_only_usage_answer(text: &str) -> bool {
 /// Only two structural patterns are checked — no NLP, no heuristics.
 use super::super::investigation::prompt_analysis::{
     classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
-    requested_simple_edit, user_requested_mutation, DirectReadMode, RetrievalIntent,
+    requested_simple_edit, user_requested_execution, user_requested_mutation, DirectReadMode,
+    RetrievalIntent,
 };
 
 pub struct Runtime {
@@ -781,7 +782,7 @@ impl Runtime {
             })
             .unwrap_or(false);
         let mutation_allowed = original_user_prompt
-            .map(user_requested_mutation)
+            .map(|p| user_requested_mutation(p) || user_requested_execution(p))
             .unwrap_or(false);
         let simple_edit_request = original_user_prompt.and_then(requested_simple_edit);
         let tool_surface = original_user_prompt

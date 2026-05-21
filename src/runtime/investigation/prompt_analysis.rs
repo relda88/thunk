@@ -212,6 +212,16 @@ pub(crate) fn user_requested_mutation(text: &str) -> bool {
     })
 }
 
+pub(crate) fn user_requested_execution(text: &str) -> bool {
+    text.split(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | '?' | '!' | ';' | ':' | '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '/' | '\\'))
+        .any(|token| {
+            matches!(
+                token.to_ascii_lowercase().as_str(),
+                "run" | "execute" | "cargo" | "check" | "build" | "test" | "clippy"
+            )
+        })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimpleEditRequest {
     pub path: String,
