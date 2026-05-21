@@ -225,8 +225,8 @@ fn is_definition_only_usage_answer(text: &str) -> bool {
 /// Only two structural patterns are checked — no NLP, no heuristics.
 use super::super::investigation::prompt_analysis::{
     classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
-    requested_shell_command, requested_simple_edit, user_requested_execution,
-    user_requested_mutation, DirectReadMode, RetrievalIntent,
+    is_permitted_shell_command, requested_shell_command, requested_simple_edit,
+    user_requested_execution, user_requested_mutation, DirectReadMode, RetrievalIntent,
 };
 
 pub struct Runtime {
@@ -880,10 +880,21 @@ impl Runtime {
         let shell_request = original_user_prompt.and_then(requested_shell_command);
         if !investigation_required {
             if let Some(cmd) = shell_request.as_ref() {
-                pending_runtime_call = Some(PendingRuntimeCall {
-                    input: ToolInput::Shell { command: cmd.clone() },
-                    seeded_pre_generation: true,
-                });
+                if is_permitted_shell_command(cmd) {
+                    pending_runtime_call = Some(PendingRuntimeCall {
+                        input: ToolInput::Shell { command: cmd.clone() },
+                        seeded_pre_generation: true,
+                    });
+                } else {
+                    let first = cmd.split_whitespace().next().unwrap_or(cmd);
+                    on_event(RuntimeEvent::Failed {
+                        message: format!(
+                            "shell command '{}' is not permitted. Allowed: cargo",
+                            first
+                        ),
+                    });
+                    return;
+                }
             } else if let Some(edit) = simple_edit_request.as_ref() {
                 pending_runtime_call = Some(PendingRuntimeCall {
                     input: ToolInput::EditFile {

@@ -236,6 +236,11 @@ pub(crate) fn requested_shell_command(text: &str) -> Option<String> {
     None
 }
 
+pub(crate) fn is_permitted_shell_command(cmd: &str) -> bool {
+    let first_token = cmd.split_whitespace().next().unwrap_or("");
+    matches!(first_token, "cargo")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimpleEditRequest {
     pub path: String,
@@ -1250,5 +1255,26 @@ mod tests {
             requested_read_path("What does task_service.py and user_service.py do?").as_deref(),
             None
         );
+    }
+
+    #[test]
+    fn is_permitted_shell_command_allows_cargo() {
+        assert!(is_permitted_shell_command("cargo check"));
+        assert!(is_permitted_shell_command("cargo test my_filter"));
+        assert!(is_permitted_shell_command("cargo clippy"));
+        assert!(is_permitted_shell_command("cargo"));
+    }
+
+    #[test]
+    fn is_permitted_shell_command_rejects_unknown() {
+        assert!(!is_permitted_shell_command("npm install"));
+        assert!(!is_permitted_shell_command("make build"));
+        assert!(!is_permitted_shell_command("python main.py"));
+    }
+
+    #[test]
+    fn is_permitted_shell_command_rejects_empty() {
+        assert!(!is_permitted_shell_command(""));
+        assert!(!is_permitted_shell_command("   "));
     }
 }

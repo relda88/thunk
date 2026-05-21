@@ -509,6 +509,7 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
             if s.timed_out {
                 lines.push("[timed out after 60s]".to_string());
             }
+            lines.push("Analyze the output above and summarize what it means for the user's request. If exit is non-zero, identify the errors. If exit is 0, confirm what succeeded.".to_string());
             lines.join("\n")
         }
     }
@@ -705,6 +706,7 @@ mod tests {
         assert!(rendered.contains("stderr line"));
         assert!(rendered.contains("[output truncated: 9000 bytes total]"));
         assert!(rendered.contains("[timed out after 60s]"));
+        assert!(rendered.contains("Analyze the output above and summarize what it means for the user's request. If exit is non-zero, identify the errors. If exit is 0, confirm what succeeded."));
     }
 
     #[test]
