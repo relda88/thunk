@@ -225,8 +225,8 @@ fn is_definition_only_usage_answer(text: &str) -> bool {
 /// Only two structural patterns are checked — no NLP, no heuristics.
 use super::super::investigation::prompt_analysis::{
     classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
-    requested_simple_edit, user_requested_execution, user_requested_mutation, DirectReadMode,
-    RetrievalIntent,
+    requested_shell_command, requested_simple_edit, user_requested_execution,
+    user_requested_mutation, DirectReadMode, RetrievalIntent,
 };
 
 pub struct Runtime {
@@ -877,8 +877,14 @@ impl Runtime {
             "tool_surface_selected",
             &[("surface", tool_surface.as_str().into())],
         );
+        let shell_request = original_user_prompt.and_then(requested_shell_command);
         if !investigation_required {
-            if let Some(edit) = simple_edit_request.as_ref() {
+            if let Some(cmd) = shell_request.as_ref() {
+                pending_runtime_call = Some(PendingRuntimeCall {
+                    input: ToolInput::Shell { command: cmd.clone() },
+                    seeded_pre_generation: true,
+                });
+            } else if let Some(edit) = simple_edit_request.as_ref() {
                 pending_runtime_call = Some(PendingRuntimeCall {
                     input: ToolInput::EditFile {
                         path: edit.path.clone(),

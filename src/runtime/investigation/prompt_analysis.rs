@@ -222,6 +222,20 @@ pub(crate) fn user_requested_execution(text: &str) -> bool {
         })
 }
 
+pub(crate) fn requested_shell_command(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let prefixes = ["run ", "execute "];
+    for prefix in prefixes {
+        if let Some(rest) = lower.find(prefix).map(|i| &text[i + prefix.len()..]) {
+            let cmd = rest.trim().to_string();
+            if !cmd.is_empty() {
+                return Some(cmd);
+            }
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimpleEditRequest {
     pub path: String,
