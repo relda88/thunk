@@ -384,12 +384,11 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
 
 fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
     match event {
-        RuntimeEvent::ActivityChanged(activity) => state.set_status(activity.label()),
+        RuntimeEvent::ActivityChanged(activity) => state.set_status(&activity.label()),
         RuntimeEvent::AssistantMessageStarted => state.begin_assistant_message(),
         RuntimeEvent::AssistantMessageChunk(chunk) => state.append_assistant_chunk(&chunk),
         RuntimeEvent::AssistantMessageFinished => {}
         RuntimeEvent::ToolCallStarted { name } => {
-            state.set_status(&format!("tool: {name}"));
             state.add_tool_message(format!("tool: {name}"));
         }
         RuntimeEvent::ToolCallFinished { name, summary } => match summary {

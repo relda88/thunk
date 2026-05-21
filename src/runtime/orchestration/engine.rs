@@ -624,8 +624,11 @@ impl Runtime {
             }
         };
 
-        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools));
         let tool_name = pending.tool_name.clone();
+        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools {
+            tool: short_tool_name(&tool_name).to_string(),
+            detail: None,
+        }));
 
         match self.registry.execute_approved(&pending) {
             Ok(output) => {
@@ -978,6 +981,7 @@ impl Runtime {
                         &mut self.conversation,
                         effective_surface,
                         project_snapshot_hint.as_deref(),
+                        investigation_mode,
                         &mut perf_on_event,
                     ) {
                         Ok(Some(r)) => r,
@@ -1555,7 +1559,7 @@ impl Runtime {
                 }
             }
 
-            on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools));
+            on_event(RuntimeEvent::ActivityChanged(tool_input_activity(calls.first())));
             let t_tool_start = if turn_perf.is_enabled() {
                 Some(std::time::Instant::now())
             } else {
@@ -1742,6 +1746,33 @@ impl Runtime {
     ) -> std::io::Result<ProjectStructureSnapshot> {
         self.get_or_build_project_snapshot().cloned()
     }
+}
+
+fn short_tool_name(tool_name: &str) -> &str {
+    match tool_name {
+        "read_file" => "read",
+        "list_dir" => "list",
+        "search_code" => "search",
+        "edit_file" => "edit",
+        "write_file" => "write",
+        "shell" => "shell",
+        "git_status" | "git_diff" | "git_log" => "git",
+        other => other,
+    }
+}
+
+fn tool_input_activity(input: Option<&crate::tools::ToolInput>) -> Activity {
+    let (tool, detail) = match input {
+        Some(crate::tools::ToolInput::ReadFile { path }) => ("read".to_string(), Some(path.clone())),
+        Some(crate::tools::ToolInput::ListDir { path }) => ("list".to_string(), Some(path.clone())),
+        Some(crate::tools::ToolInput::SearchCode { query, .. }) => ("search".to_string(), Some(query.clone())),
+        Some(crate::tools::ToolInput::EditFile { path, .. }) => ("edit".to_string(), Some(path.clone())),
+        Some(crate::tools::ToolInput::WriteFile { path, .. }) => ("write".to_string(), Some(path.clone())),
+        Some(crate::tools::ToolInput::Shell { command }) => ("shell".to_string(), Some(command.clone())),
+        Some(crate::tools::ToolInput::GitStatus | crate::tools::ToolInput::GitDiff | crate::tools::ToolInput::GitLog) => ("git".to_string(), None),
+        None => ("tool".to_string(), None),
+    };
+    Activity::ExecutingTools { tool, detail }
 }
 
 /// Caps tool result blocks in an accumulated results string to `max_lines` content lines each.

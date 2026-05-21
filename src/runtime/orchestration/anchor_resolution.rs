@@ -28,7 +28,10 @@ impl Runtime {
         let mut disallowed_tool_attempts = 0usize;
         let mut weak_search_query_attempts = 0usize;
 
-        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools));
+        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools {
+            tool: "read".to_string(),
+            detail: Some(path.clone()),
+        }));
         match run_tool_round(
             &self.project_root,
             &self.registry,
@@ -112,7 +115,10 @@ impl Runtime {
         };
         let name = input.tool_name().to_string();
 
-        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools));
+        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools {
+            tool: "search".to_string(),
+            detail: Some(query.clone()),
+        }));
         on_event(RuntimeEvent::ToolCallStarted { name: name.clone() });
 
         let resolved = match resolve(&self.project_root, &input) {

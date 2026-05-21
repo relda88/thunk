@@ -1,7 +1,7 @@
 use crate::llm::backend::BackendTimingStage;
 use crate::tools::PendingAction;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Activity {
     Idle,
     Processing,
@@ -9,23 +9,27 @@ pub enum Activity {
     CreatingContext,
     Tokenizing,
     Prefilling,
-    Generating,
+    Generating { mode: Option<String> },
     Responding,
-    ExecutingTools,
+    ExecutingTools { tool: String, detail: Option<String> },
+    AwaitingApproval { tool: String },
 }
 
 impl Activity {
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Idle => "ready",
-            Self::Processing => "processing",
-            Self::LoadingModel => "loading model",
-            Self::CreatingContext => "creating context",
-            Self::Tokenizing => "tokenizing",
-            Self::Prefilling => "prefilling",
-            Self::Generating => "generating",
-            Self::Responding => "responding",
-            Self::ExecutingTools => "running tools",
+            Self::Idle => "ready".to_string(),
+            Self::Processing => "processing...".to_string(),
+            Self::LoadingModel => "loading model...".to_string(),
+            Self::CreatingContext => "creating context...".to_string(),
+            Self::Tokenizing => "tokenizing...".to_string(),
+            Self::Prefilling => "prefilling...".to_string(),
+            Self::Generating { mode: Some(m) } => format!("{}...", m),
+            Self::Generating { mode: None } => "generating...".to_string(),
+            Self::Responding => "responding".to_string(),
+            Self::ExecutingTools { tool, detail: Some(d) } => format!("{}: {}", tool, d),
+            Self::ExecutingTools { tool, detail: None } => format!("{}...", tool),
+            Self::AwaitingApproval { tool } => format!("approval: {}", tool),
         }
     }
 }

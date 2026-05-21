@@ -2,6 +2,7 @@ use crate::app::Result;
 use crate::llm::backend::{BackendEvent, BackendStatus, GenerateRequest, Message, ModelBackend};
 
 use super::super::conversation::Conversation;
+use super::super::investigation::investigation::InvestigationMode;
 use super::super::investigation::tool_surface::ToolSurface;
 use super::super::protocol::prompt;
 use super::super::types::{Activity, RuntimeEvent};
@@ -15,6 +16,7 @@ pub(super) fn run_generate_turn(
     conversation: &mut Conversation,
     tool_surface: ToolSurface,
     project_snapshot_hint: Option<&str>,
+    investigation_mode: InvestigationMode,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
     let mut messages = conversation.snapshot();
@@ -32,7 +34,7 @@ pub(super) fn run_generate_turn(
 
     let result = backend.generate(request, &mut |event| match event {
         BackendEvent::StatusChanged(status) => {
-            on_event(RuntimeEvent::ActivityChanged(map_backend_status(status)));
+            on_event(RuntimeEvent::ActivityChanged(map_backend_status(status, investigation_mode)));
         }
         BackendEvent::TextDelta(chunk) => {
             response.push_str(&chunk);
@@ -64,12 +66,17 @@ pub(super) fn emit_visible_assistant_message(text: &str, on_event: &mut dyn FnMu
     on_event(RuntimeEvent::AssistantMessageFinished);
 }
 
-fn map_backend_status(status: BackendStatus) -> Activity {
+fn map_backend_status(status: BackendStatus, investigation_mode: InvestigationMode) -> Activity {
     match status {
         BackendStatus::LoadingModel => Activity::LoadingModel,
         BackendStatus::CreatingContext => Activity::CreatingContext,
         BackendStatus::Tokenizing => Activity::Tokenizing,
         BackendStatus::Prefilling => Activity::Prefilling,
-        BackendStatus::Generating => Activity::Generating,
+        BackendStatus::Generating => Activity::Generating {
+            mode: Some(match investigation_mode {
+                InvestigationMode::General => "Synthesizing answer".to_string(),
+                _ => "Investigating".to_string(),
+            }),
+        },
     }
 }

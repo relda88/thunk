@@ -175,9 +175,9 @@ pub(super) fn run_generation(
     on_event(BackendEvent::StatusChanged(BackendStatus::Prefilling));
     let t_prefill_start = Instant::now();
 
-    if tokens.len() <= loaded.last_prefill_token_count {
-        loaded.ctx.clear_kv_cache();
-        loaded.last_prefill_token_count = 0;
+    if tokens.len() < loaded.last_prefill_token_count {
+        loaded.ctx.clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), None).ok();
+        loaded.last_prefill_token_count = tokens.len();
     }
     let new_start = loaded.last_prefill_token_count;
 
@@ -238,6 +238,8 @@ pub(super) fn run_generation(
         loaded.ctx.decode(&mut batch).map_err(map_llama_error)?;
     }
 
+    loaded.ctx.clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), Some(current_pos as u32)).ok();
+    loaded.last_prefill_token_count = tokens.len();
     on_event(BackendEvent::Timing {
         stage: BackendTimingStage::GenerationDone,
         elapsed_ms: t_gen_start.elapsed().as_millis() as u64,

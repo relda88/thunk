@@ -166,7 +166,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
 /// Labels for events that are not already handled with timing in handle().
 fn event_label(event: &RuntimeEvent) -> Option<String> {
     match event {
-        RuntimeEvent::ActivityChanged(a) => Some(format!("activity: {}", a.label())),
+        RuntimeEvent::ActivityChanged(a) => Some(format!("activity: {}", a.clone().label())),
         RuntimeEvent::AnswerReady(source) => Some(format!("answer ready: {source:?}")),
         RuntimeEvent::Failed { message } => Some(format!("failed: {message}")),
         RuntimeEvent::ApprovalRequired(p) => Some(format!("approval required: {}", p.summary)),
