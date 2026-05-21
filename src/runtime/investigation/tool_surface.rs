@@ -15,7 +15,7 @@ pub(crate) enum ToolSurface {
     /// Used for answer-phase generations after evidence is accepted or a read completes,
     /// to prevent the model from attempting tool calls and triggering a correction round.
     AnswerOnly,
-    /// Read tools plus mutation tools (edit_file, write_file) visible in the per-turn hint.
+    /// Read tools plus approval-required tools (edit_file, write_file, shell) visible in the per-turn hint.
     /// Selected when the prompt requests a mutation so the model knows those tools are
     /// available this turn. Enforcement for mutation calls remains the same as RetrievalFirst:
     /// they bypass surface checks via the approval path.
@@ -57,9 +57,9 @@ const GIT_READ_ONLY_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::GitLog,
 ];
 const ANSWER_ONLY_TOOLS: &[SurfaceTool] = &[];
-// MutationEnabled has the same read tools as RetrievalFirst. Mutation tools (edit_file,
-// write_file) are not SurfaceTool variants — they bypass surface enforcement and are
-// exposed to the model only via the mutation_tool_names() hint extension.
+// MutationEnabled has the same read tools as RetrievalFirst. Approval-required tools
+// (edit_file, write_file, shell) are not SurfaceTool variants — they bypass surface
+// enforcement and are exposed to the model only via the mutation_tool_names() hint extension.
 const MUTATION_ENABLED_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::SearchCode,
     SurfaceTool::ReadFile,
@@ -97,7 +97,9 @@ impl SurfaceTool {
             ToolInput::GitStatus => Some(Self::GitStatus),
             ToolInput::GitDiff => Some(Self::GitDiff),
             ToolInput::GitLog => Some(Self::GitLog),
-            ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } => None,
+            ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } | ToolInput::Shell { .. } => {
+                None
+            }
         }
     }
 
@@ -137,7 +139,7 @@ impl ToolSurface {
     /// when this surface is active. Empty for all surfaces except MutationEnabled.
     pub(crate) fn mutation_tool_names(self) -> &'static [&'static str] {
         match self {
-            Self::MutationEnabled => &["edit_file", "write_file"],
+            Self::MutationEnabled => &["edit_file", "write_file", "shell"],
             _ => &[],
         }
     }

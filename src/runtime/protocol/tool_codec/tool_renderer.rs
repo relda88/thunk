@@ -84,6 +84,15 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
             let verb = if w.created { "created" } else { "overwrote" };
             format!("{} {} ({} bytes)", verb, w.path, w.bytes_written)
         }
+        ToolOutput::Shell(s) => {
+            if s.timed_out {
+                format!("shell timed out: {}", s.command)
+            } else if s.truncated {
+                format!("shell exit {}: {} (truncated)", s.exit_code, s.command)
+            } else {
+                format!("shell exit {}: {}", s.exit_code, s.command)
+            }
+        }
     }
 }
 
@@ -486,6 +495,22 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
             let verb = if w.created { "created" } else { "overwrote" };
             format!("{} {} ({} bytes)", verb, w.path, w.bytes_written)
         }
+        ToolOutput::Shell(s) => {
+            let mut lines = vec![
+                format!("command: {}", s.command),
+                format!("exit: {}", s.exit_code),
+            ];
+            if !s.stdout_stderr.is_empty() {
+                lines.push(s.stdout_stderr.clone());
+            }
+            if s.truncated {
+                lines.push(format!("[output truncated: {} bytes total]", s.total_bytes));
+            }
+            if s.timed_out {
+                lines.push("[timed out after 60s]".to_string());
+            }
+            lines.join("\n")
+        }
     }
 }
 
@@ -547,6 +572,9 @@ path: path/to/file.rs
 ---content---
 full file content
 [/write_file]
+
+Run a shell command in the project root (requires approval):
+[shell: cargo check]
 
 When you have enough information, respond directly in plain text with no tool tags."#
 }
@@ -648,6 +676,33 @@ mod tests {
         let rendered = format_tool_result("git_log", &output);
         assert!(rendered.contains("[showing 1 recent commits; output truncated]"));
         assert!(rendered.contains("0123456 2026-04-22 thunk - add git log"));
+    }
+
+    #[test]
+    fn render_shell_output() {
+        use crate::tools::types::ShellOutput;
+        use crate::tools::ToolOutput;
+
+        let output = ToolOutput::Shell(ShellOutput {
+            command: "cargo check".into(),
+            stdout_stderr: "stdout line\nstderr line".into(),
+            exit_code: 0,
+            truncated: true,
+            total_bytes: 9000,
+            timed_out: true,
+        });
+
+        assert_eq!(
+            render_compact_summary(&output),
+            "shell timed out: cargo check"
+        );
+        let rendered = format_tool_result("shell", &output);
+        assert!(rendered.contains("command: cargo check"));
+        assert!(rendered.contains("exit: 0"));
+        assert!(rendered.contains("stdout line"));
+        assert!(rendered.contains("stderr line"));
+        assert!(rendered.contains("[output truncated: 9000 bytes total]"));
+        assert!(rendered.contains("[timed out after 60s]"));
     }
 
     #[test]
@@ -1077,6 +1132,7 @@ mod tests {
         assert!(instructions.contains("[write_file:"));
         assert!(instructions.contains("[write_file]"));
         assert!(instructions.contains("[/write_file]"));
+        assert!(instructions.contains("[shell:"));
         assert!(instructions.contains("---search---"));
         assert!(instructions.contains("---replace---"));
         assert!(instructions.contains("---content---"));

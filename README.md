@@ -184,4 +184,4 @@ Configuration lives in `config.toml`. See `config.toml.example` for all availabl
 | [Tools](docs/tools.md) | Current tool contract, registry model, and built-in tool behavior |
 | [Sessions](docs/sessions.md) | Session storage, restore behavior, and persistence limits |
 | [Setup](docs/setup.md) | Requirements, run/test commands, and config basics |
-| [Benchmarks](docs/benchmarks.md) | Performance notes and measurements |
+| [Benchmarks](docs/benchmarks/README.md) | Performance notes and measurements |

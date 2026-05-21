@@ -9,6 +9,7 @@ use super::git_log::GitLogTool;
 use super::git_status::GitStatusTool;
 use super::pending::PendingAction;
 use super::search_code::SearchCodeTool;
+use super::shell::ShellTool;
 use super::types::{ExecutionKind, ToolError, ToolOutput, ToolRunResult, ToolSpec};
 use super::write_file::WriteFileTool;
 use super::Tool;
@@ -41,7 +42,8 @@ impl ToolRegistry {
         self.register(GitDiffTool::new(root.clone()));
         self.register(GitLogTool::new(root.clone()));
         self.register(EditFileTool::new(root.clone()));
-        self.register(WriteFileTool::new(root));
+        self.register(WriteFileTool::new(root.clone()));
+        self.register(ShellTool::new(root));
         self
     }
 
@@ -172,9 +174,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(EditFileTool::new(PathBuf::from(".")));
         registry.register(WriteFileTool::new(PathBuf::from(".")));
+        registry.register(ShellTool::new(PathBuf::from(".")));
 
         assert!(registry.is_approval_required("edit_file"));
         assert!(registry.is_approval_required("write_file"));
+        assert!(registry.is_approval_required("shell"));
     }
 
     #[test]

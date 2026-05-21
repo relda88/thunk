@@ -599,7 +599,7 @@ fn mutation_turn_receives_mutation_enabled_surface_hint() {
         first.messages.iter().any(|m| {
             m.role == Role::System
                 && m.content
-                    == "Active tool surface: MutationEnabled. Available this turn: search_code, read_file, list_dir, edit_file, write_file."
+                    == "Active tool surface: MutationEnabled. Available this turn: search_code, read_file, list_dir, edit_file, write_file, shell."
         }),
         "mutation-intent turns must expose MutationEnabled hint with all tool names: {:?}",
         first.messages
@@ -631,7 +631,7 @@ fn select_tool_surface_returns_mutation_enabled_for_mutation_prompts() {
 }
 
 #[test]
-fn mutation_enabled_hint_includes_edit_and_write_file() {
+fn mutation_enabled_hint_includes_approval_required_tools() {
     let hint = prompt::render_tool_surface_hint(
         ToolSurface::MutationEnabled.as_str(),
         ToolSurface::MutationEnabled.allowed_tool_names().chain(
@@ -652,6 +652,10 @@ fn mutation_enabled_hint_includes_edit_and_write_file() {
     assert!(
         hint.contains("write_file"),
         "MutationEnabled hint must list write_file: {hint}"
+    );
+    assert!(
+        hint.contains("shell"),
+        "MutationEnabled hint must list shell: {hint}"
     );
     assert!(
         hint.contains("search_code"),

@@ -68,7 +68,7 @@ fn code_fence_ranges(text: &str) -> Vec<(usize, usize)> {
 }
 
 /// Scans for single-line bracket calls: [read_file: path], [list_dir: path],
-/// [search_code: query], [write_file: path].
+/// [search_code: query], [write_file: path], [shell: cargo check].
 /// The closing ] must appear on the same line as the opening [.
 /// Note: [write_file: path] creates an empty file. Files with content use the block form.
 fn scan_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
@@ -78,6 +78,7 @@ fn scan_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
         ("list_dir", "[list_dir:"),
         ("search_code", "[search_code:"),
         ("write_file", "[write_file:"),
+        ("shell", "[shell:"),
     ];
 
     for (tool_name, prefix) in named_tools {
@@ -160,6 +161,9 @@ fn make_bracket_input(tool_name: &str, arg: &str) -> Option<ToolInput> {
                 content: String::new(),
             })
         }
+        "shell" if !arg.is_empty() => Some(ToolInput::Shell {
+            command: arg.to_string(),
+        }),
         _ => None,
     }
 }
@@ -569,6 +573,22 @@ mod tests {
             matches!(&calls[0], ToolInput::SearchCode { query, path: None }
             if query == "fn main")
         );
+    }
+
+    #[test]
+    fn parses_shell_call() {
+        let text = "[shell: cargo test my_filter]";
+        let calls = parse_all_tool_inputs(text);
+        assert_eq!(calls.len(), 1);
+        assert!(matches!(&calls[0], ToolInput::Shell { command }
+            if command == "cargo test my_filter"));
+    }
+
+    #[test]
+    fn shell_call_inside_code_fence_is_not_executed() {
+        let text = "Example:\n```\n[shell: cargo check]\n```";
+        let calls = parse_all_tool_inputs(text);
+        assert!(calls.is_empty());
     }
 
     #[test]

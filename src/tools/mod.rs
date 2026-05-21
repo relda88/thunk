@@ -7,6 +7,7 @@ mod pending;
 mod read_file;
 mod registry;
 mod search_code;
+mod shell;
 pub mod types;
 mod write_file;
 

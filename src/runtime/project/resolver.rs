@@ -92,6 +92,9 @@ pub fn resolve(
             search: search.clone(),
             replace: replace.clone(),
         }),
+        ToolInput::Shell { command } => Ok(ResolvedToolInput::Shell {
+            command: command.clone(),
+        }),
         ToolInput::GitStatus => Ok(ResolvedToolInput::GitStatus),
         ToolInput::GitDiff => Ok(ResolvedToolInput::GitDiff { path: None }),
         ToolInput::GitLog => Ok(ResolvedToolInput::GitLog),
@@ -147,10 +150,12 @@ fn find_unique_file_in_project(root: &Path, filename: &str) -> Option<PathBuf> {
 
 fn resolve_read_path(root: &ProjectRoot, raw: &str) -> Result<ProjectPath, PathResolutionError> {
     let raw_path = Path::new(raw);
-    let candidate = if !raw.contains('/') && !raw.contains('\\') && raw_path.extension().is_some()
-    {
-        find_unique_file_in_project(root.path(), raw)
-            .ok_or_else(|| PathResolutionError::NotFound { raw: raw.to_string() })?
+    let candidate = if !raw.contains('/') && !raw.contains('\\') && raw_path.extension().is_some() {
+        find_unique_file_in_project(root.path(), raw).ok_or_else(|| {
+            PathResolutionError::NotFound {
+                raw: raw.to_string(),
+            }
+        })?
     } else if raw_path.is_absolute() {
         raw_path.to_path_buf()
     } else {

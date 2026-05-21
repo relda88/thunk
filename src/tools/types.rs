@@ -40,6 +40,10 @@ pub enum ToolInput {
         /// Full content to write.
         content: String,
     },
+    Shell {
+        /// The command to run, e.g. "cargo check" or "cargo test my_test"
+        command: String,
+    },
 }
 
 impl ToolInput {
@@ -55,6 +59,7 @@ impl ToolInput {
             ToolInput::GitLog => "git_log",
             ToolInput::EditFile { .. } => "edit_file",
             ToolInput::WriteFile { .. } => "write_file",
+            ToolInput::Shell { .. } => "shell",
         }
     }
 }
@@ -73,6 +78,7 @@ pub enum ToolOutput {
     GitLog(GitLogOutput),
     EditFile(EditFileOutput),
     WriteFile(WriteFileOutput),
+    Shell(ShellOutput),
 }
 
 #[derive(Debug, Clone)]
@@ -179,6 +185,16 @@ pub struct WriteFileOutput {
     pub bytes_written: usize,
     /// True when the file was newly created; false when an existing file was overwritten.
     pub created: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShellOutput {
+    pub command: String,
+    pub stdout_stderr: String,
+    pub exit_code: i32,
+    pub truncated: bool,
+    pub total_bytes: usize,
+    pub timed_out: bool,
 }
 
 // Run result

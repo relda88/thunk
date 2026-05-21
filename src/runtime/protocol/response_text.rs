@@ -84,8 +84,6 @@ pub(crate) const TURN_COMPLETE_ANSWER_ONLY: &str =
     "[runtime:correction] The file was already read this turn. \
      Do not call more tools. Provide your final answer now based on what was read.";
 
-
-
 /// Injected when the question contains a code identifier but the model attempts a Direct answer
 /// without any investigation. Fires at most once per turn (see direct_answer_correction_issued).
 pub(crate) const SEARCH_BEFORE_ANSWERING: &str =
@@ -94,7 +92,7 @@ pub(crate) const SEARCH_BEFORE_ANSWERING: &str =
 
 pub(crate)const READ_ONLY_TOOL_POLICY_ERROR: &str =
     "mutating tools are not allowed for this read-only informational request. \
-     Do not call write_file or edit_file unless the user explicitly asks to create, write, edit, change, update, or modify a file.";
+     Do not call write_file, edit_file, or shell unless the user explicitly asks to create, write, edit, change, update, modify, or run a command.";
 
 pub(crate) const READ_REQUEST_TOOL_REQUIRED: &str =
     "[runtime:correction] The user asked to read a specific file. \
@@ -160,7 +158,7 @@ pub(crate) fn surface_policy_correction(surface: ToolSurface) -> &'static str {
             "[runtime:correction] No tools are available. Provide your final answer now."
         }
         ToolSurface::MutationEnabled => {
-            "[runtime:correction] This turn allows retrieval tools and mutation tools: search_code, read_file, list_dir, edit_file, write_file. Git tools are not available."
+            "[runtime:correction] This turn allows retrieval tools and mutation tools: search_code, read_file, list_dir, edit_file, write_file, shell. Git tools are not available."
         }
     }
 }
@@ -224,6 +222,7 @@ pub(crate) fn rejection_final_answer(tool_name: &str) -> &'static str {
     match tool_name {
         "write_file" => "Canceled. No file was created or changed.",
         "edit_file" => "Canceled. No file was changed.",
+        "shell" => "Canceled. No command was run.",
         _ => "Canceled. No action was taken.",
     }
 }

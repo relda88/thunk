@@ -3,9 +3,7 @@ use std::path::Path;
 
 use crate::app::config::Config;
 use crate::llm::backend::{ModelBackend, Role};
-use crate::tools::{
-    PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
-};
+use crate::tools::{PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult};
 
 use super::super::conversation::Conversation;
 use super::super::investigation::anchors::{
@@ -48,7 +46,6 @@ const MAX_CORRECTIONS: usize = 1;
 /// prevent unbounded InfoMessage output from long or tool-heavy sessions.
 const MAX_HISTORY_MESSAGES: usize = 10;
 const MAX_MESSAGE_CHARS: usize = 200;
-
 
 /// Explicit allowlist of tools that slash commands may invoke via the runtime.
 /// All command-to-registry dispatch passes through this type — no command handler
@@ -128,7 +125,6 @@ fn path_scope_looks_like_file(scope: &str) -> bool {
         .and_then(|name| name.to_str())
         .is_some_and(|name| name.contains('.'))
 }
-
 
 fn estimate_generation_prompt_chars(
     conversation: &Conversation,
@@ -303,14 +299,13 @@ impl Runtime {
             self.anchors.record_successful_read(&output);
         }
         if let Some(query) = last_search_query {
-            let output = crate::tools::ToolOutput::SearchResults(
-                crate::tools::types::SearchResultsOutput {
+            let output =
+                crate::tools::ToolOutput::SearchResults(crate::tools::types::SearchResultsOutput {
                     query: query.clone(),
                     matches: vec![],
                     total_matches: 0,
                     truncated: false,
-                },
-            );
+                });
             self.anchors
                 .record_successful_search(&output, query, last_search_scope);
         }
@@ -435,7 +430,10 @@ impl Runtime {
     }
 
     fn invalidate_project_snapshot_if_needed(&mut self, output: &ToolOutput) {
-        if matches!(output, ToolOutput::WriteFile(_) | ToolOutput::EditFile(_)) {
+        if matches!(
+            output,
+            ToolOutput::WriteFile(_) | ToolOutput::EditFile(_) | ToolOutput::Shell(_)
+        ) {
             self.invalidate_project_snapshot();
         }
     }
@@ -940,50 +938,51 @@ impl Runtime {
 
             turn_perf.start_round(next_round_label, next_round_cause, prompt_chars, on_event);
 
-            let (calls, response, seeded_pre_generation) =
-                if let Some(pending) = pending_runtime_call.take() {
-                    (vec![pending.input], None, pending.seeded_pre_generation)
-                } else {
-                    let response = {
-                        let turn_perf = &mut turn_perf;
-                        let mut perf_on_event = |event| {
-                            if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
-                                turn_perf.record_backend_timing(*stage, *elapsed_ms);
-                            }
-                            if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
-                                turn_perf.record_token_counts(*prompt, *completion);
-                            }
-                            on_event(event);
-                        };
-
-                        match run_generate_turn(
-                            self.backend.as_mut(),
-                            &mut self.conversation,
-                            effective_surface,
-                            project_snapshot_hint.as_deref(),
-                            &mut perf_on_event,
-                        ) {
-                            Ok(Some(r)) => r,
-                            Ok(None) => {
-                                on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
-                                on_event(RuntimeEvent::Failed {
-                                    message: format!("{} returned no output.", self.backend.name()),
-                                });
-                                finish_turn!();
-                            }
-                            Err(e) => {
-                                on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
-                                on_event(RuntimeEvent::Failed {
-                                    message: e.to_string(),
-                                });
-                                finish_turn!();
-                            }
+            let (calls, response, seeded_pre_generation) = if let Some(pending) =
+                pending_runtime_call.take()
+            {
+                (vec![pending.input], None, pending.seeded_pre_generation)
+            } else {
+                let response = {
+                    let turn_perf = &mut turn_perf;
+                    let mut perf_on_event = |event| {
+                        if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
+                            turn_perf.record_backend_timing(*stage, *elapsed_ms);
                         }
+                        if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
+                            turn_perf.record_token_counts(*prompt, *completion);
+                        }
+                        on_event(event);
                     };
 
-                    let calls = tool_codec::parse_all_tool_inputs(&response);
-                    (calls, Some(response), false)
+                    match run_generate_turn(
+                        self.backend.as_mut(),
+                        &mut self.conversation,
+                        effective_surface,
+                        project_snapshot_hint.as_deref(),
+                        &mut perf_on_event,
+                    ) {
+                        Ok(Some(r)) => r,
+                        Ok(None) => {
+                            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                            on_event(RuntimeEvent::Failed {
+                                message: format!("{} returned no output.", self.backend.name()),
+                            });
+                            finish_turn!();
+                        }
+                        Err(e) => {
+                            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                            on_event(RuntimeEvent::Failed {
+                                message: e.to_string(),
+                            });
+                            finish_turn!();
+                        }
+                    }
                 };
+
+                let calls = tool_codec::parse_all_tool_inputs(&response);
+                (calls, Some(response), false)
+            };
 
             if let Some(phase) = answer_phase {
                 if !calls.is_empty() && response.is_some() {
@@ -1444,9 +1443,8 @@ impl Runtime {
                         };
                         let can_dispatch = !answer_guard_retry_entered
                             && !investigation.evidence_ready()
-                            && investigation.is_search_candidate_path(
-                                &normalize_evidence_path(bad_path),
-                            )
+                            && investigation
+                                .is_search_candidate_path(&normalize_evidence_path(bad_path))
                             && investigation.candidate_reads_count()
                                 < MAX_CANDIDATE_READS_PER_INVESTIGATION
                             && reads_this_turn.len() < MAX_READS_PER_TURN;
@@ -1454,7 +1452,9 @@ impl Runtime {
                             answer_guard_retry_entered = true;
                             self.conversation.discard_last_if_assistant();
                             pending_runtime_call = Some(PendingRuntimeCall {
-                                input: ToolInput::ReadFile { path: bad_path.clone() },
+                                input: ToolInput::ReadFile {
+                                    path: bad_path.clone(),
+                                },
                                 seeded_pre_generation: false,
                             });
                             next_round_label = GenerationRoundLabel::PostTool;
@@ -1470,19 +1470,14 @@ impl Runtime {
                                     ("path", bad_path.clone()),
                                     ("reads_count", reads_this_turn.len().to_string()),
                                     ("reads", reads_list.clone()),
-                                    (
-                                        "evidence_ready",
-                                        investigation.evidence_ready().to_string(),
-                                    ),
+                                    ("evidence_ready", investigation.evidence_ready().to_string()),
                                     ("retry_available", "true".to_string()),
                                     ("action", "retry".to_string()),
                                 ],
                             );
                             self.conversation.discard_last_if_assistant();
-                            self.conversation.push_user(answer_guard_retry_constraint(
-                                bad_path,
-                                &reads_list,
-                            ));
+                            self.conversation
+                                .push_user(answer_guard_retry_constraint(bad_path, &reads_list));
                             next_round_label = GenerationRoundLabel::PostEvidenceRetry;
                             next_round_cause = GenerationRoundCause::Recovery;
                             continue;
@@ -3459,8 +3454,8 @@ mod tests {
             vec![
                 "[search_code: run_turns]",
                 "[read_file: src/a.rs]",
-                "run_turns is in src/b.rs.",    // guard rejects, correction injected
-                "run_turns is in src/a.rs.",    // cites only the read file, admitted
+                "run_turns is in src/b.rs.", // guard rejects, correction injected
+                "run_turns is in src/a.rs.", // cites only the read file, admitted
             ],
             tmp.path(),
         );
@@ -3541,8 +3536,7 @@ mod tests {
         let snapshot = rt.messages_snapshot();
         assert!(
             snapshot.iter().any(|m| {
-                m.content.contains("[runtime:correction]")
-                    && m.content.contains("src/unrelated.rs")
+                m.content.contains("[runtime:correction]") && m.content.contains("src/unrelated.rs")
             }),
             "correction must name the cited non-candidate path: {snapshot:?}"
         );

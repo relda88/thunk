@@ -99,13 +99,14 @@ fn call_fingerprint(input: &ToolInput) -> String {
         ToolInput::WriteFile { path, content } => {
             format!("write_file\x00{path}\x00{content}")
         }
+        ToolInput::Shell { command } => format!("shell\x00{command}"),
     }
 }
 
 fn is_mutating_tool(input: &ToolInput) -> bool {
     matches!(
         input,
-        ToolInput::EditFile { .. } | ToolInput::WriteFile { .. }
+        ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } | ToolInput::Shell { .. }
     )
 }
 
@@ -785,8 +786,12 @@ pub(super) fn run_tool_round(
                     } else {
                         ReadClassification::Candidate
                     };
-                    let recovery =
-                        investigation.record_read_result(&output, investigation_mode, classification, on_event);
+                    let recovery = investigation.record_read_result(
+                        &output,
+                        investigation_mode,
+                        classification,
+                        on_event,
+                    );
                     if let Some(requested) = requested_read_path {
                         if let Some(rp) = read_path.as_deref() {
                             if normalize_evidence_path(rp) == normalize_evidence_path(requested) {

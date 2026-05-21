@@ -30,6 +30,9 @@ pub enum ResolvedToolInput {
         search: String,
         replace: String,
     },
+    Shell {
+        command: String,
+    },
     GitStatus,
     GitDiff {
         path: Option<ProjectPath>,
@@ -45,6 +48,7 @@ impl ResolvedToolInput {
             Self::SearchCode { .. } => "search_code",
             Self::WriteFile { .. } => "write_file",
             Self::EditFile { .. } => "edit_file",
+            Self::Shell { .. } => "shell",
             Self::GitStatus => "git_status",
             Self::GitDiff { .. } => "git_diff",
             Self::GitLog => "git_log",
@@ -82,6 +86,7 @@ impl From<ResolvedToolInput> for ToolInput {
                 search,
                 replace,
             },
+            ResolvedToolInput::Shell { command } => ToolInput::Shell { command },
             ResolvedToolInput::GitStatus => ToolInput::GitStatus,
             // The legacy `ToolInput::GitDiff` carries no optional path yet, so this
             // temporary adapter cannot forward a resolved path until the later tool
