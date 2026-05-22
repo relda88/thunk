@@ -77,6 +77,15 @@ fn handle_key_event(
         (KeyCode::Right, _) => state.cursor_right(),
         (KeyCode::Home, _) => state.cursor_home(),
         (KeyCode::End, _) => state.cursor_end(),
+        (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+            if let Some(prompt) = &state.last_prompt {
+                let path = std::env::temp_dir().join("thunk_last_prompt.txt");
+                let _ = std::fs::write(&path, prompt);
+                state.set_status(&format!("prompt dumped to {}", path.display()));
+            } else {
+                state.set_status("no prompt captured yet");
+            }
+        }
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }
@@ -405,16 +414,22 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             state.set_status("error");
             state.add_system_message(message);
         }
-        RuntimeEvent::ApprovalRequired(pending) => {
+        RuntimeEvent::ApprovalRequired { pending, evidence } => {
+            let evidence_str = if evidence.is_empty() {
+                String::new()
+            } else {
+                format!("\nEvidence: {}", evidence.join(" | "))
+            };
             state.add_system_message(format!(
-                "[approval required] {} — type /approve to confirm or /reject to cancel",
-                pending.summary
+                "[approval required] {}{} — type /approve to confirm or /reject to cancel",
+                pending.summary, evidence_str
             ));
             state.set_status("awaiting approval");
         }
         RuntimeEvent::InfoMessage(text) => {
             state.add_system_message(summarize_command_output(&text))
         }
+        RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
         RuntimeEvent::BackendTokenCounts { .. } => {}

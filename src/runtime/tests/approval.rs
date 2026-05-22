@@ -69,7 +69,7 @@ fn reject_uses_runtime_cancellation_even_if_model_would_claim_success() {
     assert!(
         submit_events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(_))),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. })),
         "write_file must request approval"
     );
 
@@ -269,7 +269,7 @@ fn edit_old_new_content_format_requests_approval_and_executes() {
     assert!(
         submit_events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(p)
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. }
             if p.tool_name == "edit_file")),
         "edit must request approval instead of falling back to Direct: {submit_events:?}"
     );
@@ -316,7 +316,7 @@ fn simple_edit_prompt_seeds_edit_file_and_requests_approval() {
     assert!(
         submit_events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(p) if p.tool_name == "edit_file")),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. } if p.tool_name == "edit_file")),
         "simple edit prompt must request edit_file approval: {submit_events:?}"
     );
     assert!(
@@ -355,7 +355,7 @@ fn seeded_simple_edit_executes_only_after_approval() {
     assert!(
         submit_events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(p) if p.tool_name == "edit_file")),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. } if p.tool_name == "edit_file")),
         "seeded simple edit must enter the normal approval path: {submit_events:?}"
     );
     assert_eq!(
@@ -403,7 +403,7 @@ fn simple_edit_prompt_outside_root_is_rejected_before_approval() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(_))),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. })),
         "outside-root seeded simple edit must terminate before approval: {events:?}"
     );
     let answer_source = events.iter().find_map(|e| {
@@ -454,7 +454,7 @@ fn and_change_form_goes_straight_to_approval() {
     assert!(
         submit_events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(p) if p.tool_name == "edit_file")),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. } if p.tool_name == "edit_file")),
         "and-change form must request edit_file approval: {submit_events:?}"
     );
     assert!(
@@ -573,7 +573,7 @@ fn mutation_turn_with_preparatory_read_still_reaches_edit_file_approval() {
     assert!(
         submit_events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(p) if p.tool_name == "edit_file")),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. } if p.tool_name == "edit_file")),
         "edit_file must reach approval even after a preparatory read: {submit_events:?}"
     );
     assert_eq!(

@@ -89,7 +89,7 @@ mod tests {
     fn has_approval(events: &[RuntimeEvent]) -> bool {
         events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(_)))
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. }))
     }
 
     fn has_chunk(events: &[RuntimeEvent]) -> bool {

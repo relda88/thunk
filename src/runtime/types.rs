@@ -123,7 +123,7 @@ pub enum RuntimeEvent {
     },
     /// Fired when a mutating tool requires user approval before execution.
     /// The turn is paused until RuntimeRequest::Approve or Reject is received.
-    ApprovalRequired(PendingAction),
+    ApprovalRequired { pending: PendingAction, evidence: Vec<String> },
     AnswerReady(AnswerSource),
     Failed {
         message: String,
@@ -146,4 +146,7 @@ pub enum RuntimeEvent {
     /// Advisory runtime decision trace. Consumed by the application logging layer only;
     /// must not be forwarded to the TUI or drive any control flow.
     RuntimeTrace(String),
+    /// The fully formatted prompt string assembled just before backend generation.
+    /// Captured by the TUI for prompt inspection; must not affect control flow.
+    PromptAssembled(String),
 }

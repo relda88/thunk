@@ -110,6 +110,9 @@ pub enum BackendEvent {
     StatusChanged(BackendStatus),
     TextDelta(String),
     Finished,
+    /// The fully formatted prompt string, emitted once per generate() call before any output.
+    /// Advisory only — consumers may route this to state for inspection; must not affect control flow.
+    PromptAssembled(String),
     /// Advisory timing event — emitted by backends at key internal stages.
     /// Consumers may route this to logging; it must not affect control flow.
     Timing {

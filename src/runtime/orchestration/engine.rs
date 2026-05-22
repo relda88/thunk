@@ -483,7 +483,7 @@ impl Runtime {
             }
             Ok(ToolRunResult::Approval(pending)) => {
                 self.pending_action = Some(pending.clone());
-                on_event(RuntimeEvent::ApprovalRequired(pending));
+                on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
             }
             Err(e) => {
                 on_event(RuntimeEvent::InfoMessage(format!("error: {e}")));
@@ -666,7 +666,7 @@ impl Runtime {
                             match self.registry.dispatch(resolved) {
                                 Ok(ToolRunResult::Approval(pending)) => {
                                     self.pending_action = Some(pending.clone());
-                                    on_event(RuntimeEvent::ApprovalRequired(pending));
+                                    on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
                                 }
                                 Ok(ToolRunResult::Immediate(output)) => {
                                     self.invalidate_project_snapshot_if_needed(&output);
@@ -1723,7 +1723,8 @@ impl Runtime {
                             .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                     }
                     self.pending_action = Some(pending.clone());
-                    on_event(RuntimeEvent::ApprovalRequired(pending));
+                    let evidence = investigation.evidence_summary();
+                    on_event(RuntimeEvent::ApprovalRequired { pending, evidence });
                     on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
                     finish_turn!();
                 }

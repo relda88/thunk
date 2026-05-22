@@ -544,6 +544,8 @@ pub(crate) struct InvestigationState {
     /// Persists across run_tool_round calls so the repeated-offense terminal fires
     /// even when the first offense and second offense are in separate model responses.
     non_candidate_read_attempts: usize,
+    /// Summaries of accepted search calls this turn, for evidence citation on approval.
+    accepted_search_summaries: Vec<String>,
 }
 
 impl InvestigationState {
@@ -595,6 +597,7 @@ impl InvestigationState {
             non_candidate_read_attempts: 0,
             direct_reads_count: 0,
             direct_read_paths: HashSet::new(),
+            accepted_search_summaries: vec![],
         }
     }
 
@@ -716,6 +719,11 @@ impl InvestigationState {
         let was_empty = results.matches.is_empty();
         if !was_empty {
             self.search_produced_results = true;
+            self.accepted_search_summaries.push(format!(
+                "search: {} — {} matches",
+                query.unwrap_or("?"),
+                results.matches.len()
+            ));
             self.search_candidate_paths.clear();
             self.definition_only_candidates.clear();
             self.non_definition_match_counts.clear();
@@ -1763,6 +1771,17 @@ impl InvestigationState {
             }
             _ => None,
         }
+    }
+
+    pub fn evidence_summary(&self) -> Vec<String> {
+        let mut items = Vec::new();
+        for path in &self.useful_accepted_candidate_paths {
+            items.push(format!("read: {}", path));
+        }
+        for s in &self.accepted_search_summaries {
+            items.push(s.clone());
+        }
+        items
     }
 }
 

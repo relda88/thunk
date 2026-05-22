@@ -25,6 +25,7 @@ pub struct AppState {
     pub messages: Vec<ChatMessage>,
     pub status: String,
     pub should_quit: bool,
+    pub last_prompt: Option<String>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -51,6 +52,7 @@ impl AppState {
             messages,
             status: "ready".to_string(),
             should_quit: false,
+            last_prompt: None,
             welcome_message: welcome,
         }
     }
@@ -116,6 +118,10 @@ impl AppState {
     /// Updates the visible status line
     pub fn set_status(&mut self, status: &str) {
         self.status = status.to_string();
+    }
+
+    pub fn set_last_prompt(&mut self, prompt: String) {
+        self.last_prompt = Some(prompt);
     }
 
     /// Submits the current input, returning it as a string if it's not empty, and clears the input buffer and resets the cursor position

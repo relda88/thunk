@@ -169,7 +169,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         RuntimeEvent::ActivityChanged(a) => Some(format!("activity: {}", a.clone().label())),
         RuntimeEvent::AnswerReady(source) => Some(format!("answer ready: {source:?}")),
         RuntimeEvent::Failed { message } => Some(format!("failed: {message}")),
-        RuntimeEvent::ApprovalRequired(p) => Some(format!("approval required: {}", p.summary)),
+        RuntimeEvent::ApprovalRequired { pending: p, .. } => Some(format!("approval required: {}", p.summary)),
         RuntimeEvent::InfoMessage(text) => Some(format!("info: {text}")),
         // Handled with timing in handle():
         RuntimeEvent::AssistantMessageStarted
@@ -179,6 +179,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         | RuntimeEvent::AssistantMessageChunk(_)
         | RuntimeEvent::BackendTiming { .. }
         | RuntimeEvent::BackendTokenCounts { .. }
-        | RuntimeEvent::RuntimeTrace(_) => None,
+        | RuntimeEvent::RuntimeTrace(_)
+        | RuntimeEvent::PromptAssembled(_) => None,
     }
 }

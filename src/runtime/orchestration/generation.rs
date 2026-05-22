@@ -45,6 +45,9 @@ pub(super) fn run_generate_turn(
         BackendEvent::TokenCounts { prompt, completion } => {
             on_event(RuntimeEvent::BackendTokenCounts { prompt, completion });
         }
+        BackendEvent::PromptAssembled(p) => {
+            on_event(RuntimeEvent::PromptAssembled(p));
+        }
         BackendEvent::Finished => {}
     });
 

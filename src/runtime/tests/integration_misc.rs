@@ -80,7 +80,7 @@ fn mutating_tool_is_blocked_on_informational_turn() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(_))),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. })),
         "read-only informational turn must not create a pending mutation"
     );
     assert!(

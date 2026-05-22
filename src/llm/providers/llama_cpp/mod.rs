@@ -18,6 +18,7 @@ pub struct LlamaCppBackend {
     config: LlamaCppConfig,
     display_name: String,
     loaded: Option<LoadedLlama>,
+    last_prompt: Option<String>,
 }
 
 impl LlamaCppBackend {
@@ -35,7 +36,12 @@ impl LlamaCppBackend {
             config,
             display_name: format!("llama.cpp · {model_name}"),
             loaded: None,
+            last_prompt: None,
         }
+    }
+
+    pub fn last_prompt(&self) -> Option<&str> {
+        self.last_prompt.as_deref()
     }
 
     // Lazily loads the model once and caches it for reuse across requests.
@@ -83,6 +89,8 @@ impl ModelBackend for LlamaCppBackend {
     ) -> Result<()> {
         let config = self.config.clone();
         let prompt = format_messages(&request.messages);
+        self.last_prompt = Some(prompt.clone());
+        on_event(BackendEvent::PromptAssembled(prompt.clone()));
         let is_cold = self.loaded.is_none();
         if is_cold {
             on_event(BackendEvent::StatusChanged(BackendStatus::LoadingModel));

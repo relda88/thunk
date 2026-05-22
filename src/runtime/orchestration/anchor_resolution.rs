@@ -87,7 +87,7 @@ impl Runtime {
                         .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                 }
                 self.pending_action = Some(pending.clone());
-                on_event(RuntimeEvent::ApprovalRequired(pending));
+                on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
             ToolRoundOutcome::RuntimeDispatch { .. } => {
@@ -193,7 +193,7 @@ impl Runtime {
                     "tool '{name}' requested approval but spec declares Immediate"
                 );
                 self.pending_action = Some(pending.clone());
-                on_event(RuntimeEvent::ApprovalRequired(pending));
+                on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
             Err(e) => {
