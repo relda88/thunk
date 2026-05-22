@@ -2,6 +2,7 @@ mod llama_cpp;
 mod mock;
 mod ollama;
 mod openai;
+mod openrouter;
 
 use crate::app::config::Config;
 use crate::app::{AppError, Result};
@@ -12,6 +13,7 @@ pub use llama_cpp::LlamaCppBackend;
 use mock::MockBackend;
 use ollama::OllamaBackend;
 use openai::OpenAiBackend;
+use openrouter::OpenRouterBackend;
 
 type BackendFactory = fn(&Config) -> Result<Box<dyn ModelBackend>>;
 
@@ -44,11 +46,22 @@ fn make_ollama(config: &Config) -> Result<Box<dyn ModelBackend>> {
     Ok(Box::new(OllamaBackend::new(config.ollama.clone())))
 }
 
+fn make_openrouter(config: &Config) -> Result<Box<dyn ModelBackend>> {
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .ok()
+        .ok_or_else(|| AppError::Config("OPENROUTER_API_KEY not set".into()))?;
+    Ok(Box::new(OpenRouterBackend::new(
+        config.openrouter.clone(),
+        api_key,
+    )))
+}
+
 const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
     ("mock", make_mock),
     ("llama_cpp", make_llama_cpp),
     ("openai", make_openai),
     ("ollama", make_ollama),
+    ("openrouter", make_openrouter),
 ];
 
 pub fn build_backend(config: &Config) -> Result<Box<dyn ModelBackend>> {

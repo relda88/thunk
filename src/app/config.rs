@@ -139,6 +139,7 @@ pub struct Config {
     pub llama_cpp: LlamaCppConfig,
     pub openai: OpenAiConfig,
     pub ollama: OllamaConfig,
+    pub openrouter: OpenRouterConfig,
     pub commands: HashMap<String, CustomCommandDef>,
     pub project: ProjectConfig,
 }
@@ -254,6 +255,27 @@ impl Default for OllamaConfig {
         Self {
             model: "gemma3:1b".to_string(),
             base_url: "http://localhost:11434".to_string(),
+            max_tokens: 512,
+            temperature: 0.2,
+        }
+    }
+}
+
+/// OpenRouter provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct OpenRouterConfig {
+    pub model: String,
+    pub base_url: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+impl Default for OpenRouterConfig {
+    fn default() -> Self {
+        Self {
+            model: "anthropic/claude-3-haiku".to_string(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
             max_tokens: 512,
             temperature: 0.2,
         }
@@ -469,6 +491,19 @@ mod tests {
         assert_eq!(cfg.ollama.model, "llama3:8b");
         assert_eq!(cfg.ollama.base_url, "http://localhost:11434");
         assert_eq!(cfg.ollama.max_tokens, 512);
+    }
+
+    #[test]
+    fn openrouter_config_deserializes_with_default_base_url() {
+        let cfg = parse_config(
+            r#"
+            [openrouter]
+            model = "openai/gpt-4o"
+        "#,
+        );
+        assert_eq!(cfg.openrouter.model, "openai/gpt-4o");
+        assert_eq!(cfg.openrouter.base_url, "https://openrouter.ai/api/v1");
+        assert_eq!(cfg.openrouter.max_tokens, 512);
     }
 
     #[test]

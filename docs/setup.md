@@ -49,6 +49,7 @@ Configuration lives in `config.toml`.
 - `llm.provider = "mock"` uses the built-in mock backend.
 - `llm.provider = "llama_cpp"` uses the local llama.cpp backend.
 - `llm.provider = "openai"` uses the OpenAI backend and requires `OPENAI_API_KEY`.
+- `llm.provider = "openrouter"` uses the OpenRouter backend and requires `OPENROUTER_API_KEY`.
 - `llama_cpp.model_path` must point to a local `.gguf` file.
 - Relative `model_path` values are resolved from the config root, not the runtime project root.
 
@@ -92,6 +93,12 @@ show_native_logs = false
 [openai]
 model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
+max_tokens = 512
+temperature = 0.2
+
+[openrouter]
+model = "anthropic/claude-3-haiku"
+base_url = "https://openrouter.ai/api/v1"
 max_tokens = 512
 temperature = 0.2
 ```
