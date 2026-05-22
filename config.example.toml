@@ -28,7 +28,7 @@ max_tokens = 512
 temperature = 0.2
 
 [ollama]
-model = "gemma3:1b"
+model = "qwen2.5-coder:1.5b"
 base_url = "http://localhost:11434"
 max_tokens = 512
 temperature = 0.2
