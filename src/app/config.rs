@@ -138,6 +138,7 @@ pub struct Config {
     pub llm: LlmConfig,
     pub llama_cpp: LlamaCppConfig,
     pub openai: OpenAiConfig,
+    pub ollama: OllamaConfig,
     pub commands: HashMap<String, CustomCommandDef>,
     pub project: ProjectConfig,
 }
@@ -232,6 +233,27 @@ impl Default for OpenAiConfig {
         Self {
             model: String::new(),
             base_url: "https://api.openai.com/v1".to_string(),
+            max_tokens: 512,
+            temperature: 0.2,
+        }
+    }
+}
+
+/// Ollama provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct OllamaConfig {
+    pub model: String,
+    pub base_url: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+impl Default for OllamaConfig {
+    fn default() -> Self {
+        Self {
+            model: "gemma3:1b".to_string(),
+            base_url: "http://localhost:11434".to_string(),
             max_tokens: 512,
             temperature: 0.2,
         }
@@ -434,6 +456,19 @@ mod tests {
         "#,
         );
         assert_eq!(cfg.project.test_command.as_deref(), Some("cargo test"));
+    }
+
+    #[test]
+    fn ollama_config_deserializes_with_default_base_url() {
+        let cfg = parse_config(
+            r#"
+            [ollama]
+            model = "llama3:8b"
+        "#,
+        );
+        assert_eq!(cfg.ollama.model, "llama3:8b");
+        assert_eq!(cfg.ollama.base_url, "http://localhost:11434");
+        assert_eq!(cfg.ollama.max_tokens, 512);
     }
 
     #[test]

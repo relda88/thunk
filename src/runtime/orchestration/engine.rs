@@ -733,7 +733,7 @@ impl Runtime {
 
     fn handle_providers_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let current = self.config.llm.provider.as_str();
-        let providers = [("llamacpp", "llama_cpp"), ("openai", "openai")];
+        let providers = [("llamacpp", "llama_cpp"), ("openai", "openai"), ("ollama", "ollama")];
         let mut lines = vec!["providers:".to_string()];
         for (display, internal) in &providers {
             let marker = if *internal == current { " (active)" } else { "" };
@@ -746,9 +746,10 @@ impl Runtime {
         let normalized = match name.as_str() {
             "llamacpp" | "llama_cpp" => "llama_cpp",
             "openai" => "openai",
+            "ollama" => "ollama",
             other => {
                 on_event(RuntimeEvent::SystemMessage(format!(
-                    "Unknown provider '{}'. Known: llamacpp, openai",
+                    "Unknown provider '{}'. Known: llamacpp, openai, ollama",
                     other
                 )));
                 return;

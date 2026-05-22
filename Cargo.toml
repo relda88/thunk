@@ -1,6 +1,6 @@
 [package]
 name = "thunk"
-version = "0.10.42"
+version = "0.11.42"
 edition = "2021"
 
 [dependencies]
