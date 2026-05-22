@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::tools::ToolSpec;
+use crate::tools::{ExecutionKind, ToolSpec};
 
 use super::super::project::{ProjectStructureEntryKind, ProjectStructureSnapshot};
 use super::tool_codec;
@@ -93,7 +93,12 @@ fn truncate_item(item: &str, max_chars: usize) -> String {
     }
 }
 
-pub fn build_system_prompt(app_name: &str, project_root: &Path, specs: &[ToolSpec]) -> String {
+pub fn build_system_prompt(
+    app_name: &str,
+    project_root: &Path,
+    specs: &[ToolSpec],
+    include_mutation_tools: bool,
+) -> String {
     let mut prompt = format!(
         "You are {app_name}, a local AI coding assistant.\n\
 Project: {}\n\n\
@@ -104,12 +109,17 @@ When you show code, keep it focused on the user's request.",
         project_root.display()
     );
 
-    if !specs.is_empty() {
+    let visible_specs: Vec<&ToolSpec> = specs
+        .iter()
+        .filter(|s| include_mutation_tools || s.execution_kind != ExecutionKind::RequiresApproval)
+        .collect();
+
+    if !visible_specs.is_empty() {
         let instructions = tool_codec::format_instructions();
 
-        // Guard: every registered tool must appear in the protocol instructions.
+        // Guard: every listed tool must appear in the protocol instructions.
         // A missing entry means the model is told a tool exists but not how to call it.
-        for spec in specs {
+        for spec in &visible_specs {
             debug_assert!(
                 instructions.contains(spec.name),
                 "tool '{}' is registered but its call syntax is missing from format_instructions()",
@@ -118,7 +128,7 @@ When you show code, keep it focused on the user's request.",
         }
 
         prompt.push_str("\n\nYou have access to the following tools:\n\n");
-        for spec in specs {
+        for spec in &visible_specs {
             prompt.push_str(&format!("  {}: {}\n", spec.name, spec.description));
         }
         prompt.push('\n');

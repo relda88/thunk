@@ -103,6 +103,29 @@ impl TurnPerformance {
         }
     }
 
+    /// Test-only constructor that always enables tracing without reading the env var.
+    /// Avoids races from parallel tests mutating RUNTIME_TRACE_ENV.
+    #[cfg(test)]
+    fn new_enabled(context_window_tokens: Option<u32>) -> Self {
+        Self {
+            enabled: true,
+            turn_start: Some(std::time::Instant::now()),
+            rounds: 0,
+            round_labels: Vec::new(),
+            round_causes: Vec::new(),
+            prompt_sizes: Vec::new(),
+            ctx_ms: 0,
+            tokenize_ms: 0,
+            prefill_ms: 0,
+            generation_ms: 0,
+            model_load_ms: 0,
+            tool_ms: 0,
+            tokens_prompt: 0,
+            tokens_completion: 0,
+            context_window_tokens,
+        }
+    }
+
     pub(super) fn start_round(
         &mut self,
         label: GenerationRoundLabel,
@@ -230,14 +253,7 @@ mod tests {
 
     #[test]
     fn perf_summary_includes_cold_start_and_tool_fields() {
-        // Phase 11.3.4 + 11.3.5: verify model_load_ms, tool_ms, model_ms, total_turn_ms
-        // appear in the [runtime:perf] summary when tracing is enabled.
-        //
-        // Uses env-var isolation: set before constructing TurnPerformance (which captures
-        // enabled at construction), removed immediately after so parallel tests are unaffected.
-        std::env::set_var(RUNTIME_TRACE_ENV, "1");
-        let mut perf = TurnPerformance::new(None);
-        std::env::remove_var(RUNTIME_TRACE_ENV);
+        let mut perf = TurnPerformance::new_enabled(None);
 
         perf.record_backend_timing(BackendTimingStage::ModelLoad, 4200);
         perf.record_backend_timing(BackendTimingStage::CtxCreate, 50);
@@ -277,9 +293,7 @@ mod tests {
 
     #[test]
     fn perf_token_counts_accumulate_across_rounds() {
-        std::env::set_var(RUNTIME_TRACE_ENV, "1");
-        let mut perf = TurnPerformance::new(None);
-        std::env::remove_var(RUNTIME_TRACE_ENV);
+        let mut perf = TurnPerformance::new_enabled(None);
 
         perf.record_token_counts(100, 50);
         perf.record_token_counts(200, 75);
@@ -290,9 +304,7 @@ mod tests {
 
     #[test]
     fn perf_summary_includes_token_fields_when_available() {
-        std::env::set_var(RUNTIME_TRACE_ENV, "1");
-        let mut perf = TurnPerformance::new(None);
-        std::env::remove_var(RUNTIME_TRACE_ENV);
+        let mut perf = TurnPerformance::new_enabled(None);
 
         perf.record_token_counts(512, 128);
 
@@ -321,9 +333,7 @@ mod tests {
 
     #[test]
     fn perf_summary_omits_context_used_pct_when_context_window_unknown() {
-        std::env::set_var(RUNTIME_TRACE_ENV, "1");
-        let mut perf = TurnPerformance::new(None);
-        std::env::remove_var(RUNTIME_TRACE_ENV);
+        let mut perf = TurnPerformance::new_enabled(None);
 
         perf.record_token_counts(1000, 200);
 

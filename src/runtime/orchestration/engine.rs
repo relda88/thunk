@@ -266,8 +266,12 @@ impl Runtime {
         registry: ToolRegistry,
     ) -> Self {
         let specs = registry.specs();
-        let system_prompt =
-            prompt::build_system_prompt(&config.app.name, project_root.path(), &specs);
+        let system_prompt = prompt::build_system_prompt(
+            &config.app.name,
+            project_root.path(),
+            &specs,
+            false,
+        );
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
         Self {
             project_root,
