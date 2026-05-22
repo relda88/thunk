@@ -252,6 +252,10 @@ pub struct Runtime {
     /// Queued runtime-owned tool call to execute at the start of the next run_turns invocation.
     /// Set by handle_approve when a post-mutation follow-up (e.g. test run) is configured.
     pending_runtime_call: Option<PendingRuntimeCall>,
+    /// Per-session undo stack. Each entry is (absolute_path, before_contents).
+    /// Empty string for before_contents means the file did not exist before write_file created it.
+    /// Capped at 5 entries — oldest dropped when exceeded.
+    undo_stack: Vec<(String, String)>,
 }
 
 impl Runtime {
@@ -277,6 +281,7 @@ impl Runtime {
             pending_action: None,
             config: config.clone(),
             pending_runtime_call: None,
+            undo_stack: Vec::new(),
         }
     }
 
@@ -347,6 +352,7 @@ impl Runtime {
             RuntimeRequest::QueryHistory => self.handle_query_history(on_event),
             RuntimeRequest::ReadFile { path } => self.handle_read_file(path, on_event),
             RuntimeRequest::SearchCode { query } => self.handle_search_code(query, on_event),
+            RuntimeRequest::Undo => self.handle_undo(on_event),
         }
     }
 
@@ -641,6 +647,16 @@ impl Runtime {
             detail: None,
         }));
 
+        if matches!(tool_name.as_str(), "edit_file" | "write_file") {
+            if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
+                let before = std::fs::read_to_string(&abs_path).unwrap_or_default();
+                self.undo_stack.push((abs_path, before));
+                if self.undo_stack.len() > 5 {
+                    self.undo_stack.remove(0);
+                }
+            }
+        }
+
         match self.registry.execute_approved(&pending) {
             Ok(output) => {
                 self.invalidate_project_snapshot_if_needed(&output);
@@ -690,6 +706,25 @@ impl Runtime {
                 // On failure, let the model respond — it may want to retry.
                 on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
                 self.run_turns(0, on_event);
+            }
+        }
+    }
+
+    fn handle_undo(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        match self.undo_stack.pop() {
+            None => {
+                on_event(RuntimeEvent::SystemMessage("Nothing to undo.".to_string()));
+            }
+            Some((path, contents)) => {
+                if contents.is_empty() {
+                    let _ = std::fs::remove_file(&path);
+                } else {
+                    let _ = std::fs::write(&path, &contents);
+                }
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "Undone: restored {}",
+                    path
+                )));
             }
         }
     }
@@ -1774,6 +1809,28 @@ impl Runtime {
     ) -> std::io::Result<ProjectStructureSnapshot> {
         self.get_or_build_project_snapshot().cloned()
     }
+}
+
+/// Extracts the absolute file path from an edit_file or write_file pending payload.
+/// Both tools use a null-byte-separated format:
+///   v2: "v2\x00<abs_path>\x00..."
+///   legacy: "<abs_path>\x00..."
+fn extract_absolute_path_from_payload(payload: &str) -> Option<String> {
+    const SEP: char = '\x00';
+    let mut parts = payload.splitn(3, SEP);
+    let first = parts.next()?;
+    if first == "v2" {
+        let abs = parts.next()?;
+        if !abs.is_empty() {
+            return Some(abs.to_string());
+        }
+        return None;
+    }
+    // Legacy: first segment is the absolute path.
+    if std::path::Path::new(first).is_absolute() {
+        return Some(first.to_string());
+    }
+    None
 }
 
 fn short_tool_name(tool_name: &str) -> &str {
@@ -3664,6 +3721,36 @@ mod tests {
                 })
             ),
             "second guard violation after dispatch must terminate: {source:?}"
+        );
+    }
+
+    #[test]
+    fn undo_with_empty_stack_emits_nothing_to_undo_message() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let mut rt = make_runtime_in(vec![] as Vec<String>, tmp.path());
+        let events = collect_events(&mut rt, RuntimeRequest::Undo);
+
+        let system_messages: Vec<&str> = events
+            .iter()
+            .filter_map(|e| {
+                if let RuntimeEvent::SystemMessage(msg) = e {
+                    Some(msg.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(
+            system_messages,
+            vec!["Nothing to undo."],
+            "empty undo stack must emit exactly the nothing-to-undo message"
+        );
+        assert!(
+            !has_failed(&events),
+            "undo on empty stack must not emit Failed"
         );
     }
 }

@@ -14,6 +14,7 @@ pub enum Command {
     Search(String),
     Sessions,
     SessionClear,
+    Undo,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -69,6 +70,7 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some(query) => Some(Ok(Command::Search(query.to_string()))),
             None => Some(Err(ParseError::MissingArgument { command: "/search" })),
         },
+        "/undo" => Some(Ok(Command::Undo)),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
             Some("clear") => Some(Ok(Command::SessionClear)),

@@ -160,6 +160,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::QueryHistory => "query_history",
         RuntimeRequest::ReadFile { .. } => "read_file",
         RuntimeRequest::SearchCode { .. } => "search_code",
+        RuntimeRequest::Undo => "undo",
     }
 }
 
@@ -171,6 +172,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         RuntimeEvent::Failed { message } => Some(format!("failed: {message}")),
         RuntimeEvent::ApprovalRequired { pending: p, .. } => Some(format!("approval required: {}", p.summary)),
         RuntimeEvent::InfoMessage(text) => Some(format!("info: {text}")),
+        RuntimeEvent::SystemMessage(text) => Some(format!("system: {text}")),
         // Handled with timing in handle():
         RuntimeEvent::AssistantMessageStarted
         | RuntimeEvent::AssistantMessageFinished

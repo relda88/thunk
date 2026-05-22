@@ -103,6 +103,9 @@ pub enum RuntimeRequest {
     SearchCode {
         query: String,
     },
+    /// Reverts the most recent approved mutation by restoring the file's prior contents.
+    /// No-op with a user message if the undo stack is empty.
+    Undo,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
@@ -149,4 +152,7 @@ pub enum RuntimeEvent {
     /// The fully formatted prompt string assembled just before backend generation.
     /// Captured by the TUI for prompt inspection; must not affect control flow.
     PromptAssembled(String),
+    /// A runtime-generated message for the user that is not assistant output.
+    /// Displayed as a system message in the TUI; never added to conversation state.
+    SystemMessage(String),
 }

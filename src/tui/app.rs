@@ -184,6 +184,7 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
         }
         commands::Command::Sessions => CommandAction::ListSessions,
         commands::Command::SessionClear => CommandAction::ClearProjectSessions,
+        commands::Command::Undo => CommandAction::Runtime(RuntimeRequest::Undo),
     }
 }
 
@@ -196,7 +197,7 @@ fn handle_command(
     match resolve_command(cmd) {
         CommandAction::ShowHelp => {
             state.add_system_message(
-                "Commands: /help — show this message  |  /clear — clear history  |  /sessions — list current project sessions  |  /session clear — delete current project sessions and start fresh  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history",
+                "Commands: /help — show this message  |  /clear — clear history  |  /sessions — list current project sessions  |  /session clear — delete current project sessions and start fresh  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /undo — revert last mutation  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history",
             );
         }
         CommandAction::Quit => {
@@ -430,6 +431,7 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             state.add_system_message(summarize_command_output(&text))
         }
         RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
+        RuntimeEvent::SystemMessage(text) => state.add_system_message(text),
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
         RuntimeEvent::BackendTokenCounts { .. } => {}
