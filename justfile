@@ -28,3 +28,6 @@ fresh:
 trace-fresh:
     just fresh
     just trace
+
+install:
+    cargo install --path .

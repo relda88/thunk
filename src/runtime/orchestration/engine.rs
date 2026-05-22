@@ -1056,7 +1056,11 @@ impl Runtime {
                     &[("surface", "AnswerOnly".into())],
                 );
             }
-            let project_snapshot_hint = if pending_runtime_call.is_none() {
+            let is_correction_round = !matches!(
+                next_round_cause,
+                GenerationRoundCause::Initial | GenerationRoundCause::ToolResults
+            );
+            let project_snapshot_hint = if pending_runtime_call.is_none() && !is_correction_round {
                 self.maybe_render_project_snapshot_hint(effective_surface)
             } else {
                 None
