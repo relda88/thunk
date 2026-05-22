@@ -353,6 +353,8 @@ impl Runtime {
             RuntimeRequest::ReadFile { path } => self.handle_read_file(path, on_event),
             RuntimeRequest::SearchCode { query } => self.handle_search_code(query, on_event),
             RuntimeRequest::Undo => self.handle_undo(on_event),
+            RuntimeRequest::ProvidersList => self.handle_providers_list(on_event),
+            RuntimeRequest::ProvidersUse { name } => self.handle_providers_use(name, on_event),
         }
     }
 
@@ -724,6 +726,49 @@ impl Runtime {
                 on_event(RuntimeEvent::SystemMessage(format!(
                     "Undone: restored {}",
                     path
+                )));
+            }
+        }
+    }
+
+    fn handle_providers_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let current = self.config.llm.provider.as_str();
+        let providers = [("llamacpp", "llama_cpp"), ("openai", "openai")];
+        let mut lines = vec!["providers:".to_string()];
+        for (display, internal) in &providers {
+            let marker = if *internal == current { " (active)" } else { "" };
+            lines.push(format!("  {}{}", display, marker));
+        }
+        on_event(RuntimeEvent::SystemMessage(lines.join("\n")));
+    }
+
+    fn handle_providers_use(&mut self, name: String, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let normalized = match name.as_str() {
+            "llamacpp" | "llama_cpp" => "llama_cpp",
+            "openai" => "openai",
+            other => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "Unknown provider '{}'. Known: llamacpp, openai",
+                    other
+                )));
+                return;
+            }
+        };
+        let mut new_config = self.config.clone();
+        new_config.llm.provider = normalized.to_string();
+        match crate::llm::providers::build_backend(&new_config) {
+            Ok(new_backend) => {
+                self.backend = new_backend;
+                self.config.llm.provider = normalized.to_string();
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "Switched to provider: {}",
+                    normalized
+                )));
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "Failed to switch to '{}': {}",
+                    normalized, e
                 )));
             }
         }
@@ -3752,5 +3797,28 @@ mod tests {
             !has_failed(&events),
             "undo on empty stack must not emit Failed"
         );
+    }
+
+    #[test]
+    fn providers_use_unknown_name_emits_error_system_message() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let mut rt = make_runtime_in(vec![] as Vec<String>, tmp.path());
+        let events = collect_events(
+            &mut rt,
+            RuntimeRequest::ProvidersUse {
+                name: "totally_unknown".to_string(),
+            },
+        );
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                RuntimeEvent::SystemMessage(msg) if msg.contains("Unknown provider")
+            )),
+            "unknown provider name must emit SystemMessage with 'Unknown provider': {events:?}"
+        );
+        assert!(!has_failed(&events), "unknown provider must not emit Failed");
     }
 }

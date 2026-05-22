@@ -106,6 +106,10 @@ pub enum RuntimeRequest {
     /// Reverts the most recent approved mutation by restoring the file's prior contents.
     /// No-op with a user message if the undo stack is empty.
     Undo,
+    /// Lists all known providers and indicates which is currently active.
+    ProvidersList,
+    /// Switches the active backend provider by name.
+    ProvidersUse { name: String },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

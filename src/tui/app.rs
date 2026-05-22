@@ -185,6 +185,10 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
         commands::Command::Sessions => CommandAction::ListSessions,
         commands::Command::SessionClear => CommandAction::ClearProjectSessions,
         commands::Command::Undo => CommandAction::Runtime(RuntimeRequest::Undo),
+        commands::Command::ProvidersList => CommandAction::Runtime(RuntimeRequest::ProvidersList),
+        commands::Command::ProvidersUse(name) => {
+            CommandAction::Runtime(RuntimeRequest::ProvidersUse { name })
+        }
     }
 }
 
@@ -197,7 +201,7 @@ fn handle_command(
     match resolve_command(cmd) {
         CommandAction::ShowHelp => {
             state.add_system_message(
-                "Commands: /help — show this message  |  /clear — clear history  |  /sessions — list current project sessions  |  /session clear — delete current project sessions and start fresh  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /undo — revert last mutation  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history",
+                "Commands: /help — show this message  |  /clear — clear history  |  /sessions — list current project sessions  |  /session clear — delete current project sessions and start fresh  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /undo — revert last mutation  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history  |  /providers list — list available providers  |  /providers use <name> — switch active provider",
             );
         }
         CommandAction::Quit => {

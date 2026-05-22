@@ -15,6 +15,8 @@ pub enum Command {
     Sessions,
     SessionClear,
     Undo,
+    ProvidersList,
+    ProvidersUse(String),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -71,6 +73,18 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             None => Some(Err(ParseError::MissingArgument { command: "/search" })),
         },
         "/undo" => Some(Ok(Command::Undo)),
+        "/providers" => match arg {
+            Some("list") => Some(Ok(Command::ProvidersList)),
+            Some(rest) if rest.starts_with("use ") => {
+                let name = rest["use ".len()..].trim().to_string();
+                if name.is_empty() {
+                    Some(Err(ParseError::UnknownCommand))
+                } else {
+                    Some(Ok(Command::ProvidersUse(name)))
+                }
+            }
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
             Some("clear") => Some(Ok(Command::SessionClear)),

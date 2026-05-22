@@ -161,6 +161,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::ReadFile { .. } => "read_file",
         RuntimeRequest::SearchCode { .. } => "search_code",
         RuntimeRequest::Undo => "undo",
+        RuntimeRequest::ProvidersList => "providers_list",
+        RuntimeRequest::ProvidersUse { .. } => "providers_use",
     }
 }
 
