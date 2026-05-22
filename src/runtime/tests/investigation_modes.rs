@@ -1182,8 +1182,7 @@ fn load_lookup_definition_only_read_dispatches_to_call_site_candidate() {
 fn load_lookup_no_call_site_candidate_produces_insufficient_evidence() {
     // Only candidate has load terms exclusively on definition lines.
     // has_non_definition_load_candidates = false — Gate 6a never fires (no call-site to dispatch to).
-    // Model answers twice without reading → correction exhausted → InsufficientEvidence.
-    use crate::runtime::types::RuntimeTerminalReason;
+    // Model answers without reading → runtime seeds read directly → evidence accepted → ToolAssisted.
     use std::fs;
     use tempfile::TempDir;
 
@@ -1219,14 +1218,8 @@ fn load_lookup_no_call_site_candidate_produces_insufficient_evidence() {
         }
     });
     assert!(
-        matches!(
-            answer_source,
-            Some(AnswerSource::RuntimeTerminal {
-                reason: RuntimeTerminalReason::InsufficientEvidence,
-                ..
-            })
-        ),
-        "LoadLookup with no call-site candidate and no reads must produce InsufficientEvidence: {answer_source:?}"
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "LoadLookup with no call-site candidate must seed read and produce ToolAssisted: {answer_source:?}"
     );
 }
 
@@ -1301,8 +1294,7 @@ fn general_mode_no_call_site_candidate_produces_insufficient_evidence() {
     // without triggering any specific lookup mode).
     // Only candidate has load terms exclusively on definition lines.
     // has_non_definition_load_candidates = false — Gate 6a never fires (no call-site to dispatch to).
-    // Model answers twice without reading → correction exhausted → InsufficientEvidence.
-    use crate::runtime::types::RuntimeTerminalReason;
+    // Model answers without reading → runtime seeds read directly → evidence accepted → ToolAssisted.
     use std::fs;
     use tempfile::TempDir;
 
@@ -1338,13 +1330,7 @@ fn general_mode_no_call_site_candidate_produces_insufficient_evidence() {
         }
     });
     assert!(
-        matches!(
-            answer_source,
-            Some(AnswerSource::RuntimeTerminal {
-                reason: RuntimeTerminalReason::InsufficientEvidence,
-                ..
-            })
-        ),
-        "General mode with no call-site candidate and no reads must produce InsufficientEvidence: {answer_source:?}"
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "General mode must seed read and produce ToolAssisted: {answer_source:?}"
     );
 }

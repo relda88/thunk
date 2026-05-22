@@ -335,15 +335,15 @@ mod tests {
         );
     }
 
-    // Scenario 8.3-A: non-empty search → synthesis without read → correction fires once
+    // Scenario 8.3-A: non-empty search → synthesis without read → runtime seeds direct read
     //
-    // Phase 8.3 behavior: after search returns matches, the model attempting synthesis
-    // without reading any file triggers a one-time runtime correction. The model then
-    // gets another attempt. The correction fires at most once per turn.
+    // When search returns matches and the model attempts synthesis without reading any file,
+    // the runtime seeds a read_file call for the best candidate directly rather than
+    // issuing a correction message. The model then synthesizes with evidence after the read.
 
     #[test]
-    fn non_empty_search_synthesis_without_read_fires_correction_once() {
-        use crate::runtime::types::{AnswerSource, RuntimeTerminalReason};
+    fn non_empty_search_synthesis_without_read_seeds_direct_read() {
+        use crate::runtime::types::AnswerSource;
 
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("target.rs"), "fn target_fn() {}\n").unwrap();
@@ -352,8 +352,8 @@ mod tests {
             &dir,
             vec![
                 "[search_code: target_fn]",      // produces matches
-                "The function is in target.rs.", // synthesis without read → correction fires
-                "The function is in target.rs.", // second synthesis: still no read → terminal
+                "The function is in target.rs.", // synthesis without read → runtime seeds read
+                "The function is in target.rs.", // synthesis after seeded read → accepted
             ],
         );
 
@@ -370,9 +370,7 @@ mod tests {
 
         let snapshot = rt.messages_snapshot();
 
-        // Correction must appear exactly once. Match the specific sentinel+text that only
-        // READ_BEFORE_ANSWERING produces — not SEARCH_CLOSED_AFTER_RESULTS which also
-        // mentions "Search returned matches" and "read_file" inside the results block.
+        // No read-before-answering correction must fire.
         let correction_count = snapshot
             .iter()
             .filter(|m| {
@@ -381,20 +379,11 @@ mod tests {
             })
             .count();
         assert_eq!(
-            correction_count, 1,
-            "read-before-answering correction must fire exactly once"
+            correction_count, 0,
+            "runtime must seed a read directly rather than issuing a correction"
         );
 
-        // Correction uses the [runtime:correction] sentinel.
-        assert!(
-            snapshot
-                .iter()
-                .any(|m| m.content.starts_with("[runtime:correction]")
-                    && m.content.contains("read_file")),
-            "correction must use runtime:correction sentinel"
-        );
-
-        // Turn ends with a runtime terminal answer, not an admitted synthesis.
+        // Turn ends with a model answer backed by tool evidence, not a runtime terminal.
         let answer_source = events.iter().find_map(|e| {
             if let RuntimeEvent::AnswerReady(src) = e {
                 Some(src.clone())
@@ -403,14 +392,8 @@ mod tests {
             }
         });
         assert!(
-            matches!(
-                answer_source,
-                Some(AnswerSource::RuntimeTerminal {
-                    reason: RuntimeTerminalReason::InsufficientEvidence,
-                    ..
-                })
-            ),
-            "turn must terminate without admitting unread synthesis: {answer_source:?}"
+            matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+            "seeded read must produce a ToolAssisted answer: {answer_source:?}"
         );
     }
 
@@ -1314,7 +1297,7 @@ mod tests {
 
         let snapshot = rt.messages_snapshot();
 
-        // Both R1 and R2 corrections must appear.
+        // R1 correction must appear; R2 is replaced by a direct seeded read.
         assert!(
             snapshot.iter().any(|m| {
                 m.content.starts_with("[runtime:correction]")
@@ -1323,11 +1306,11 @@ mod tests {
             "R1 correction must be in conversation"
         );
         assert!(
-            snapshot.iter().any(|m| {
+            !snapshot.iter().any(|m| {
                 m.content.starts_with("[runtime:correction]")
                     && m.content.contains("no matched file has been read")
             }),
-            "R2 correction must be in conversation"
+            "R2 correction must not fire — runtime seeds read directly"
         );
 
         // Both tool results must appear.
@@ -1392,12 +1375,13 @@ mod tests {
         assert!(!has_failed(&events), "must not fail: {events:?}");
 
         let snapshot = rt.messages_snapshot();
+        // Runtime seeds the read directly rather than issuing a correction.
         assert!(
-            snapshot.iter().any(|m| {
+            !snapshot.iter().any(|m| {
                 m.content.starts_with("[runtime:correction]")
                     && m.content.contains("no matched file has been read")
             }),
-            "natural-language lookup must still require a matched read"
+            "natural-language lookup must seed read directly, not issue a correction"
         );
 
         let chunks = assistant_chunks(&events);

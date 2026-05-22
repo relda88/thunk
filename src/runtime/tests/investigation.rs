@@ -53,6 +53,9 @@ fn premature_investigation_answer_is_not_admitted() {
 
 #[test]
 fn search_results_require_matched_read_before_synthesis() {
+    // After search returns matches and the model answers without reading, the runtime
+    // seeds a read_file call for the best candidate directly. The model then synthesizes
+    // with evidence from the seeded read.
     use std::fs;
     use tempfile::TempDir;
 
@@ -75,13 +78,14 @@ fn search_results_require_matched_read_before_synthesis() {
         },
     );
 
+    // No read-before-answering correction must fire — runtime seeds the read directly.
     let snapshot = rt.messages_snapshot();
     assert!(
-        snapshot.iter().any(|m| {
+        !snapshot.iter().any(|m| {
             m.content.starts_with("[runtime:correction]")
                 && m.content.contains("no matched file has been read")
         }),
-        "runtime must require read_file after non-empty search"
+        "runtime must seed read directly, not issue a correction"
     );
     let answer_source = events.iter().find_map(|e| {
         if let RuntimeEvent::AnswerReady(src) = e {
@@ -91,22 +95,16 @@ fn search_results_require_matched_read_before_synthesis() {
         }
     });
     assert!(
-        matches!(
-            answer_source,
-            Some(AnswerSource::RuntimeTerminal {
-                reason: RuntimeTerminalReason::InsufficientEvidence,
-                ..
-            })
-        ),
-        "unread search results must not admit synthesis: {answer_source:?}"
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "seeded read must produce a ToolAssisted answer: {answer_source:?}"
     );
 }
 
 #[test]
 fn read_before_answering_correction_discards_premature_synthesis() {
     // After search returns matches, the model synthesizes without reading (premature).
-    // The READ_BEFORE_ANSWERING correction must fire AND discard the premature synthesis
-    // from context before injecting the correction message.
+    // The runtime seeds a read_file call for the best candidate and discards the premature
+    // synthesis from context. The model then synthesizes with evidence from the seeded read.
     // Verified by checking: no premature synthesis message remains in the conversation.
     use std::fs;
     use tempfile::TempDir;
@@ -134,18 +132,10 @@ fn read_before_answering_correction_discards_premature_synthesis() {
     let snapshot = rt.messages_snapshot();
 
     assert!(
-        snapshot.iter().any(|m| {
-            m.content.starts_with("[runtime:correction]")
-                && m.content.contains("no matched file has been read")
-        }),
-        "READ_BEFORE_ANSWERING correction must be injected: {snapshot:?}"
-    );
-
-    assert!(
         !snapshot
             .iter()
             .any(|m| m.content == "run_turns is the main driver."),
-        "premature synthesis must be discarded from context before correction"
+        "premature synthesis must be discarded from context before seeded read"
     );
 
     let last_assistant = snapshot

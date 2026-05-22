@@ -1492,16 +1492,35 @@ impl Runtime {
                             finish_turn!();
                         }
 
-                        if corrections < MAX_CORRECTIONS
-                            && investigation.issue_premature_synthesis_correction()
-                        {
-                            corrections += 1;
-                            self.conversation.discard_last_if_assistant();
-                            self.conversation
-                                .push_user(READ_BEFORE_ANSWERING.to_string());
-                            next_round_label = GenerationRoundLabel::CorrectionRetry;
-                            next_round_cause = GenerationRoundCause::ReadBeforeAnsweringCorrection;
-                            continue;
+                        if corrections < MAX_CORRECTIONS {
+                            let candidate = investigation
+                                .best_candidate_for_mode(investigation_mode)
+                                .map(str::to_string);
+                            if let Some(candidate) = candidate {
+                                if investigation.candidate_reads_count()
+                                    < MAX_CANDIDATE_READS_PER_INVESTIGATION
+                                {
+                                    self.conversation.discard_last_if_assistant();
+                                    investigation.issue_premature_synthesis_correction();
+                                    pending_runtime_call = Some(PendingRuntimeCall {
+                                        input: ToolInput::ReadFile { path: candidate },
+                                        seeded_pre_generation: false,
+                                    });
+                                    next_round_label = GenerationRoundLabel::PostTool;
+                                    next_round_cause = GenerationRoundCause::Recovery;
+                                    continue;
+                                }
+                            }
+                            if investigation.issue_premature_synthesis_correction() {
+                                corrections += 1;
+                                self.conversation.discard_last_if_assistant();
+                                self.conversation
+                                    .push_user(READ_BEFORE_ANSWERING.to_string());
+                                next_round_label = GenerationRoundLabel::CorrectionRetry;
+                                next_round_cause =
+                                    GenerationRoundCause::ReadBeforeAnsweringCorrection;
+                                continue;
+                            }
                         }
 
                         trace_insufficient_evidence_terminal(
@@ -2772,6 +2791,66 @@ mod tests {
             last_assistant,
             Some(ungrounded_investigation_final_answer()),
             "last assistant must be the runtime terminal, not model synthesis"
+        );
+    }
+
+    #[test]
+    fn prose_after_search_seeds_read_file_directly() {
+        // When the model emits prose immediately after search results without calling
+        // read_file, the runtime seeds a read_file call for the best candidate rather
+        // than issuing a correction message.
+        use std::fs;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("lib.rs"),
+            "pub fn target_fn() { /* impl */ }\n",
+        )
+        .unwrap();
+
+        let mut rt = make_runtime_in(
+            vec![
+                "[search_code: target_fn]",       // search → finds lib.rs
+                "target_fn is in lib.rs.",         // prose without read → runtime seeds read
+                "target_fn is defined in lib.rs.", // synthesis after seeded read → accepted
+            ],
+            tmp.path(),
+        );
+
+        let events = collect_events(
+            &mut rt,
+            RuntimeRequest::Submit {
+                text: "Where is target_fn defined?".into(),
+            },
+        );
+
+        assert!(!has_failed(&events), "turn must not fail: {events:?}");
+
+        let snapshot = rt.messages_snapshot();
+
+        let correction_count = snapshot
+            .iter()
+            .filter(|m| {
+                m.content.starts_with("[runtime:correction]")
+                    && m.content.contains("no matched file has been read")
+            })
+            .count();
+        assert_eq!(
+            correction_count, 0,
+            "runtime must seed a read directly rather than issuing a correction"
+        );
+
+        let answer_source = events.iter().find_map(|e| {
+            if let RuntimeEvent::AnswerReady(src) = e {
+                Some(src.clone())
+            } else {
+                None
+            }
+        });
+        assert!(
+            matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+            "seeded read must produce a ToolAssisted answer: {answer_source:?}"
         );
     }
 
