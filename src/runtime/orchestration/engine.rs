@@ -1058,7 +1058,10 @@ impl Runtime {
             }
             let is_correction_round = !matches!(
                 next_round_cause,
-                GenerationRoundCause::Initial | GenerationRoundCause::ToolResults
+                GenerationRoundCause::Initial
+                    | GenerationRoundCause::ToolResults
+                    | GenerationRoundCause::ReadRequestToolRequired
+                    | GenerationRoundCause::ReadBeforeAnsweringCorrection
             );
             let project_snapshot_hint = if pending_runtime_call.is_none() && !is_correction_round {
                 self.maybe_render_project_snapshot_hint(effective_surface)

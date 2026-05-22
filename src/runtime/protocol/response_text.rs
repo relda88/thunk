@@ -95,8 +95,11 @@ pub(crate)const READ_ONLY_TOOL_POLICY_ERROR: &str =
      Do not call write_file, edit_file, or shell unless the user explicitly asks to create, write, edit, change, update, modify, or run a command.";
 
 pub(crate) const READ_REQUEST_TOOL_REQUIRED: &str =
-    "[runtime:correction] The user asked to read a specific file. \
-     Call read_file for that exact path before answering.";
+    "[runtime:correction] Search returned matches but no matched file has \
+     been read this turn. You MUST now emit exactly this format and nothing else:\n\
+     [read_file: path/to/matched/file]\n\
+     Replace path/to/matched/file with one of the paths from the search results. \
+     Do not write any prose. Do not explain. Emit only the read_file tag.";
 
 /// Injected when answer_guard rejects a synthesis that cites an unread path and a retry
 /// is eligible (evidence exists). Directs the model to synthesize only from read files.

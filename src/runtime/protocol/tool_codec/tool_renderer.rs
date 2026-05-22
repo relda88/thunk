@@ -509,7 +509,6 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
             if s.timed_out {
                 lines.push("[timed out after 60s]".to_string());
             }
-            lines.push("Analyze the output above and summarize what it means for the user's request. If exit is non-zero, identify the errors. If exit is 0, confirm what succeeded.".to_string());
             lines.join("\n")
         }
     }
@@ -530,6 +529,11 @@ You do NOT write result blocks. Result blocks are written by the system, not you
 When a tool is needed, your ENTIRE response must be the call tag only — no prose, no fences, no explanation.
 
 Tag names are EXACT. Do not rename, abbreviate, or invent tag names. Use only the tags shown below.
+
+To run a build or test command, use shell — never use search_code for this:
+[shell: cargo check]
+[shell: cargo test my_filter]
+[shell: cargo clippy]
 
 Request a file read:
 [read_file: path/to/file.rs]
@@ -573,11 +577,6 @@ path: path/to/file.rs
 ---content---
 full file content
 [/write_file]
-
-To run a build or test command, use shell — never use search_code for this:
-[shell: cargo check]
-[shell: cargo test my_filter]
-[shell: cargo clippy]
 
 When you have enough information, respond directly in plain text with no tool tags."#
 }
@@ -706,7 +705,6 @@ mod tests {
         assert!(rendered.contains("stderr line"));
         assert!(rendered.contains("[output truncated: 9000 bytes total]"));
         assert!(rendered.contains("[timed out after 60s]"));
-        assert!(rendered.contains("Analyze the output above and summarize what it means for the user's request. If exit is non-zero, identify the errors. If exit is 0, confirm what succeeded."));
     }
 
     #[test]
