@@ -262,6 +262,13 @@ pub(crate) fn direct_read_fallback_answer(results: &str) -> String {
     inner.trim_end_matches('\n').to_string()
 }
 
+pub(crate) fn seeded_edit_search_not_found_answer(path: &str) -> String {
+    format!(
+        "The edit couldn't be applied because the search text wasn't found in `{path}`. \
+         Read the file first to see its current content, then retry the edit."
+    )
+}
+
 pub(crate) fn mutation_input_rejected_final_answer(tool_name: &str, error: &str) -> String {
     format!("I couldn't complete {tool_name}: {error}. No changes were made.")
 }

@@ -179,6 +179,61 @@ fn initialization_lookup_non_initialization_read_triggers_recovery() {
 }
 
 #[test]
+fn edit_search_not_found_emits_answer_ready_with_read_hint() {
+    use crate::runtime::types::RuntimeTerminalReason;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("target.txt"), "fn existing() {}\n").unwrap();
+
+    // Model emits an edit_file where the search text is not present in the file.
+    let bad_edit = "[edit_file]\npath: target.txt\n---search---\nNOT_PRESENT_TEXT\n---replace---\nfixed\n[/edit_file]";
+    let mut rt = make_runtime_in(vec![bad_edit], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            // "modify" triggers mutation_allowed but not simple_edit seeding.
+            text: "modify target.txt to fix the function".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must not emit Failed: {events:?}");
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::MutationFailed,
+                ..
+            })
+        ),
+        "expected RuntimeTerminal(MutationFailed), got: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert!(
+        last_assistant
+            .map(|s| s.contains("Read the file first"))
+            .unwrap_or(false),
+        "answer must instruct the model to read the file first: {last_assistant:?}"
+    );
+}
+
+#[test]
 fn initialization_lookup_no_initialization_candidates_degrades_cleanly() {
     // Initialization lookup triggered, but no matched line contains an exact
     // initialization term. Gate 3 does not fire — existing candidate-read

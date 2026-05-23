@@ -23,6 +23,7 @@ sandbox/
 
 # Memory files
 .memory/
+CLAUDE.md
 
 # OS
 .DS_Store

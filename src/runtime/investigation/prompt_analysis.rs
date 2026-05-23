@@ -404,7 +404,8 @@ fn path_from_bare_filename_explain_prompt(text: &str) -> Option<String> {
     let lower = text.trim_start().to_ascii_lowercase();
     if !(lower.starts_with("what does ")
         || lower.starts_with("explain ")
-        || lower.starts_with("describe "))
+        || lower.starts_with("describe ")
+        || lower.starts_with("find what "))
     {
         return None;
     }
@@ -487,7 +488,10 @@ fn path_from_read_verb(text: &str) -> Option<String> {
 
 fn path_from_explicit_file_prompt(text: &str) -> Option<String> {
     let lower = text.trim_start().to_ascii_lowercase();
-    if !(lower.starts_with("what does ") || lower.starts_with("explain ")) {
+    if !(lower.starts_with("what does ")
+        || lower.starts_with("explain ")
+        || lower.starts_with("find what "))
+    {
         return None;
     }
 
@@ -636,7 +640,10 @@ fn classify_direct_read_mode(text: &str) -> Option<DirectReadMode> {
     {
         return Some(DirectReadMode::Raw);
     }
-    if lower.starts_with("explain ") || lower.starts_with("what does ") {
+    if lower.starts_with("explain ")
+        || lower.starts_with("what does ")
+        || lower.starts_with("find what ")
+    {
         return Some(DirectReadMode::Explain);
     }
     None
@@ -1253,6 +1260,30 @@ mod tests {
         // ambiguous — two filenames
         assert_eq!(
             requested_read_path("What does task_service.py and user_service.py do?").as_deref(),
+            None
+        );
+    }
+
+    #[test]
+    fn requested_read_path_find_what_bare_filename() {
+        assert_eq!(
+            requested_read_path("Find what task_service.py does").as_deref(),
+            Some("task_service.py")
+        );
+    }
+
+    #[test]
+    fn requested_read_path_find_what_path_qualified() {
+        assert_eq!(
+            requested_read_path("Find what sandbox/services/task_service.py does").as_deref(),
+            Some("sandbox/services/task_service.py")
+        );
+    }
+
+    #[test]
+    fn requested_read_path_find_what_no_file_token_returns_none() {
+        assert_eq!(
+            requested_read_path("Find what the project does").as_deref(),
             None
         );
     }

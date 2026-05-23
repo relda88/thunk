@@ -929,6 +929,15 @@ pub(super) fn run_tool_round(
                         reason: RuntimeTerminalReason::ReadFileFailed,
                     };
                 }
+                if let ToolInput::EditFile { path, .. } = &input {
+                    if error.contains("search text not found") {
+                        return ToolRoundOutcome::TerminalAnswer {
+                            results: accumulated,
+                            answer: seeded_edit_search_not_found_answer(path),
+                            reason: RuntimeTerminalReason::MutationFailed,
+                        };
+                    }
+                }
                 // Do NOT update last_call_key on error: a failed call should not block
                 // an identical retry. Cycle detection applies only to successful executions.
             }
