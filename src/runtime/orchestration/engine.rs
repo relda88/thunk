@@ -742,6 +742,7 @@ impl Runtime {
             ("openai", "openai"),
             ("ollama", "ollama"),
             ("openrouter", "openrouter"),
+            ("groq", "groq"),
         ];
         let mut lines = vec!["providers:".to_string()];
         for (display, internal) in &providers {
@@ -757,9 +758,10 @@ impl Runtime {
             "openai" => "openai",
             "ollama" => "ollama",
             "openrouter" => "openrouter",
+            "groq" => "groq",
             other => {
                 on_event(RuntimeEvent::SystemMessage(format!(
-                    "Unknown provider '{}'. Known: llamacpp, openai, ollama, openrouter",
+                    "Unknown provider '{}'. Known: llamacpp, openai, ollama, openrouter, groq",
                     other
                 )));
                 return;

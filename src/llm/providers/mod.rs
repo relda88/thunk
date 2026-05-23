@@ -1,3 +1,4 @@
+mod groq;
 mod llama_cpp;
 mod mock;
 mod ollama;
@@ -10,6 +11,7 @@ use crate::llm::backend::ModelBackend;
 
 pub use llama_cpp::LlamaCppBackend;
 
+use groq::GroqBackend;
 use mock::MockBackend;
 use ollama::OllamaBackend;
 use openai::OpenAiBackend;
@@ -56,12 +58,20 @@ fn make_openrouter(config: &Config) -> Result<Box<dyn ModelBackend>> {
     )))
 }
 
+fn make_groq(config: &Config) -> Result<Box<dyn ModelBackend>> {
+    let api_key = std::env::var("GROQ_API_KEY")
+        .ok()
+        .ok_or_else(|| AppError::Config("GROQ_API_KEY not set".into()))?;
+    Ok(Box::new(GroqBackend::new(config.groq.clone(), api_key)))
+}
+
 const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
     ("mock", make_mock),
     ("llama_cpp", make_llama_cpp),
     ("openai", make_openai),
     ("ollama", make_ollama),
     ("openrouter", make_openrouter),
+    ("groq", make_groq),
 ];
 
 pub fn build_backend(config: &Config) -> Result<Box<dyn ModelBackend>> {
@@ -84,7 +94,7 @@ pub fn build_backend(config: &Config) -> Result<Box<dyn ModelBackend>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::config::{Config, LlmConfig, OpenAiConfig};
+    use crate::app::config::{Config, GroqConfig, LlmConfig, OpenAiConfig};
     use crate::app::AppError;
 
     use super::build_backend;
@@ -170,5 +180,11 @@ mod tests {
             err.to_string().contains("OPENAI_API_KEY"),
             "unexpected message: {err}"
         );
+    }
+
+    #[test]
+    fn groq_config_defaults_to_correct_base_url() {
+        let config = GroqConfig::default();
+        assert_eq!(config.base_url, "https://api.groq.com/openai/v1");
     }
 }

@@ -140,6 +140,7 @@ pub struct Config {
     pub openai: OpenAiConfig,
     pub ollama: OllamaConfig,
     pub openrouter: OpenRouterConfig,
+    pub groq: GroqConfig,
     pub commands: HashMap<String, CustomCommandDef>,
     pub project: ProjectConfig,
 }
@@ -276,6 +277,26 @@ impl Default for OpenRouterConfig {
         Self {
             model: "anthropic/claude-3-haiku".to_string(),
             base_url: "https://openrouter.ai/api/v1".to_string(),
+            max_tokens: 512,
+            temperature: 0.2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct GroqConfig {
+    pub model: String,
+    pub base_url: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+impl Default for GroqConfig {
+    fn default() -> Self {
+        Self {
+            model: "qwen-qwq-32b".to_string(),
+            base_url: "https://api.groq.com/openai/v1".to_string(),
             max_tokens: 512,
             temperature: 0.2,
         }
