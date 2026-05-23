@@ -1001,7 +1001,7 @@ impl Runtime {
             &[("surface", tool_surface.as_str().into())],
         );
         let shell_request = original_user_prompt.and_then(requested_shell_command);
-        if !investigation_required {
+        if !investigation_required && tool_surface != ToolSurface::GitReadOnly {
             if let Some(cmd) = shell_request.as_ref() {
                 if is_permitted_shell_command(cmd) {
                     pending_runtime_call = Some(PendingRuntimeCall {

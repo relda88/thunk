@@ -40,7 +40,7 @@ max_tokens = 512
 temperature = 0.2
 
 [groq]
-model = "qwen-qwq-32b"
+model = "llama-3.1-8b-instant"
 base_url = "https://api.groq.com/openai/v1"
 max_tokens = 512
 temperature = 0.2

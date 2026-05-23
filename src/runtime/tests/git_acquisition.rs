@@ -850,3 +850,39 @@ fn allowed_tool_execution_failure_does_not_count_as_disallowed_tool_attempt() {
         "tool execution failures must not trigger surface-policy terminal reason"
     );
 }
+
+#[test]
+fn git_read_only_surface_does_not_seed_shell_command() {
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    init_git_repo(tmp.path());
+    // "git status" prefix selects GitReadOnly surface; "run cargo test" would
+    // normally trigger shell seeding on other surfaces.
+    let mut rt = make_runtime_in(vec!["[git_status]"], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "git status run cargo test".into(),
+        },
+    );
+
+    assert!(
+        !has_failed(&events),
+        "GitReadOnly turn with run phrase must not fail: {events:?}"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            RuntimeEvent::ApprovalRequired { pending: p, .. } if p.tool_name == "shell"
+        )),
+        "shell must not be seeded on GitReadOnly surface: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "shell")),
+        "shell must not be dispatched on GitReadOnly surface: {events:?}"
+    );
+}
