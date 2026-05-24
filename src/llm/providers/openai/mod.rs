@@ -2,8 +2,8 @@ use std::io::BufRead;
 
 use serde_json::{json, Value};
 
-use crate::app::config::OpenAiConfig;
-use crate::app::{AppError, Result};
+use crate::core::config::OpenAiConfig;
+use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
     BackendCapabilities, BackendEvent, BackendStatus, GenerateRequest, ModelBackend,
 };

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use crate::app::config::Config;
+use crate::core::config::Config;
 use crate::llm::backend::{BackendCapabilities, BackendEvent, GenerateRequest, ModelBackend};
 use crate::tools::default_registry;
 
@@ -57,7 +57,7 @@ impl ModelBackend for TestBackend {
         &mut self,
         _request: GenerateRequest,
         on_event: &mut dyn FnMut(BackendEvent),
-    ) -> crate::app::Result<()> {
+    ) -> crate::core::error::Result<()> {
         let reply = self
             .responses
             .get(self.call_count)
@@ -107,7 +107,7 @@ impl ModelBackend for RecordingBackend {
         &mut self,
         request: GenerateRequest,
         on_event: &mut dyn FnMut(BackendEvent),
-    ) -> crate::app::Result<()> {
+    ) -> crate::core::error::Result<()> {
         self.requests.lock().unwrap().push(request);
         let reply = self
             .responses

@@ -1,5 +1,5 @@
     use super::*;
-    use crate::app::config::Config;
+    use crate::core::config::Config;
     use crate::llm::backend::{BackendCapabilities, BackendEvent, GenerateRequest, ModelBackend};
     use crate::runtime::ProjectRoot;
     use crate::tools::{default_registry, ToolInput};
@@ -43,7 +43,7 @@
             &mut self,
             _request: GenerateRequest,
             on_event: &mut dyn FnMut(BackendEvent),
-        ) -> crate::app::Result<()> {
+        ) -> crate::core::error::Result<()> {
             let reply = self
                 .responses
                 .get(self.call_count)

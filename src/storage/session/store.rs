@@ -2,7 +2,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::app::{AppError, Result};
+use crate::core::error::{AppError, Result};
 
 use super::schema;
 use super::types::{generate_session_id, now_ms, SavedSession, SessionMeta, StoredMessage};

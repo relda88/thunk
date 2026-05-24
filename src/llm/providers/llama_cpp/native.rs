@@ -11,8 +11,8 @@ use llama_cpp_2::{
     TokenToStringError,
 };
 
-use crate::app::config::LlamaCppConfig;
-use crate::app::{AppError, Result};
+use crate::core::config::LlamaCppConfig;
+use crate::core::error::{AppError, Result};
 use crate::llm::backend::{BackendEvent, BackendStatus, BackendTimingStage};
 
 pub(super) struct LoadedLlama {

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::app::{AppError, Result};
+use crate::core::error::{AppError, Result};
 
 const CURRENT_VERSION: i32 = 3;
 

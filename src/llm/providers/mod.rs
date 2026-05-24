@@ -5,8 +5,8 @@ mod ollama;
 mod openai;
 mod openrouter;
 
-use crate::app::config::Config;
-use crate::app::{AppError, Result};
+use crate::core::config::Config;
+use crate::core::error::{AppError, Result};
 use crate::llm::backend::ModelBackend;
 
 pub use llama_cpp::LlamaCppBackend;
@@ -94,8 +94,8 @@ pub fn build_backend(config: &Config) -> Result<Box<dyn ModelBackend>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::config::{Config, GroqConfig, LlmConfig, OpenAiConfig};
-    use crate::app::AppError;
+    use crate::core::config::{Config, GroqConfig, LlmConfig, OpenAiConfig};
+    use crate::core::error::AppError;
 
     use super::build_backend;
 
@@ -109,7 +109,7 @@ mod tests {
     }
 
     fn unwrap_config_err(
-        result: crate::app::Result<Box<dyn crate::llm::backend::ModelBackend>>,
+        result: crate::core::error::Result<Box<dyn crate::llm::backend::ModelBackend>>,
     ) -> AppError {
         match result {
             Err(e) => e,

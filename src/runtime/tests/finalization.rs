@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::config::Config;
+use crate::core::config::Config;
 use crate::llm::backend::GenerateRequest;
 use crate::runtime::types::RuntimeTerminalReason;
 use crate::tools::default_registry;

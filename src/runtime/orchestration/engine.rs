@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::app::config::Config;
+use crate::core::config::Config;
 use crate::llm::backend::ModelBackend;
 use crate::tools::{PendingAction, ToolInput, ToolOutput, ToolRegistry, ToolRunResult};
 

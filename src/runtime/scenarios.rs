@@ -9,7 +9,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::app::config::Config;
+    use crate::core::config::Config;
     use crate::llm::backend::{BackendCapabilities, BackendEvent, GenerateRequest, ModelBackend};
     use crate::runtime::types::{RuntimeEvent, RuntimeRequest};
     use crate::runtime::{ProjectRoot, Runtime};
@@ -47,7 +47,7 @@ mod tests {
             &mut self,
             _request: GenerateRequest,
             on_event: &mut dyn FnMut(BackendEvent),
-        ) -> crate::app::Result<()> {
+        ) -> crate::core::error::Result<()> {
             let reply = self
                 .responses
                 .get(self.call_count)

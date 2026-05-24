@@ -2,8 +2,8 @@ use std::io::BufRead;
 
 use serde_json::{json, Value};
 
-use crate::app::config::GroqConfig;
-use crate::app::{AppError, Result};
+use crate::core::config::GroqConfig;
+use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
     BackendCapabilities, BackendEvent, BackendStatus, GenerateRequest, ModelBackend,
 };
@@ -97,7 +97,7 @@ impl ModelBackend for GroqBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::config::{Config, GroqConfig};
+    use crate::core::config::{Config, GroqConfig};
 
     #[test]
     fn groq_config_is_readable_from_config_struct() {

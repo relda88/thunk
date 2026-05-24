@@ -1,4 +1,4 @@
-use crate::app::Result;
+use crate::core::error::Result;
 
 /// Typed identifiers for backend timing stages.
 ///

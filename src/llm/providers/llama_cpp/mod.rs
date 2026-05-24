@@ -1,8 +1,8 @@
 mod native;
 mod prompt;
 
-use crate::app::config::LlamaCppConfig;
-use crate::app::{AppError, Result};
+use crate::core::config::LlamaCppConfig;
+use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
     BackendCapabilities, BackendEvent, BackendStatus, BackendTimingStage, GenerateRequest,
     ModelBackend,

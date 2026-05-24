@@ -1,4 +1,4 @@
-use crate::app::Result;
+use crate::core::error::Result;
 use crate::llm::backend::{BackendEvent, BackendStatus, GenerateRequest, Message, ModelBackend};
 
 use super::super::conversation::Conversation;
