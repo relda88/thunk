@@ -17,6 +17,7 @@ mod finalization;
 mod git_acquisition;
 mod integration_misc;
 mod investigation;
+mod investigation_inline;
 mod investigation_modes;
 mod path_scope;
 mod project_snapshot;
