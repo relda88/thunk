@@ -7,7 +7,7 @@ use super::super::types::{Activity, RuntimeEvent};
 use super::tool_round::SearchBudget;
 
 #[derive(Clone, Copy)]
-pub(super) enum GenerationRoundLabel {
+pub(crate) enum GenerationRoundLabel {
     Initial,
     PostTool,
     PostEvidenceRetry,
@@ -15,7 +15,7 @@ pub(super) enum GenerationRoundLabel {
 }
 
 impl GenerationRoundLabel {
-    pub(super) fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Initial => "initial",
             Self::PostTool => "post-tool",
@@ -26,7 +26,7 @@ impl GenerationRoundLabel {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum GenerationRoundCause {
+pub(crate) enum GenerationRoundCause {
     Initial,
     ToolResults,
     Recovery,
@@ -43,7 +43,7 @@ pub(super) enum GenerationRoundCause {
 }
 
 impl GenerationRoundCause {
-    pub(super) fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Initial => "initial",
             Self::ToolResults => "tool-results",
@@ -62,7 +62,7 @@ impl GenerationRoundCause {
     }
 }
 
-pub(super) struct TurnPerformance {
+pub(crate) struct TurnPerformance {
     enabled: bool,
     turn_start: Option<std::time::Instant>,
     rounds: usize,
@@ -81,11 +81,11 @@ pub(super) struct TurnPerformance {
 }
 
 impl TurnPerformance {
-    pub(super) fn is_enabled(&self) -> bool {
+    pub(crate) fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    pub(super) fn new(context_window_tokens: Option<u32>) -> Self {
+    pub(crate) fn new(context_window_tokens: Option<u32>) -> Self {
         let enabled = std::env::var_os(RUNTIME_TRACE_ENV).is_some();
         Self {
             enabled,
@@ -129,7 +129,7 @@ impl TurnPerformance {
         }
     }
 
-    pub(super) fn start_round(
+    pub(crate) fn start_round(
         &mut self,
         label: GenerationRoundLabel,
         cause: GenerationRoundCause,
@@ -153,7 +153,7 @@ impl TurnPerformance {
         )));
     }
 
-    pub(super) fn record_backend_timing(&mut self, stage: BackendTimingStage, elapsed_ms: u64) {
+    pub(crate) fn record_backend_timing(&mut self, stage: BackendTimingStage, elapsed_ms: u64) {
         if !self.enabled {
             return;
         }
@@ -168,14 +168,14 @@ impl TurnPerformance {
         }
     }
 
-    pub(super) fn record_tool_elapsed(&mut self, elapsed_ms: u64) {
+    pub(crate) fn record_tool_elapsed(&mut self, elapsed_ms: u64) {
         if !self.enabled {
             return;
         }
         self.tool_ms += elapsed_ms;
     }
 
-    pub(super) fn record_token_counts(&mut self, prompt: u32, completion: u32) {
+    pub(crate) fn record_token_counts(&mut self, prompt: u32, completion: u32) {
         if !self.enabled {
             return;
         }
@@ -183,7 +183,7 @@ impl TurnPerformance {
         self.tokens_completion += u64::from(completion);
     }
 
-    pub(super) fn emit_summary(&self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+    pub(crate) fn emit_summary(&self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         if !self.enabled {
             return;
         }
