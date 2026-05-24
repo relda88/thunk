@@ -31,7 +31,9 @@ pub(crate) fn run_app(
 
         if event::poll(Duration::from_millis(100))? {
             match event::read()? {
-                Event::Key(key) => handle_key_event(stdout, &mut state, app, config, key)?,
+                Event::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
+                    handle_key_event(stdout, &mut state, app, config, key)?
+                }
                 Event::Paste(text) => state.insert_str(&text),
                 Event::Resize(_, _) => {}
                 _ => {}

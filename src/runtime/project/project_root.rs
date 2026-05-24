@@ -46,6 +46,16 @@ impl ProjectRoot {
         let canonical = std::fs::canonicalize(&path)
             .map_err(|e| ProjectRootError::CanonicalizeFailed(path.clone(), e))?;
 
+        #[cfg(target_os = "windows")]
+        let canonical = {
+            let s = canonical.to_string_lossy();
+            if s.starts_with("\\\\?\\") {
+                std::path::PathBuf::from(&s[4..])
+            } else {
+                canonical
+            }
+        };
+
         if !canonical.is_dir() {
             return Err(ProjectRootError::NotADirectory(canonical));
         }

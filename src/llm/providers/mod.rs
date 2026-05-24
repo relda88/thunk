@@ -1,4 +1,5 @@
 mod groq;
+#[cfg(feature = "local")]
 mod llama_cpp;
 mod mock;
 mod ollama;
@@ -9,6 +10,7 @@ use crate::core::config::Config;
 use crate::core::error::{AppError, Result};
 use crate::llm::backend::ModelBackend;
 
+#[cfg(feature = "local")]
 pub use llama_cpp::LlamaCppBackend;
 
 use groq::GroqBackend;
@@ -23,6 +25,7 @@ fn make_mock(config: &Config) -> Result<Box<dyn ModelBackend>> {
     Ok(Box::new(MockBackend::new(config.app.name.clone())))
 }
 
+#[cfg(feature = "local")]
 fn make_llama_cpp(config: &Config) -> Result<Box<dyn ModelBackend>> {
     if config.llama_cpp.model_path.is_none() {
         return Err(AppError::Config(
@@ -65,9 +68,19 @@ fn make_groq(config: &Config) -> Result<Box<dyn ModelBackend>> {
     Ok(Box::new(GroqBackend::new(config.groq.clone(), api_key)))
 }
 
+#[cfg(feature = "local")]
 const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
     ("mock", make_mock),
     ("llama_cpp", make_llama_cpp),
+    ("openai", make_openai),
+    ("ollama", make_ollama),
+    ("openrouter", make_openrouter),
+    ("groq", make_groq),
+];
+
+#[cfg(not(feature = "local"))]
+const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
+    ("mock", make_mock),
     ("openai", make_openai),
     ("ollama", make_ollama),
     ("openrouter", make_openrouter),
@@ -117,6 +130,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "local")]
     #[test]
     fn llama_cpp_without_model_path_fails_at_startup() {
         let config = config_with_provider("llama_cpp");
