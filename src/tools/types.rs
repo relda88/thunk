@@ -245,8 +245,3 @@ pub enum ToolError {
     InvalidInput(String),
 }
 
-impl From<ToolError> for crate::app::AppError {
-    fn from(e: ToolError) -> Self {
-        crate::app::AppError::Tool(e.to_string())
-    }
-}

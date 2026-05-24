@@ -27,3 +27,4 @@ pub use tool_detector::{
     contains_malformed_block,
     detected_malformed_mutation_tool,
 };
+pub(crate) use tool_detector::is_tool_call_message;

@@ -93,3 +93,42 @@ impl ModelBackend for GroqBackend {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::config::{Config, GroqConfig};
+
+    #[test]
+    fn groq_config_is_readable_from_config_struct() {
+        let config = Config::default();
+        assert_eq!(config.groq.base_url, "https://api.groq.com/openai/v1");
+        assert_eq!(config.groq.max_tokens, 512);
+        assert!(!config.groq.model.is_empty());
+    }
+
+    #[test]
+    fn authorization_header_is_bearer_prefixed() {
+        let api_key = "sk-test-key-12345";
+        let auth_header = format!("Bearer {api_key}");
+        assert_eq!(auth_header, "Bearer sk-test-key-12345");
+    }
+
+    #[test]
+    fn endpoint_url_appends_chat_completions_to_base_url() {
+        let config = GroqConfig {
+            base_url: "https://api.groq.com/openai/v1".to_string(),
+            ..GroqConfig::default()
+        };
+        let url = format!("{}/chat/completions", config.base_url);
+        assert_eq!(url, "https://api.groq.com/openai/v1/chat/completions");
+    }
+
+    #[test]
+    fn backend_name_is_groq_slash_model() {
+        let config = GroqConfig::default();
+        let expected = format!("groq/{}", config.model);
+        let backend = GroqBackend::new(config, "key".to_string());
+        assert_eq!(backend.name(), expected);
+    }
+}

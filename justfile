@@ -31,3 +31,6 @@ trace-fresh:
 
 install:
     cargo install --path .
+
+clean-logs:
+    rm -f logs/*

@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::tools::ToolError;
+
 /// Defines the custom error type for the app
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -26,3 +28,9 @@ pub enum AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+impl From<ToolError> for AppError {
+    fn from(e: ToolError) -> Self {
+        AppError::Tool(e.to_string())
+    }
+}

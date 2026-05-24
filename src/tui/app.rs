@@ -80,7 +80,7 @@ fn handle_key_event(
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
             if let Some(prompt) = &state.last_prompt {
                 let path = std::env::temp_dir().join("thunk_last_prompt.txt");
-                let _ = std::fs::write(&path, prompt);
+                dump_prompt_to_file(&path, prompt);
                 state.set_status(&format!("prompt dumped to {}", path.display()));
             } else {
                 state.set_status("no prompt captured yet");
@@ -394,6 +394,10 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
     let month = mp + if mp < 10 { 3 } else { -9 };
     let year = y + if month <= 2 { 1 } else { 0 };
     (year as i32, month as u32, day as u32)
+}
+
+fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
+    let _ = std::fs::write(path, prompt);
 }
 
 fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {

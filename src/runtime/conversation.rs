@@ -1,4 +1,5 @@
 use crate::llm::backend::{Message, Role};
+use crate::runtime::protocol::tool_codec::is_tool_call_message;
 
 /// Trigger live trimming when the conversation exceeds this many messages.
 const LIVE_TRIM_THRESHOLD: usize = 40;
@@ -67,7 +68,7 @@ impl Conversation {
             .filter(|m| match m.role {
                 Role::System => false,
                 Role::User => !is_runtime_injected(&m.content),
-                Role::Assistant => !is_assistant_tool_call(&m.content),
+                Role::Assistant => !is_tool_call_message(&m.content),
             })
             .cloned()
             .collect()
@@ -151,7 +152,7 @@ impl Conversation {
             let a = &self.messages[i];
             let b = &self.messages[i + 1];
             if a.role == Role::Assistant
-                && a.content.trim_start().starts_with('[')
+                && is_tool_call_message(&a.content)
                 && b.role == Role::User
                 && is_runtime_injected(&b.content)
             {
@@ -192,13 +193,6 @@ fn is_runtime_injected(content: &str) -> bool {
     content.starts_with("=== tool_result:")
         || content.starts_with("=== tool_error:")
         || content.starts_with("[runtime:correction]")
-}
-
-/// Returns true for assistant messages that are tool-call requests rather than
-/// natural-language responses. Uses the same bracket-start heuristic as
-/// `trim_tool_exchanges_if_needed`.
-fn is_assistant_tool_call(content: &str) -> bool {
-    content.trim_start().starts_with('[')
 }
 
 #[cfg(test)]
