@@ -1,7 +1,10 @@
 use crate::llm::backend::BackendTimingStage;
+use crate::tools::ToolInput;
 
-use super::super::trace::RUNTIME_TRACE_ENV;
-use super::super::types::RuntimeEvent;
+use super::super::investigation::investigation::InvestigationState;
+use super::super::trace::{trace_runtime_decision, RUNTIME_TRACE_ENV};
+use super::super::types::{Activity, RuntimeEvent};
+use super::tool_round::SearchBudget;
 
 #[derive(Clone, Copy)]
 pub(super) enum GenerationRoundLabel {
@@ -244,6 +247,83 @@ impl TurnPerformance {
         }
         on_event(RuntimeEvent::RuntimeTrace(line));
     }
+}
+
+pub(crate) fn trace_insufficient_evidence_terminal(
+    reason: &str,
+    tool_rounds: usize,
+    search_budget: &SearchBudget,
+    investigation: &InvestigationState,
+    on_event: &mut dyn FnMut(RuntimeEvent),
+) {
+    trace_runtime_decision(
+        on_event,
+        "terminal_insufficient_evidence",
+        &[
+            ("reason", reason.to_string()),
+            ("rounds", tool_rounds.to_string()),
+            ("search_calls", search_budget.calls.to_string()),
+            (
+                "search_produced_results",
+                investigation.search_produced_results().to_string(),
+            ),
+            ("files_read", investigation.files_read_count().to_string()),
+            (
+                "candidate_reads",
+                investigation.candidate_reads_count().to_string(),
+            ),
+            ("evidence_ready", investigation.evidence_ready().to_string()),
+        ],
+    );
+}
+
+pub(crate) fn infer_post_tool_round_cause(results: &str) -> GenerationRoundCause {
+    if results.contains("=== tool_result: search_code ===") && results.contains("No matches found.")
+    {
+        GenerationRoundCause::SearchRetry
+    } else if results.contains("This is a usage lookup")
+        || results.contains("This is a config lookup")
+        || results.contains("This is an initialization lookup")
+        || results.contains("This is a creation lookup")
+        || results.contains("This is a registration lookup")
+        || results.contains("This is a load lookup")
+        || results.contains("This is a save lookup")
+        || results.contains("The file just read contained only import matches")
+        || results.contains("The file just read is a lockfile")
+    {
+        GenerationRoundCause::Recovery
+    } else {
+        GenerationRoundCause::ToolResults
+    }
+}
+
+pub(crate) fn short_tool_name(tool_name: &str) -> &str {
+    match tool_name {
+        "read_file" => "read",
+        "list_dir" => "list",
+        "search_code" => "search",
+        "edit_file" => "edit",
+        "write_file" => "write",
+        "shell" => "shell",
+        "git_status" | "git_diff" | "git_log" => "git",
+        other => other,
+    }
+}
+
+pub(crate) fn tool_input_activity(input: Option<&ToolInput>) -> Activity {
+    let (tool, detail) = match input {
+        Some(ToolInput::ReadFile { path }) => ("read".to_string(), Some(path.clone())),
+        Some(ToolInput::ListDir { path }) => ("list".to_string(), Some(path.clone())),
+        Some(ToolInput::SearchCode { query, .. }) => ("search".to_string(), Some(query.clone())),
+        Some(ToolInput::EditFile { path, .. }) => ("edit".to_string(), Some(path.clone())),
+        Some(ToolInput::WriteFile { path, .. }) => ("write".to_string(), Some(path.clone())),
+        Some(ToolInput::Shell { command }) => ("shell".to_string(), Some(command.clone())),
+        Some(ToolInput::GitStatus | ToolInput::GitDiff | ToolInput::GitLog) => {
+            ("git".to_string(), None)
+        }
+        None => ("tool".to_string(), None),
+    };
+    Activity::ExecutingTools { tool, detail }
 }
 
 #[cfg(test)]

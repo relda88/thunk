@@ -24,23 +24,23 @@ use super::super::{resolve, ProjectRoot};
 /// context growth when the model reads speculatively or drifts into repeated reads.
 /// 3 is conservative: a correct investigation needs 1 (search → read → answer);
 /// 2-3 accommodates a reasonable follow-up read without runaway context expansion.
-pub(super) const MAX_READS_PER_TURN: usize = 3;
+pub(crate) const MAX_READS_PER_TURN: usize = 3;
 
 /// Maximum number of distinct search-candidate files that may be read in a single
 /// investigation turn.  After two candidate reads, if evidence is still not ready,
 /// the runtime terminates cleanly rather than allowing another correction cycle.
-pub(super) const MAX_CANDIDATE_READS_PER_INVESTIGATION: usize = 2;
+pub(crate) const MAX_CANDIDATE_READS_PER_INVESTIGATION: usize = 2;
 
 /// Tracks search_code usage within a single turn.
 /// Rules: 1 search always permitted; a second search is permitted only when the first
 /// returned zero matches; any further searches are blocked.
-pub(super) struct SearchBudget {
+pub(crate) struct SearchBudget {
     pub(super) calls: usize,
     last_was_empty: bool,
 }
 
 impl SearchBudget {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             calls: 0,
             last_was_empty: false,
@@ -56,15 +56,15 @@ impl SearchBudget {
         self.last_was_empty = was_empty;
     }
 
-    pub(super) fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.calls >= 2 || (self.calls == 1 && !self.last_was_empty)
     }
 
-    pub(super) fn empty_retry_exhausted(&self) -> bool {
+    pub(crate) fn empty_retry_exhausted(&self) -> bool {
         self.calls >= 2 && self.last_was_empty
     }
 
-    pub(super) fn closed_message(&self) -> &'static str {
+    pub(crate) fn closed_message(&self) -> &'static str {
         if self.calls >= 2 && self.last_was_empty {
             SEARCH_CLOSED_AFTER_EMPTY_RETRY
         } else {
@@ -123,7 +123,7 @@ fn is_general_doc_like_candidate_path(path: &str) -> bool {
 }
 
 /// Outcome of dispatching one round of tool calls.
-pub(super) enum ToolRoundOutcome {
+pub(crate) enum ToolRoundOutcome {
     /// All tools in this round completed immediately; results are ready to push.
     Completed {
         results: String,
@@ -161,7 +161,7 @@ pub(super) enum ToolRoundOutcome {
 /// `last_call_key` carries the fingerprint of the most recently executed call across
 /// rounds. If the current call matches it, a cycle error is injected instead of
 /// dispatching. The key is updated after every non-cycle, non-approval dispatch.
-pub(super) fn run_tool_round(
+pub(crate) fn run_tool_round(
     project_root: &ProjectRoot,
     registry: &ToolRegistry,
     calls: Vec<ToolInput>,

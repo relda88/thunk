@@ -9,6 +9,7 @@ pub use super::{
     AnswerSource, PendingAction, ProjectRoot, RiskLevel, Runtime, RuntimeEvent, RuntimeRequest,
 };
 
+mod engine;
 mod anchors;
 mod approval;
 mod external_repo_fixtures;
