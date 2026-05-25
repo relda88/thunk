@@ -546,6 +546,9 @@ pub(crate) struct InvestigationState {
     non_candidate_read_attempts: usize,
     /// Summaries of accepted search calls this turn, for evidence citation on approval.
     accepted_search_summaries: Vec<String>,
+    /// Path dispatched as a definition-site read after usage candidates were exhausted.
+    /// When set, Gate 1 is bypassed for this path so the read is accepted as evidence.
+    definition_site_dispatch_issued: Option<String>,
 }
 
 impl InvestigationState {
@@ -598,6 +601,7 @@ impl InvestigationState {
             direct_reads_count: 0,
             direct_read_paths: HashSet::new(),
             accepted_search_summaries: vec![],
+            definition_site_dispatch_issued: None,
         }
     }
 
@@ -1031,6 +1035,28 @@ impl InvestigationState {
                 .iter()
                 .any(|c| normalize_evidence_path(c) == read_path);
 
+            // Bypass: definition-site dispatch. If the runtime explicitly dispatched this
+            // path after usage candidates were exhausted, accept it unconditionally.
+            // Gate 1 must not reject a file the runtime was directed to read.
+            if self.definition_site_dispatch_issued.as_deref() == Some(read_path.as_str()) {
+                self.useful_accepted_candidate_reads += 1;
+                self.useful_accepted_candidate_paths.insert(read_path.clone());
+                trace_runtime_decision(
+                    on_event,
+                    "read_evidence",
+                    &[
+                        ("path", read_path.clone()),
+                        ("accepted", "true".into()),
+                        ("reason", "definition_site_dispatch_bypass".into()),
+                        ("candidate_reads", self.candidate_reads_count.to_string()),
+                        (
+                            "useful_candidate_reads",
+                            self.useful_accepted_candidate_reads.to_string(),
+                        ),
+                    ],
+                );
+                return None;
+            }
             // Gate 1 (UsageLookup): definition-only reads are structurally insufficient
             // when usage candidates exist. Fire once; subsequent reads fall through ungated.
             if matches!(mode, InvestigationMode::UsageLookup)
@@ -1781,6 +1807,10 @@ impl InvestigationState {
             }
             _ => None,
         }
+    }
+
+    pub(crate) fn set_definition_site_dispatched(&mut self, path: &str) {
+        self.definition_site_dispatch_issued = Some(normalize_evidence_path(path));
     }
 
     pub fn evidence_summary(&self) -> Vec<String> {

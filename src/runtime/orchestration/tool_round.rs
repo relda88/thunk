@@ -913,6 +913,7 @@ pub(crate) fn run_tool_round(
                                 ],
                             );
                             let path = def_path.to_string();
+                            investigation.set_definition_site_dispatched(&path);
                             return ToolRoundOutcome::RuntimeDispatch {
                                 accumulated,
                                 call: ToolInput::ReadFile { path },
@@ -1648,6 +1649,126 @@ mod tests {
         assert!(
             path.contains("sandbox/services/task_service.py"),
             "redirect must target the source candidate, got: {path}"
+        );
+    }
+
+    #[test]
+    fn definition_site_dispatch_accepted_on_usage_lookup() {
+        // After usage candidates are exhausted on a UsageLookup, the runtime dispatches
+        // the definition-site file (definition_after_usage_exhausted). Gate 1 must not
+        // reject that read — the bypass must fire and accept it as evidence.
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("usage.rs"), "let x = needle(args);\n").unwrap();
+        fs::write(root.path().join("definition.rs"), "fn needle() {}\n").unwrap();
+
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed = 0usize;
+        let mut weak_query = 0usize;
+
+        // Round 1: search — UsageLookup immediately dispatches the preferred usage candidate
+        let after_search = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::SearchCode {
+                query: "needle".into(),
+                path: None,
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            true,
+            InvestigationMode::UsageLookup,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        let ToolRoundOutcome::RuntimeDispatch { call, .. } = after_search else {
+            panic!("search on UsageLookup must dispatch the preferred usage candidate");
+        };
+        let ToolInput::ReadFile { path: usage_path } = call else {
+            panic!("dispatch must be read_file");
+        };
+        assert_eq!(usage_path, "usage.rs", "preferred candidate must be usage.rs");
+
+        // Round 2: read usage.rs — evidence satisfied; runtime then dispatches definition.rs
+        let after_usage_read = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::ReadFile {
+                path: usage_path.clone(),
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            true,
+            InvestigationMode::UsageLookup,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        let ToolRoundOutcome::RuntimeDispatch { call, .. } = after_usage_read else {
+            panic!("after usage read, runtime must dispatch the definition site candidate");
+        };
+        let ToolInput::ReadFile { path: def_path } = call else {
+            panic!("dispatch must be read_file");
+        };
+        assert_eq!(
+            def_path, "definition.rs",
+            "definition-site dispatch must target definition.rs"
+        );
+
+        // Round 3: read definition.rs — bypass must accept it without triggering Gate 1
+        let after_def_read = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::ReadFile {
+                path: def_path.clone(),
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            true,
+            InvestigationMode::UsageLookup,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        assert!(
+            matches!(after_def_read, ToolRoundOutcome::Completed { .. }),
+            "definition-site read must complete without Gate 1 cascade"
+        );
+        assert!(
+            investigation.evidence_ready(),
+            "evidence must be ready after reading the usage candidate"
         );
     }
 }
