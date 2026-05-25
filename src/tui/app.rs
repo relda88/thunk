@@ -417,6 +417,10 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             state.add_tool_message(format!("tool: {name}"));
         }
         RuntimeEvent::ToolCallFinished { name, summary } => match summary {
+            // FileReadFinished fires for every successful read_file and adds the
+            // canonical "read {path} ({n} lines) — Ctrl+O to expand" message.
+            // Suppress the compact ToolCallFinished duplicate to keep a single summary.
+            Some(_) if name == "read_file" => {}
             Some(s) => state.add_tool_message(s),
             None => state.add_tool_message(format!("tool failed: {name}")),
         },
