@@ -1587,12 +1587,26 @@ impl InvestigationState {
             && !self.lockfile_candidates.contains(path)
     }
 
-    fn first_definition_candidate(&self) -> Option<&str> {
+    pub(crate) fn first_definition_candidate(&self) -> Option<&str> {
         self.search_candidate_paths
             .iter()
             .find(|path| {
                 self.definition_only_candidates.contains(*path)
                     || self.definition_site_candidates.contains(*path)
+            })
+            .map(String::as_str)
+    }
+
+    /// Returns the first candidate that contains an exact definition of the queried symbol
+    /// but is NOT classified as definition-only (i.e. it also has non-definition lines).
+    /// Used by the UsageLookup supplemental dispatch: reading this file won't trigger the
+    /// Gate 1 cascade that fires for definition-only files.
+    pub(crate) fn first_definition_site_candidate(&self) -> Option<&str> {
+        self.search_candidate_paths
+            .iter()
+            .find(|path| {
+                self.definition_site_candidates.contains(*path)
+                    && !self.definition_only_candidates.contains(*path)
             })
             .map(String::as_str)
     }

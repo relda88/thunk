@@ -805,3 +805,97 @@ fn usage_lookup_definition_only_reads_produce_insufficient_evidence() {
         "UsageLookup with definition-only reads must produce InsufficientEvidence, got: {answer_source:?}"
     );
 }
+
+#[test]
+fn usage_lookup_dispatches_definition_site_candidate_after_usage_exhausted() {
+    // Scenario: broad UsageLookup with two pure-usage callers (target=2) plus one
+    // mixed file that is a definition_site_candidate but NOT definition_only_candidate
+    // (it has both a definition line and a usage line for the queried symbol).
+    // The two callers rank higher by non_definition_match_count and are dispatched
+    // first. After they are exhausted (count=2=target), the runtime should dispatch
+    // the definition_site file via first_definition_site_candidate. Gate 1 must NOT
+    // fire for this dispatch because the file is not definition_only.
+    use crate::runtime::types::RuntimeEvent;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    // caller_a.rs: three usage lines → highest non_def_count, preferred candidate
+    fs::write(
+        tmp.path().join("caller_a.rs"),
+        "target_fn();\ntarget_fn();\ntarget_fn();\n",
+    )
+    .unwrap();
+    // caller_b.rs: two usage lines → second-highest non_def_count, next candidate
+    fs::write(
+        tmp.path().join("caller_b.rs"),
+        "target_fn();\ntarget_fn();\n",
+    )
+    .unwrap();
+    // impl.rs: one definition line + one usage line → definition_site (not def_only),
+    // non_def_count=1 so ranks below both callers and is not dispatched as a usage
+    // candidate. The new code should dispatch it after usage candidates are exhausted.
+    fs::write(
+        tmp.path().join("impl.rs"),
+        "pub fn target_fn() { init(); }\ntarget_fn();\n",
+    )
+    .unwrap();
+
+    let final_answer =
+        "target_fn is defined in impl.rs and called in caller_a.rs and caller_b.rs.";
+    let mut rt = make_runtime_in(
+        vec!["[search_code: target_fn]", final_answer],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is target_fn used?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must terminate cleanly: {events:?}");
+
+    let successful_reads: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let RuntimeEvent::ToolCallFinished {
+                name,
+                summary: Some(s),
+            } = e
+            {
+                if name == "read_file" {
+                    return Some(s.as_str());
+                }
+            }
+            None
+        })
+        .collect();
+
+    assert!(
+        successful_reads.iter().any(|s| s.contains("caller_a.rs")),
+        "preferred usage candidate must be read: {events:?}"
+    );
+    assert!(
+        successful_reads.iter().any(|s| s.contains("caller_b.rs")),
+        "second usage candidate must be read: {events:?}"
+    );
+    assert!(
+        successful_reads.iter().any(|s| s.contains("impl.rs")),
+        "definition_site candidate must be dispatched after usage exhausted: {events:?}"
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "turn must complete with a model answer after all reads: {answer_source:?}"
+    );
+}

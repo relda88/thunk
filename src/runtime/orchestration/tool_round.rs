@@ -894,6 +894,30 @@ pub(crate) fn run_tool_round(
                                 path: path.to_string(),
                             },
                         };
+                    } else if let Some(def_path) =
+                        investigation.first_definition_site_candidate()
+                    {
+                        let normalized = normalize_evidence_path(def_path);
+                        if !reads_this_turn.contains(&normalized) {
+                            trace_runtime_decision(
+                                on_event,
+                                "usage_candidate_selected",
+                                &[
+                                    ("path", def_path.to_string()),
+                                    ("mode", investigation_mode.as_str().to_string()),
+                                    (
+                                        "selection_reason",
+                                        "definition_after_usage_exhausted".to_string(),
+                                    ),
+                                    ("dispatch_possible", "true".to_string()),
+                                ],
+                            );
+                            let path = def_path.to_string();
+                            return ToolRoundOutcome::RuntimeDispatch {
+                                accumulated,
+                                call: ToolInput::ReadFile { path },
+                            };
+                        }
                     }
                 }
                 *last_call_key = Some(key);
