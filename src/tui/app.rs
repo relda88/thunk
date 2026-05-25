@@ -407,6 +407,29 @@ fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
     let _ = std::fs::write(path, prompt);
 }
 
+/// Decodes a v2 edit_file payload and returns a diff approval message, or None if the
+/// payload doesn't match the expected format (caller falls back to the generic summary).
+///
+/// Payload format: `v2\x00{absolute_path}\x00{display_path}\x00{search_text}\x00{replace_text}`
+fn format_edit_approval(payload: &str) -> Option<String> {
+    let parts: Vec<&str> = payload.split('\x00').collect();
+    if parts.len() < 5 || parts[0] != "v2" {
+        return None;
+    }
+    let display_path = parts[2];
+    let search_text = parts[3];
+    let replace_text = parts[4];
+    let diff_lines = search_text
+        .lines()
+        .map(|l| format!("- {l}"))
+        .chain(replace_text.lines().map(|l| format!("+ {l}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(format!(
+        "[approval required] edit {display_path}\n{diff_lines}\ntype /approve to confirm or /reject to cancel"
+    ))
+}
+
 fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ActivityChanged(activity) => state.set_status(&activity.label()),
@@ -432,18 +455,33 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         }
         RuntimeEvent::Failed { message } => {
             state.set_status("error");
-            state.add_system_message(message);
+            state.add_error_message(message);
         }
         RuntimeEvent::ApprovalRequired { pending, evidence } => {
-            let evidence_str = if evidence.is_empty() {
-                String::new()
+            let message = if pending.tool_name == "edit_file" {
+                format_edit_approval(&pending.payload).unwrap_or_else(|| {
+                    let evidence_str = if evidence.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\nEvidence: {}", evidence.join(" | "))
+                    };
+                    format!(
+                        "[approval required] {}{} — type /approve to confirm or /reject to cancel",
+                        pending.summary, evidence_str
+                    )
+                })
             } else {
-                format!("\nEvidence: {}", evidence.join(" | "))
+                let evidence_str = if evidence.is_empty() {
+                    String::new()
+                } else {
+                    format!("\nEvidence: {}", evidence.join(" | "))
+                };
+                format!(
+                    "[approval required] {}{} — type /approve to confirm or /reject to cancel",
+                    pending.summary, evidence_str
+                )
             };
-            state.add_system_message(format!(
-                "[approval required] {}{} — type /approve to confirm or /reject to cancel",
-                pending.summary, evidence_str
-            ));
+            state.add_alert_message(message);
             state.set_status("awaiting approval");
         }
         RuntimeEvent::InfoMessage(text) => {
@@ -480,8 +518,8 @@ mod tests {
     use crate::tools::default_registry;
 
     use super::{
-        format_session_updated_at, format_sessions_list, handle_command, parse_read_file_header,
-        summarize_command_output,
+        format_edit_approval, format_session_updated_at, format_sessions_list, handle_command,
+        parse_read_file_header, summarize_command_output,
     };
     use crate::tui::commands::Command;
     use crate::tui::state::AppState;
@@ -491,6 +529,35 @@ mod tests {
     }
 
     // parse_read_file_header
+
+    // format_edit_approval
+
+    #[test]
+    fn edit_approval_renders_diff_with_path() {
+        let payload = "v2\x00/abs/src/main.rs\x00src/main.rs\x00old line\x00new line";
+        let msg = format_edit_approval(payload).unwrap();
+        assert!(msg.starts_with("[approval required] edit src/main.rs\n"));
+        assert!(msg.contains("- old line"));
+        assert!(msg.contains("+ new line"));
+        assert!(msg.ends_with("\ntype /approve to confirm or /reject to cancel"));
+    }
+
+    #[test]
+    fn edit_approval_multiline_diff() {
+        let payload = "v2\x00/abs/lib.rs\x00lib.rs\x00fn old() {}\nfn also_old() {}\x00fn new() {}\nfn also_new() {}";
+        let msg = format_edit_approval(payload).unwrap();
+        assert!(msg.contains("- fn old() {}"));
+        assert!(msg.contains("- fn also_old() {}"));
+        assert!(msg.contains("+ fn new() {}"));
+        assert!(msg.contains("+ fn also_new() {}"));
+    }
+
+    #[test]
+    fn edit_approval_returns_none_for_malformed_payload() {
+        assert!(format_edit_approval("not_v2\x00a\x00b\x00c\x00d").is_none());
+        assert!(format_edit_approval("v2\x00only_three\x00parts").is_none());
+        assert!(format_edit_approval("no_nulls_at_all").is_none());
+    }
 
     #[test]
     fn parses_untruncated_header() {

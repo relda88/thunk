@@ -9,11 +9,20 @@ pub enum Role {
     Assistant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKind {
+    Normal,
+    Dimmed,
+    Alert,
+    Error,
+}
+
 /// Represents a chat message with a role (system, user, assistant) and content
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
+    pub kind: MessageKind,
 }
 
 /// Main application state struct, holding the app name, input buffer, cursor position, message history, status, and quit flag
@@ -46,6 +55,7 @@ impl AppState {
         let messages = vec![ChatMessage {
             role: Role::System,
             content: welcome.clone(),
+            kind: MessageKind::Normal,
         }];
 
         Self {
@@ -70,6 +80,7 @@ impl AppState {
         self.messages.push(ChatMessage {
             role: Role::System,
             content: content.into(),
+            kind: MessageKind::Dimmed,
         });
         self.reset_scroll();
     }
@@ -79,6 +90,7 @@ impl AppState {
         self.messages.push(ChatMessage {
             role: Role::User,
             content: content.into(),
+            kind: MessageKind::Normal,
         });
         self.reset_scroll();
     }
@@ -88,6 +100,7 @@ impl AppState {
         self.messages.push(ChatMessage {
             role: Role::Assistant,
             content: content.into(),
+            kind: MessageKind::Normal,
         });
         self.reset_scroll();
     }
@@ -103,6 +116,7 @@ impl AppState {
             Some(ChatMessage {
                 role: Role::Assistant,
                 content,
+                ..
             }) => content.push_str(chunk),
             _ => self.add_assistant_message(chunk.to_string()),
         }
@@ -113,6 +127,25 @@ impl AppState {
         self.messages.push(ChatMessage {
             role: Role::System,
             content: content.into(),
+            kind: MessageKind::Dimmed,
+        });
+        self.reset_scroll();
+    }
+
+    pub fn add_alert_message(&mut self, content: impl Into<String>) {
+        self.messages.push(ChatMessage {
+            role: Role::System,
+            content: content.into(),
+            kind: MessageKind::Alert,
+        });
+        self.reset_scroll();
+    }
+
+    pub fn add_error_message(&mut self, content: impl Into<String>) {
+        self.messages.push(ChatMessage {
+            role: Role::System,
+            content: content.into(),
+            kind: MessageKind::Error,
         });
         self.reset_scroll();
     }
@@ -124,6 +157,7 @@ impl AppState {
         self.messages.push(ChatMessage {
             role: Role::System,
             content: self.welcome_message.clone(),
+            kind: MessageKind::Normal,
         });
         self.reset_scroll();
     }

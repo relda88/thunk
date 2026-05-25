@@ -3,13 +3,13 @@ use std::io::{self, Write};
 use crossterm::{
     cursor::MoveTo,
     queue,
-    style::{Attribute, Print, SetAttribute},
+    style::{Attribute, Color, Print, SetAttribute, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
 
 use crate::app::Result;
 
-use super::state::{AppState, ChatMessage, Role};
+use super::state::{AppState, ChatMessage, MessageKind, Role};
 
 const RESERVED_LINES: u16 = 4;
 
@@ -54,7 +54,7 @@ fn draw_transcript(
     transcript_height: usize,
 ) -> Result<()> {
     let available_width = width.saturating_sub(1) as usize;
-    let mut lines = Vec::new();
+    let mut lines: Vec<(String, MessageKind)> = Vec::new();
 
     for (i, message) in state.messages.iter().enumerate() {
         // In collapsed state, hide the assistant message immediately after the
@@ -67,27 +67,40 @@ fn draw_transcript(
             }
         }
 
-        let prefix = role_prefix(message);
+        let is_expanded_file_content = state.expanded_file_read
+            && state.last_file_read_index.map_or(false, |idx| i == idx + 1)
+            && message.role == Role::Assistant;
+        let prefix = if is_expanded_file_content { "" } else { role_prefix(message) };
         let wrapped = wrap_text(
             &format!("{prefix}{}", message.content),
             available_width.max(8),
         );
-        lines.extend(wrapped);
-        lines.push(String::new());
+        let kind = message.kind;
+        for line in wrapped {
+            lines.push((line, kind));
+        }
+        lines.push((String::new(), kind));
     }
 
     state.max_scroll = lines.len().saturating_sub(transcript_height);
     let offset = state.scroll_offset.min(state.max_scroll);
     let end = lines.len().saturating_sub(offset);
     let start = end.saturating_sub(transcript_height);
-    let visible: Vec<String> = lines[start..end].to_vec();
+    let visible: Vec<(String, MessageKind)> = lines[start..end].to_vec();
 
-    for (idx, line) in visible.iter().enumerate() {
-        queue!(
-            stdout,
-            MoveTo(0, (idx as u16) + 2),
-            Print(fit_line(line, width))
-        )?;
+    for (idx, (line, kind)) in visible.iter().enumerate() {
+        queue!(stdout, MoveTo(0, (idx as u16) + 2))?;
+        match kind {
+            MessageKind::Dimmed => queue!(stdout, SetAttribute(Attribute::Dim))?,
+            MessageKind::Alert => queue!(
+                stdout,
+                SetAttribute(Attribute::Bold),
+                SetForegroundColor(Color::Yellow)
+            )?,
+            MessageKind::Error => queue!(stdout, SetForegroundColor(Color::Red))?,
+            MessageKind::Normal => {}
+        }
+        queue!(stdout, Print(fit_line(line, width)), SetAttribute(Attribute::Reset))?;
     }
 
     if offset > 0 && !visible.is_empty() {
