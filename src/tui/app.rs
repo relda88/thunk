@@ -451,10 +451,10 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         }
         RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
         RuntimeEvent::SystemMessage(text) => state.add_system_message(text),
-        RuntimeEvent::FileReadFinished { path, line_count, content } => {
+        RuntimeEvent::FileReadFinished { path, line_count, content: _ } => {
             state.add_system_message(format!("read {path} ({line_count} lines) — Ctrl+O to expand"));
             let message_index = state.messages.len() - 1;
-            state.store_file_read(content, message_index);
+            state.store_file_read(message_index);
         }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}

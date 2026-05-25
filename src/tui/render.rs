@@ -57,6 +57,16 @@ fn draw_transcript(
     let mut lines = Vec::new();
 
     for (i, message) in state.messages.iter().enumerate() {
+        // In collapsed state, hide the assistant message immediately after the
+        // file read summary — it holds the raw file content from the runtime.
+        if !state.expanded_file_read {
+            if let Some(idx) = state.last_file_read_index {
+                if i == idx + 1 && message.role == Role::Assistant {
+                    continue;
+                }
+            }
+        }
+
         let prefix = role_prefix(message);
         let wrapped = wrap_text(
             &format!("{prefix}{}", message.content),
@@ -64,14 +74,6 @@ fn draw_transcript(
         );
         lines.extend(wrapped);
         lines.push(String::new());
-
-        if state.expanded_file_read && state.last_file_read_index == Some(i) {
-            if let Some(ref content) = state.last_file_read_content {
-                let wrapped_content = wrap_text(content, available_width.max(8));
-                lines.extend(wrapped_content);
-                lines.push(String::new());
-            }
-        }
     }
 
     state.max_scroll = lines.len().saturating_sub(transcript_height);
