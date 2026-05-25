@@ -1081,7 +1081,12 @@ impl Runtime {
                 if let Some(bad_path) = claimed
                     .iter()
                     .map(|p| normalize_evidence_path(p))
-                    .find(|p| !path_is_within_scope(p, scope))
+                    .find(|p| {
+                        !path_is_within_scope(p, scope)
+                            && !state.reads_this_turn.contains(&normalize_evidence_path(
+                                &format!("{}/{p}", scope.trim_end_matches('/')),
+                            ))
+                    })
                 {
                     trace_runtime_decision(
                         on_event,
@@ -1114,7 +1119,6 @@ impl Runtime {
                     sorted.join(",")
                 };
                 let can_dispatch = !state.answer_guard_retry_entered
-                    && !state.investigation.evidence_ready()
                     && state.investigation
                         .is_search_candidate_path(&normalize_evidence_path(bad_path))
                     && state.investigation.candidate_reads_count()

@@ -1694,8 +1694,9 @@
     // ── 18.4 → 18.2 answer guard retry on EvidenceReady ─────────────────────
 
     /// Guard fires on an unread search candidate when evidence is already ready.
-    /// Phase 18.2: no tool dispatch is issued; a text-only correction names the
-    /// allowed read set and the model synthesizes correctly on the retry.
+    /// The guard dispatches a read of the unread candidate regardless of evidence
+    /// state — evidence_ready and cited-but-unread are independent. Model synthesizes
+    /// correctly after both files are read → ToolAssisted.
     #[test]
     fn answer_guard_evidence_ready_text_retry_allows_grounded_synthesis() {
         use std::fs;
@@ -1711,14 +1712,14 @@
         .unwrap();
 
         // Model reads a.rs (evidence ready) then cites the unread candidate b.rs.
-        // Guard fires: evidence_ready → can_dispatch blocked → text correction injected.
-        // Model answers correctly from a.rs only on the retry → ToolAssisted.
+        // Guard fires: b.rs is a candidate → runtime dispatches read of b.rs.
+        // Model answers correctly citing only a.rs (now both files read) → ToolAssisted.
         let mut rt = make_runtime_in(
             vec![
                 "[search_code: run_turns]",
                 "[read_file: src/a.rs]",
-                "run_turns is in src/b.rs.", // guard rejects, correction injected
-                "run_turns is in src/a.rs.", // cites only the read file, admitted
+                "run_turns is in src/b.rs.", // guard detects unread candidate, dispatches read
+                "run_turns is in src/a.rs.", // cites a read file, admitted
             ],
             tmp.path(),
         );
@@ -1738,7 +1739,7 @@
         });
         assert!(
             matches!(source, Some(AnswerSource::ToolAssisted { .. })),
-            "text retry must allow grounded synthesis: {source:?}"
+            "guard dispatch must allow grounded synthesis: {source:?}"
         );
         let snapshot = rt.messages_snapshot();
         let read_results = snapshot
@@ -1746,14 +1747,8 @@
             .filter(|m| m.content.contains("=== tool_result: read_file ==="))
             .count();
         assert_eq!(
-            read_results, 1,
-            "no tool dispatch must occur during retry: {snapshot:?}"
-        );
-        assert!(
-            snapshot
-                .iter()
-                .any(|m| m.content.contains("which was not read this turn")),
-            "text correction must be injected naming the unread path: {snapshot:?}"
+            read_results, 2,
+            "guard must dispatch read of unread candidate (both files read): {snapshot:?}"
         );
     }
 

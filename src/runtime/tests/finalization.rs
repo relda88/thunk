@@ -285,17 +285,17 @@ fn answer_citing_unread_path_triggers_insufficient_evidence() {
         "pub fn route_request() {}\n",
     )
     .unwrap();
-    // handlers.rs also defines route_request so it appears as a search candidate.
-    // This exercises the !evidence_ready() gate in can_dispatch: even though handlers.rs
-    // is a candidate, the guard must not issue a tool read after evidence is already ready.
+    // handlers.rs does NOT define route_request, so it is never a search candidate.
+    // The guard must not dispatch a read for a non-candidate path — instead it injects
+    // a text correction, then InsufficientEvidence on the second hallucination.
     fs::write(
         tmp.path().join("src/handlers.rs"),
-        "pub fn route_request() {}\n",
+        "pub fn handle_request() {}\n",
     )
     .unwrap();
 
     // Model: search → read one candidate (evidence ready) → answer citing the unread
-    // candidate twice. First rejection triggers a text-only retry; second is terminal.
+    // non-candidate twice. First rejection triggers a text-only retry; second is terminal.
     let hallucinated = "route_request is defined in src/handlers.rs.";
     let mut rt = make_runtime_in(
         vec![
