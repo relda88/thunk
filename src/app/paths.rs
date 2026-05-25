@@ -27,6 +27,16 @@ impl AppPaths {
     pub fn discover() -> Result<Self> {
         let start_dir = env::current_dir()?.canonicalize()?;
 
+        #[cfg(target_os = "windows")]
+        let start_dir = {
+            let s = start_dir.to_string_lossy();
+            if s.starts_with("\\\\?\\") {
+                std::path::PathBuf::from(&s[4..])
+            } else {
+                start_dir
+            }
+        };
+
         // Config/storage root: where config.toml lives, or cwd when absent.
         let root_dir = find_config_root(&start_dir).unwrap_or_else(|| start_dir.clone());
 
@@ -82,6 +92,16 @@ mod tests {
     // discovery logic as AppPaths::discover() but without touching cwd.
     fn discover_from(launch_dir: &Path) -> AppPaths {
         let start_dir = launch_dir.canonicalize().unwrap();
+
+        #[cfg(target_os = "windows")]
+        let start_dir = {
+            let s = start_dir.to_string_lossy();
+            if s.starts_with("\\\\?\\") {
+                std::path::PathBuf::from(&s[4..])
+            } else {
+                start_dir
+            }
+        };
         let root_dir = find_config_root(&start_dir).unwrap_or_else(|| start_dir.clone());
         let project_root = find_git_root(&start_dir).unwrap_or_else(|| start_dir.clone());
         AppPaths {
