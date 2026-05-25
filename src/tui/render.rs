@@ -14,7 +14,7 @@ use super::state::{AppState, ChatMessage, Role};
 const RESERVED_LINES: u16 = 4;
 
 /// Renders the entire TUI based on the current app state, including header, transcript, input, and status bar
-pub fn render(stdout: &mut io::Stdout, state: &AppState) -> Result<()> {
+pub fn render(stdout: &mut io::Stdout, state: &mut AppState) -> Result<()> {
     let (width, height) = terminal::size()?;
     let transcript_height = height.saturating_sub(RESERVED_LINES) as usize;
 
@@ -49,7 +49,7 @@ fn draw_header(stdout: &mut io::Stdout, state: &AppState, width: u16) -> Result<
 /// in the available space
 fn draw_transcript(
     stdout: &mut io::Stdout,
-    state: &AppState,
+    state: &mut AppState,
     width: u16,
     transcript_height: usize,
 ) -> Result<()> {
@@ -66,7 +66,8 @@ fn draw_transcript(
         lines.push(String::new());
     }
 
-    let offset = state.scroll_offset;
+    state.max_scroll = lines.len().saturating_sub(transcript_height);
+    let offset = state.scroll_offset.min(state.max_scroll);
     let end = lines.len().saturating_sub(offset);
     let start = end.saturating_sub(transcript_height);
     let visible: Vec<String> = lines[start..end].to_vec();

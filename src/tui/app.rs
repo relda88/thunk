@@ -23,7 +23,7 @@ pub(crate) fn run_app(
     let mut state = AppState::new(config, paths);
 
     loop {
-        render(stdout, &state)?;
+        render(stdout, &mut state)?;
 
         if state.should_quit {
             return Ok(());

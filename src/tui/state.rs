@@ -27,6 +27,7 @@ pub struct AppState {
     pub should_quit: bool,
     pub last_prompt: Option<String>,
     pub scroll_offset: usize,
+    pub max_scroll: usize,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -55,6 +56,7 @@ impl AppState {
             should_quit: false,
             last_prompt: None,
             scroll_offset: 0,
+            max_scroll: 0,
             welcome_message: welcome,
         }
     }
@@ -123,7 +125,7 @@ impl AppState {
     }
 
     pub fn scroll_up(&mut self, n: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_add(n);
+        self.scroll_offset = self.scroll_offset.saturating_add(n).min(self.max_scroll);
     }
 
     pub fn scroll_down(&mut self, n: usize) {
