@@ -159,4 +159,11 @@ pub enum RuntimeEvent {
     /// A runtime-generated message for the user that is not assistant output.
     /// Displayed as a system message in the TUI; never added to conversation state.
     SystemMessage(String),
+    /// Fired after a successful read_file completion. Carries the full file content
+    /// for the TUI expand view. Advisory only — must not affect control flow.
+    FileReadFinished {
+        path: String,
+        line_count: usize,
+        content: String,
+    },
 }

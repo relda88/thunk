@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::tools::{
-    ExecutionKind, PendingAction, ToolError, ToolInput, ToolRegistry, ToolRunResult,
+    ExecutionKind, PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
 };
 
 use super::super::investigation::anchors::AnchorState;
@@ -812,6 +812,15 @@ pub(crate) fn run_tool_round(
                     name: name.clone(),
                     summary: Some(summary),
                 });
+                if name == "read_file" {
+                    if let ToolOutput::FileContents(ref fc) = output {
+                        on_event(RuntimeEvent::FileReadFinished {
+                            path: fc.path.clone(),
+                            line_count: fc.total_lines,
+                            content: fc.contents.clone(),
+                        });
+                    }
+                }
                 if is_git_read_only_tool {
                     git_answer_sections.push(git_acquisition_answer_section(
                         &name,

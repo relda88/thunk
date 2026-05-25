@@ -92,6 +92,7 @@ fn handle_key_event(
         (KeyCode::Down, _) => state.scroll_down(1),
         (KeyCode::PageUp, _) => state.scroll_up(10),
         (KeyCode::PageDown, _) => state.scroll_down(10),
+        (KeyCode::Char('o'), KeyModifiers::CONTROL) => state.toggle_file_expand(),
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }
@@ -446,6 +447,11 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         }
         RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
         RuntimeEvent::SystemMessage(text) => state.add_system_message(text),
+        RuntimeEvent::FileReadFinished { path, line_count, content } => {
+            state.add_system_message(format!("read {path} ({line_count} lines) — Ctrl+O to expand"));
+            let message_index = state.messages.len() - 1;
+            state.store_file_read(content, message_index);
+        }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
         RuntimeEvent::BackendTokenCounts { .. } => {}

@@ -28,6 +28,9 @@ pub struct AppState {
     pub last_prompt: Option<String>,
     pub scroll_offset: usize,
     pub max_scroll: usize,
+    pub expanded_file_read: bool,
+    pub last_file_read_content: Option<String>,
+    pub last_file_read_index: Option<usize>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -57,6 +60,9 @@ impl AppState {
             last_prompt: None,
             scroll_offset: 0,
             max_scroll: 0,
+            expanded_file_read: false,
+            last_file_read_content: None,
+            last_file_read_index: None,
             welcome_message: welcome,
         }
     }
@@ -155,5 +161,15 @@ impl AppState {
         let submitted = std::mem::take(&mut self.input);
         self.cursor = 0;
         Some(submitted)
+    }
+
+    pub fn toggle_file_expand(&mut self) {
+        self.expanded_file_read = !self.expanded_file_read;
+    }
+
+    pub fn store_file_read(&mut self, content: String, message_index: usize) {
+        self.last_file_read_content = Some(content);
+        self.last_file_read_index = Some(message_index);
+        self.expanded_file_read = false;
     }
 }
