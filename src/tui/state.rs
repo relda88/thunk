@@ -26,6 +26,7 @@ pub struct AppState {
     pub status: String,
     pub should_quit: bool,
     pub last_prompt: Option<String>,
+    pub scroll_offset: usize,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -53,6 +54,7 @@ impl AppState {
             status: "ready".to_string(),
             should_quit: false,
             last_prompt: None,
+            scroll_offset: 0,
             welcome_message: welcome,
         }
     }
@@ -63,6 +65,7 @@ impl AppState {
             role: Role::System,
             content: content.into(),
         });
+        self.reset_scroll();
     }
 
     /// Adds a user message to the transcript
@@ -71,6 +74,7 @@ impl AppState {
             role: Role::User,
             content: content.into(),
         });
+        self.reset_scroll();
     }
 
     /// Adds a complete assistant message to the transcript
@@ -79,6 +83,7 @@ impl AppState {
             role: Role::Assistant,
             content: content.into(),
         });
+        self.reset_scroll();
     }
 
     /// Starts a new assistant message so chunks can be streamed into it
@@ -103,6 +108,7 @@ impl AppState {
             role: Role::System,
             content: content.into(),
         });
+        self.reset_scroll();
     }
 
     /// Clears all transcript messages and restores only the initial welcome line.
@@ -113,6 +119,19 @@ impl AppState {
             role: Role::System,
             content: self.welcome_message.clone(),
         });
+        self.reset_scroll();
+    }
+
+    pub fn scroll_up(&mut self, n: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_add(n);
+    }
+
+    pub fn scroll_down(&mut self, n: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
+    }
+
+    pub fn reset_scroll(&mut self) {
+        self.scroll_offset = 0;
     }
 
     /// Updates the visible status line

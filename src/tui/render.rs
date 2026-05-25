@@ -66,11 +66,10 @@ fn draw_transcript(
         lines.push(String::new());
     }
 
-    let visible: Vec<String> = if lines.len() > transcript_height {
-        lines[lines.len() - transcript_height..].to_vec()
-    } else {
-        lines
-    };
+    let offset = state.scroll_offset;
+    let end = lines.len().saturating_sub(offset);
+    let start = end.saturating_sub(transcript_height);
+    let visible: Vec<String> = lines[start..end].to_vec();
 
     for (idx, line) in visible.iter().enumerate() {
         queue!(
@@ -78,6 +77,13 @@ fn draw_transcript(
             MoveTo(0, (idx as u16) + 2),
             Print(fit_line(line, width))
         )?;
+    }
+
+    if offset > 0 && !visible.is_empty() {
+        let indicator = format!("↑ {} lines", offset);
+        let row = (visible.len() as u16).saturating_sub(1) + 2;
+        let col = width.saturating_sub(indicator.chars().count() as u16);
+        queue!(stdout, MoveTo(col, row), Print(&indicator))?;
     }
 
     Ok(())

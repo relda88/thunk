@@ -88,6 +88,10 @@ fn handle_key_event(
                 state.set_status("no prompt captured yet");
             }
         }
+        (KeyCode::Up, _) => state.scroll_up(1),
+        (KeyCode::Down, _) => state.scroll_down(1),
+        (KeyCode::PageUp, _) => state.scroll_up(10),
+        (KeyCode::PageDown, _) => state.scroll_down(10),
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }

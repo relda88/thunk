@@ -1039,6 +1039,9 @@ impl InvestigationState {
             // path after usage candidates were exhausted, accept it unconditionally.
             // Gate 1 must not reject a file the runtime was directed to read.
             if self.definition_site_dispatch_issued.as_deref() == Some(read_path.as_str()) {
+                // Undo the candidate_reads_count increment above: definition-site reads are
+                // supplemental runtime dispatches and must not consume a candidate slot.
+                self.candidate_reads_count -= 1;
                 self.useful_accepted_candidate_reads += 1;
                 self.useful_accepted_candidate_paths.insert(read_path.clone());
                 trace_runtime_decision(
