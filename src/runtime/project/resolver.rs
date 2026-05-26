@@ -166,6 +166,16 @@ fn resolve_read_path(root: &ProjectRoot, raw: &str) -> Result<ProjectPath, PathR
         raw: raw.to_string(),
     })?;
 
+    #[cfg(target_os = "windows")]
+    let canonical = {
+        let s = canonical.to_string_lossy();
+        if s.starts_with("\\\\?\\") {
+            std::path::PathBuf::from(&s[4..])
+        } else {
+            canonical
+        }
+    };
+
     project_path_from_absolute(root, raw, canonical)
 }
 
@@ -384,6 +394,16 @@ fn rebuild_write_target(
                 current.display()
             ),
         })?;
+
+    #[cfg(target_os = "windows")]
+    let canonical_parent = {
+        let s = canonical_parent.to_string_lossy();
+        if s.starts_with("\\\\?\\") {
+            std::path::PathBuf::from(&s[4..])
+        } else {
+            canonical_parent
+        }
+    };
 
     if !canonical_parent.starts_with(root.path()) {
         return Err(PathResolutionError::EscapesRoot {
