@@ -80,8 +80,10 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
         ToolOutput::GitBranch(b) => {
             if b.branches.is_empty() {
                 "git branch: no branches".to_string()
+            } else if b.current.is_empty() {
+                format!("git branch: {} branches (detached HEAD)", b.branches.len())
             } else {
-                format!("git branch: {} (current: {})", b.branches.len(), b.current)
+                format!("git branch: {}", b.current)
             }
         }
         ToolOutput::EditFile(e) => {
@@ -449,13 +451,12 @@ fn render_git_branch(b: &crate::tools::types::GitBranchOutput) -> String {
         return "No branches found.".to_string();
     }
     let mut lines = Vec::new();
-    for branch in &b.branches {
-        if branch == &b.current {
-            lines.push(format!("* {branch}"));
-        } else {
-            lines.push(format!("  {branch}"));
-        }
+    if !b.current.is_empty() {
+        lines.push(format!("current: {}", b.current));
+    } else {
+        lines.push("current: (detached HEAD)".to_string());
     }
+    lines.push(format!("branches: {}", b.branches.join(", ")));
     lines.join("\n")
 }
 
@@ -704,6 +705,21 @@ mod tests {
         let rendered = format_tool_result("git_log", &output);
         assert!(rendered.contains("[showing 1 recent commits; output truncated]"));
         assert!(rendered.contains("0123456 2026-04-22 thunk - add git log"));
+    }
+
+    #[test]
+    fn render_git_branch_output() {
+        use crate::tools::types::GitBranchOutput;
+        use crate::tools::ToolOutput;
+
+        let output = ToolOutput::GitBranch(GitBranchOutput {
+            current: "dev".to_string(),
+            branches: vec!["dev".to_string(), "main".to_string()],
+        });
+        assert_eq!(render_compact_summary(&output), "git branch: dev");
+        let rendered = format_tool_result("git_branch", &output);
+        assert!(rendered.contains("current: dev"));
+        assert!(rendered.contains("branches: dev, main"));
     }
 
     #[test]

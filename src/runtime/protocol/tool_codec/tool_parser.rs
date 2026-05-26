@@ -119,6 +119,7 @@ fn scan_static_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
         ("[git_status]", ToolInput::GitStatus),
         ("[git_diff]", ToolInput::GitDiff),
         ("[git_log]", ToolInput::GitLog),
+        ("[git_branch]", ToolInput::GitBranch),
     ];
 
     for (tag, input) in static_tools {
@@ -613,6 +614,14 @@ mod tests {
         let calls = parse_all_tool_inputs(text);
         assert_eq!(calls.len(), 1);
         assert!(matches!(&calls[0], ToolInput::GitLog));
+    }
+
+    #[test]
+    fn parses_git_branch_call() {
+        let text = "[git_branch]";
+        let calls = parse_all_tool_inputs(text);
+        assert_eq!(calls.len(), 1);
+        assert!(matches!(&calls[0], ToolInput::GitBranch));
     }
 
     #[test]

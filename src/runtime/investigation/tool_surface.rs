@@ -194,6 +194,12 @@ fn is_explicit_git_tooling_prompt(prompt: &str) -> bool {
         || starts_with_token_phrase(&tokens, &["show", "latest", "git", "status"])
         || starts_with_token_phrase(&tokens, &["show", "latest", "git", "diff"])
         || starts_with_token_phrase(&tokens, &["show", "latest", "git", "log"])
+        || starts_with_token_phrase(&tokens, &["git", "branch"])
+        || starts_with_token_phrase(&tokens, &["show", "git", "branch"])
+        || starts_with_token_phrase(&tokens, &["what", "branch"])
+        || starts_with_token_phrase(&tokens, &["which", "branch"])
+        || starts_with_token_phrase(&tokens, &["current", "branch"])
+        || starts_with_token_phrase(&tokens, &["show", "current", "branch"])
 }
 
 fn prompt_requests_directory_navigation(prompt: &str) -> bool {

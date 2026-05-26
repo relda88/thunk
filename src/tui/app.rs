@@ -338,6 +338,18 @@ fn summarize_command_output(text: &str) -> String {
                 "search: done".to_string()
             }
         }
+        "git_status" | "git_diff" | "git_log" => body.to_string(),
+        "git_branch" => {
+            if body == "No branches found." {
+                return "git branch: no branches".to_string();
+            }
+            let current = body
+                .lines()
+                .find(|l| l.starts_with("current: "))
+                .and_then(|l| l.strip_prefix("current: "))
+                .unwrap_or("unknown");
+            format!("git branch: {current}")
+        }
         _ => text.to_string(),
     }
 }
@@ -638,8 +650,15 @@ mod tests {
 
     #[test]
     fn unknown_tool_passes_through_raw() {
-        let raw = tool_result("git_status", "clean");
+        let raw = tool_result("unknown_tool", "some output");
         assert_eq!(summarize_command_output(&raw), raw);
+    }
+
+    #[test]
+    fn summarize_git_branch_shows_current_branch() {
+        let body = "current: dev\nbranches: dev, main";
+        let raw = tool_result("git_branch", body);
+        assert_eq!(summarize_command_output(&raw), "git branch: dev");
     }
 
     #[test]
