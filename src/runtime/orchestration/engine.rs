@@ -648,6 +648,7 @@ impl Runtime {
                         AnswerSource::ToolAssisted { rounds: 1 },
                         on_event,
                     );
+                    on_event(RuntimeEvent::DirectReadCompleted);
                     return TurnSignal::Finish;
                 }
                 let post_tool_cause = infer_post_tool_round_cause(&results);

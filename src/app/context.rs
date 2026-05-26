@@ -185,6 +185,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         | RuntimeEvent::BackendTokenCounts { .. }
         | RuntimeEvent::RuntimeTrace(_)
         | RuntimeEvent::PromptAssembled(_)
-        | RuntimeEvent::FileReadFinished { .. } => None,
+        | RuntimeEvent::FileReadFinished { .. }
+        | RuntimeEvent::DirectReadCompleted => None,
     }
 }

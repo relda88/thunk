@@ -61,14 +61,14 @@ fn draw_transcript(
         // file read summary — it holds the raw file content from the runtime.
         if !state.expanded_file_read {
             if let Some(idx) = state.last_file_read_index {
-                if i == idx + 1 && message.role == Role::Assistant {
+                if i == idx && message.role == Role::Assistant {
                     continue;
                 }
             }
         }
 
         let is_expanded_file_content = state.expanded_file_read
-            && state.last_file_read_index.map_or(false, |idx| i == idx + 1)
+            && state.last_file_read_index.map_or(false, |idx| i == idx)
             && message.role == Role::Assistant;
         let prefix = if is_expanded_file_content { "" } else { role_prefix(message) };
         let wrapped = wrap_text(

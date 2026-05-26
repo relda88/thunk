@@ -166,4 +166,7 @@ pub enum RuntimeEvent {
         line_count: usize,
         content: String,
     },
+    /// Fired after a direct read turn completes and the fallback answer has been
+    /// streamed. The TUI uses this to record the assistant message index for Ctrl+O.
+    DirectReadCompleted,
 }
