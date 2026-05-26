@@ -193,6 +193,10 @@ impl Runtime {
             RuntimeRequest::ProvidersList => self.handle_providers_list(on_event),
             RuntimeRequest::ProvidersUse { name } => self.handle_providers_use(name, on_event),
             RuntimeRequest::GitBranch => self.handle_git_branch(on_event),
+            RuntimeRequest::GitStatus => self.handle_git_status(on_event),
+            RuntimeRequest::GitDiff => self.handle_git_diff(on_event),
+            RuntimeRequest::GitLog => self.handle_git_log(on_event),
+            RuntimeRequest::ListDir { path } => self.handle_list_dir(path, on_event),
         }
     }
 

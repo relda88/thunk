@@ -164,6 +164,10 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::ProvidersList => "providers_list",
         RuntimeRequest::ProvidersUse { .. } => "providers_use",
         RuntimeRequest::GitBranch => "git_branch",
+        RuntimeRequest::GitStatus => "git_status",
+        RuntimeRequest::GitDiff => "git_diff",
+        RuntimeRequest::GitLog => "git_log",
+        RuntimeRequest::ListDir { .. } => "list_dir",
     }
 }
 

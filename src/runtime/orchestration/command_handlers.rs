@@ -20,6 +20,10 @@ pub(super) enum CommandTool {
     ReadFile { path: String },
     SearchCode { query: String },
     GitBranch,
+    GitStatus,
+    GitDiff,
+    GitLog,
+    ListDir { path: String },
 }
 
 impl CommandTool {
@@ -28,6 +32,10 @@ impl CommandTool {
             Self::ReadFile { path } => ToolInput::ReadFile { path },
             Self::SearchCode { query } => ToolInput::SearchCode { query, path: None },
             Self::GitBranch => ToolInput::GitBranch,
+            Self::GitStatus => ToolInput::GitStatus,
+            Self::GitDiff => ToolInput::GitDiff,
+            Self::GitLog => ToolInput::GitLog,
+            Self::ListDir { path } => ToolInput::ListDir { path },
         }
     }
 
@@ -36,6 +44,10 @@ impl CommandTool {
             Self::ReadFile { .. } => "read_file",
             Self::SearchCode { .. } => "search_code",
             Self::GitBranch => "git_branch",
+            Self::GitStatus => "git_status",
+            Self::GitDiff => "git_diff",
+            Self::GitLog => "git_log",
+            Self::ListDir { .. } => "list_dir",
         }
     }
 }
@@ -121,7 +133,12 @@ impl Runtime {
         }
         let search_query = match &tool {
             CommandTool::SearchCode { query } => Some(query.clone()),
-            CommandTool::ReadFile { .. } | CommandTool::GitBranch => None,
+            CommandTool::ReadFile { .. }
+            | CommandTool::GitBranch
+            | CommandTool::GitStatus
+            | CommandTool::GitDiff
+            | CommandTool::GitLog
+            | CommandTool::ListDir { .. } => None,
         };
         let name = tool.name();
         let input = tool.into_input();
@@ -176,6 +193,26 @@ impl Runtime {
 
     pub(super) fn handle_git_branch(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         self.dispatch_command_tool(CommandTool::GitBranch, on_event);
+    }
+
+    pub(super) fn handle_git_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        self.dispatch_command_tool(CommandTool::GitStatus, on_event);
+    }
+
+    pub(super) fn handle_git_diff(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        self.dispatch_command_tool(CommandTool::GitDiff, on_event);
+    }
+
+    pub(super) fn handle_git_log(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        self.dispatch_command_tool(CommandTool::GitLog, on_event);
+    }
+
+    pub(super) fn handle_list_dir(
+        &mut self,
+        path: String,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        self.dispatch_command_tool(CommandTool::ListDir { path }, on_event);
     }
 
     pub(super) fn handle_search_code(

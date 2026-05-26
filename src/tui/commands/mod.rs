@@ -18,6 +18,10 @@ pub enum Command {
     ProvidersList,
     ProvidersUse(String),
     GitBranch,
+    GitStatus,
+    GitDiff,
+    GitLog,
+    Ls(String),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -88,8 +92,14 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
         },
         "/git" => match arg {
             Some("branch") => Some(Ok(Command::GitBranch)),
+            Some("status") => Some(Ok(Command::GitStatus)),
+            Some("diff") => Some(Ok(Command::GitDiff)),
+            Some("log") => Some(Ok(Command::GitLog)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/ls" => Some(Ok(Command::Ls(
+            arg.unwrap_or(".").to_string(),
+        ))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
             Some("clear") => Some(Ok(Command::SessionClear)),
@@ -254,5 +264,31 @@ mod tests {
     #[test]
     fn parses_git_branch() {
         assert_eq!(parse("/git branch"), Some(Ok(Command::GitBranch)));
+    }
+
+    #[test]
+    fn parses_git_status() {
+        assert_eq!(parse("/git status"), Some(Ok(Command::GitStatus)));
+    }
+
+    #[test]
+    fn parses_git_diff() {
+        assert_eq!(parse("/git diff"), Some(Ok(Command::GitDiff)));
+    }
+
+    #[test]
+    fn parses_git_log() {
+        assert_eq!(parse("/git log"), Some(Ok(Command::GitLog)));
+    }
+
+    #[test]
+    fn parses_ls_with_path() {
+        assert_eq!(parse("/ls src/"), Some(Ok(Command::Ls("src/".to_string()))));
+    }
+
+    #[test]
+    fn parses_ls_no_arg_defaults_to_dot() {
+        assert_eq!(parse("/ls"), Some(Ok(Command::Ls(".".to_string()))));
+        assert_eq!(parse("/ls   "), Some(Ok(Command::Ls(".".to_string()))));
     }
 }

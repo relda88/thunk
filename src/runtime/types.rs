@@ -113,6 +113,18 @@ pub enum RuntimeRequest {
     /// Command-triggered git_branch invocation. Goes through CommandTool allowlist.
     /// Does not mutate conversation or trigger session save.
     GitBranch,
+    /// Command-triggered git_status invocation. Goes through CommandTool allowlist.
+    /// Does not mutate conversation or trigger session save.
+    GitStatus,
+    /// Command-triggered git_diff invocation. Goes through CommandTool allowlist.
+    /// Does not mutate conversation or trigger session save.
+    GitDiff,
+    /// Command-triggered git_log invocation. Goes through CommandTool allowlist.
+    /// Does not mutate conversation or trigger session save.
+    GitLog,
+    /// Command-triggered list_dir invocation. Goes through CommandTool allowlist.
+    /// Does not mutate conversation or trigger session save.
+    ListDir { path: String },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

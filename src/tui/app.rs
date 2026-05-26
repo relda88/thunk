@@ -197,6 +197,10 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
             CommandAction::Runtime(RuntimeRequest::ProvidersUse { name })
         }
         commands::Command::GitBranch => CommandAction::Runtime(RuntimeRequest::GitBranch),
+        commands::Command::GitStatus => CommandAction::Runtime(RuntimeRequest::GitStatus),
+        commands::Command::GitDiff => CommandAction::Runtime(RuntimeRequest::GitDiff),
+        commands::Command::GitLog => CommandAction::Runtime(RuntimeRequest::GitLog),
+        commands::Command::Ls(path) => CommandAction::Runtime(RuntimeRequest::ListDir { path }),
     }
 }
 
@@ -209,7 +213,7 @@ fn handle_command(
     match resolve_command(cmd) {
         CommandAction::ShowHelp => {
             state.add_system_message(
-                "Commands: /help — show this message  |  /clear — clear history  |  /sessions — list current project sessions  |  /session clear — delete current project sessions and start fresh  |  /quit — exit  |  /approve — confirm pending action  |  /reject — cancel pending action  |  /undo — revert last mutation  |  /read <path> — read file  |  /search <query> — search code  |  /last — last response  |  /anchors — anchor state  |  /history — conversation history  |  /providers list — list available providers  |  /providers use <name> — switch active provider",
+                "Commands:\n\n  Navigation\n    /read <path>          read a file\n    /search <query>       search code\n    /last                 show last response\n    /anchors              show anchor state\n    /history              conversation history\n\n  Git\n    /git status           git status\n    /git diff             git diff\n    /git log              git log\n    /git branch           current branch\n\n  Session\n    /sessions             list project sessions\n    /session clear        delete sessions and start fresh\n    /clear                clear transcript history\n\n  Actions\n    /approve              confirm pending action\n    /reject               cancel pending action\n    /undo                 revert last mutation\n\n  Providers\n    /providers list       list available providers\n    /providers use <name> switch provider (session-only)\n\n  General\n    /help                 show this message\n    /quit                 exit",
             );
         }
         CommandAction::Quit => {
