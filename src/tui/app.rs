@@ -354,6 +354,11 @@ fn summarize_command_output(text: &str) -> String {
                 .unwrap_or("unknown");
             format!("git branch: {current}")
         }
+        "list_dir" => {
+            let dir_count = body.lines().filter(|l| l.starts_with("dir")).count();
+            let file_count = body.lines().filter(|l| l.starts_with("file")).count();
+            format!("ls: {dir_count} dirs, {file_count} files")
+        }
         _ => text.to_string(),
     }
 }
@@ -663,6 +668,13 @@ mod tests {
         let body = "current: dev\nbranches: dev, main";
         let raw = tool_result("git_branch", body);
         assert_eq!(summarize_command_output(&raw), "git branch: dev");
+    }
+
+    #[test]
+    fn summarize_list_dir_shows_counts() {
+        let body = "dir   src\ndir   docs\nfile  README.md\nfile  Cargo.toml\nfile  main.rs";
+        let raw = tool_result("list_dir", body);
+        assert_eq!(summarize_command_output(&raw), "ls: 2 dirs, 3 files");
     }
 
     #[test]
