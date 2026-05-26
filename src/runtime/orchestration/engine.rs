@@ -192,6 +192,7 @@ impl Runtime {
             RuntimeRequest::Undo => self.handle_undo(on_event),
             RuntimeRequest::ProvidersList => self.handle_providers_list(on_event),
             RuntimeRequest::ProvidersUse { name } => self.handle_providers_use(name, on_event),
+            RuntimeRequest::GitBranch => self.handle_git_branch(on_event),
         }
     }
 

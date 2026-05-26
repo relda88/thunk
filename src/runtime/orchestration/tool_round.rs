@@ -89,6 +89,7 @@ fn call_fingerprint(input: &ToolInput) -> String {
         ToolInput::GitStatus => "git_status".to_string(),
         ToolInput::GitDiff => "git_diff".to_string(),
         ToolInput::GitLog => "git_log".to_string(),
+        ToolInput::GitBranch => "git_branch".to_string(),
         ToolInput::EditFile {
             path,
             search,

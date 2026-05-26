@@ -19,6 +19,7 @@ const MAX_MESSAGE_CHARS: usize = 200;
 pub(super) enum CommandTool {
     ReadFile { path: String },
     SearchCode { query: String },
+    GitBranch,
 }
 
 impl CommandTool {
@@ -26,6 +27,7 @@ impl CommandTool {
         match self {
             Self::ReadFile { path } => ToolInput::ReadFile { path },
             Self::SearchCode { query } => ToolInput::SearchCode { query, path: None },
+            Self::GitBranch => ToolInput::GitBranch,
         }
     }
 
@@ -33,6 +35,7 @@ impl CommandTool {
         match self {
             Self::ReadFile { .. } => "read_file",
             Self::SearchCode { .. } => "search_code",
+            Self::GitBranch => "git_branch",
         }
     }
 }
@@ -118,7 +121,7 @@ impl Runtime {
         }
         let search_query = match &tool {
             CommandTool::SearchCode { query } => Some(query.clone()),
-            CommandTool::ReadFile { .. } => None,
+            CommandTool::ReadFile { .. } | CommandTool::GitBranch => None,
         };
         let name = tool.name();
         let input = tool.into_input();
@@ -169,6 +172,10 @@ impl Runtime {
             return;
         }
         self.dispatch_command_tool(CommandTool::ReadFile { path }, on_event);
+    }
+
+    pub(super) fn handle_git_branch(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        self.dispatch_command_tool(CommandTool::GitBranch, on_event);
     }
 
     pub(super) fn handle_search_code(

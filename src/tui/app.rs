@@ -196,6 +196,7 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
         commands::Command::ProvidersUse(name) => {
             CommandAction::Runtime(RuntimeRequest::ProvidersUse { name })
         }
+        commands::Command::GitBranch => CommandAction::Runtime(RuntimeRequest::GitBranch),
     }
 }
 

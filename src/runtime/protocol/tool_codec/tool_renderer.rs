@@ -77,6 +77,13 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
                 format!("git log ({} commits)", g.entries.len())
             }
         }
+        ToolOutput::GitBranch(b) => {
+            if b.branches.is_empty() {
+                "git branch: no branches".to_string()
+            } else {
+                format!("git branch: {} (current: {})", b.branches.len(), b.current)
+            }
+        }
         ToolOutput::EditFile(e) => {
             format!("replaced {} line(s) in {}", e.lines_replaced, e.path)
         }
@@ -437,6 +444,21 @@ fn render_git_log(g: &crate::tools::types::GitLogOutput) -> String {
     lines.join("\n")
 }
 
+fn render_git_branch(b: &crate::tools::types::GitBranchOutput) -> String {
+    if b.branches.is_empty() {
+        return "No branches found.".to_string();
+    }
+    let mut lines = Vec::new();
+    for branch in &b.branches {
+        if branch == &b.current {
+            lines.push(format!("* {branch}"));
+        } else {
+            lines.push(format!("  {branch}"));
+        }
+    }
+    lines.join("\n")
+}
+
 pub(crate) fn render_output(output: &ToolOutput) -> String {
     match output {
         ToolOutput::FileContents(f) => {
@@ -488,6 +510,7 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
         ToolOutput::GitStatus(g) => render_git_status(g),
         ToolOutput::GitDiff(d) => render_git_diff(d),
         ToolOutput::GitLog(g) => render_git_log(g),
+        ToolOutput::GitBranch(b) => render_git_branch(b),
         ToolOutput::EditFile(e) => {
             format!("replaced {} line(s) in {}", e.lines_replaced, e.path)
         }
@@ -558,6 +581,9 @@ Show unstaged git working tree diff:
 
 Show recent git commit history:
 [git_log]
+
+Show local git branches:
+[git_branch]
 
 Edit a file:
 [edit_file]

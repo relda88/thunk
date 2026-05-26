@@ -26,6 +26,7 @@ pub enum ToolInput {
     GitStatus,
     GitDiff,
     GitLog,
+    GitBranch,
     EditFile {
         /// Path relative to the project root, or absolute.
         path: String,
@@ -57,6 +58,7 @@ impl ToolInput {
             ToolInput::GitStatus => "git_status",
             ToolInput::GitDiff => "git_diff",
             ToolInput::GitLog => "git_log",
+            ToolInput::GitBranch => "git_branch",
             ToolInput::EditFile { .. } => "edit_file",
             ToolInput::WriteFile { .. } => "write_file",
             ToolInput::Shell { .. } => "shell",
@@ -76,6 +78,7 @@ pub enum ToolOutput {
     GitStatus(GitStatusOutput),
     GitDiff(GitDiffOutput),
     GitLog(GitLogOutput),
+    GitBranch(GitBranchOutput),
     EditFile(EditFileOutput),
     WriteFile(WriteFileOutput),
     Shell(ShellOutput),
@@ -170,6 +173,12 @@ pub struct GitLogEntry {
     pub date: String,
     pub author: String,
     pub subject: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitBranchOutput {
+    pub current: String,
+    pub branches: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

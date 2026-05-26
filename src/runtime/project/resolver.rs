@@ -98,6 +98,7 @@ pub fn resolve(
         ToolInput::GitStatus => Ok(ResolvedToolInput::GitStatus),
         ToolInput::GitDiff => Ok(ResolvedToolInput::GitDiff { path: None }),
         ToolInput::GitLog => Ok(ResolvedToolInput::GitLog),
+        ToolInput::GitBranch => Ok(ResolvedToolInput::GitBranch),
     }
 }
 

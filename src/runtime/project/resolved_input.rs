@@ -38,6 +38,7 @@ pub enum ResolvedToolInput {
         path: Option<ProjectPath>,
     },
     GitLog,
+    GitBranch,
 }
 
 impl ResolvedToolInput {
@@ -52,6 +53,7 @@ impl ResolvedToolInput {
             Self::GitStatus => "git_status",
             Self::GitDiff { .. } => "git_diff",
             Self::GitLog => "git_log",
+            Self::GitBranch => "git_branch",
         }
     }
 }
@@ -93,6 +95,7 @@ impl From<ResolvedToolInput> for ToolInput {
             // migration slice updates the raw/legacy tool boundary.
             ResolvedToolInput::GitDiff { .. } => ToolInput::GitDiff,
             ResolvedToolInput::GitLog => ToolInput::GitLog,
+            ResolvedToolInput::GitBranch => ToolInput::GitBranch,
         }
     }
 }

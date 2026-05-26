@@ -110,6 +110,9 @@ pub enum RuntimeRequest {
     ProvidersList,
     /// Switches the active backend provider by name.
     ProvidersUse { name: String },
+    /// Command-triggered git_branch invocation. Goes through CommandTool allowlist.
+    /// Does not mutate conversation or trigger session save.
+    GitBranch,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

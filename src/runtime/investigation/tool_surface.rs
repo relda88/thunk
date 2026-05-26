@@ -44,6 +44,7 @@ pub(crate) enum SurfaceTool {
     GitStatus,
     GitDiff,
     GitLog,
+    GitBranch,
 }
 
 const RETRIEVAL_FIRST_TOOLS: &[SurfaceTool] = &[
@@ -55,6 +56,7 @@ const GIT_READ_ONLY_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::GitStatus,
     SurfaceTool::GitDiff,
     SurfaceTool::GitLog,
+    SurfaceTool::GitBranch,
 ];
 const ANSWER_ONLY_TOOLS: &[SurfaceTool] = &[];
 // MutationEnabled has the same read tools as RetrievalFirst. Approval-required tools
@@ -97,6 +99,7 @@ impl SurfaceTool {
             ToolInput::GitStatus => Some(Self::GitStatus),
             ToolInput::GitDiff => Some(Self::GitDiff),
             ToolInput::GitLog => Some(Self::GitLog),
+            ToolInput::GitBranch => Some(Self::GitBranch),
             ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } | ToolInput::Shell { .. } => {
                 None
             }
@@ -111,6 +114,7 @@ impl SurfaceTool {
             Self::GitStatus => "git_status",
             Self::GitDiff => "git_diff",
             Self::GitLog => "git_log",
+            Self::GitBranch => "git_branch",
         }
     }
 }

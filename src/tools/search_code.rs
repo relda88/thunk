@@ -245,7 +245,7 @@ fn parse_rg_match_line(raw: &str, scope_prefix: Option<&str>) -> Option<SearchMa
             continue;
         }
 
-        let relative_path = raw[..path_end].trim_start_matches("./");
+        let relative_path = raw[..path_end].trim_start_matches("./").replace('\\', "/");
         let file = match scope_prefix {
             Some(prefix) if !prefix.is_empty() && prefix != "." => {
                 format!("{prefix}/{relative_path}")
@@ -828,5 +828,13 @@ mod tests {
             zzz_count, 1,
             "definition match must be within the shown cap"
         );
+    }
+
+    #[test]
+    fn backslash_separators_in_rg_output_are_normalized_to_forward_slashes() {
+        let m = parse_rg_match_line("sandbox\\models\\task.py:10:def foo()", None)
+            .expect("should parse");
+        assert_eq!(m.file, "sandbox/models/task.py");
+        assert_eq!(m.line_number, 10);
     }
 }

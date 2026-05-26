@@ -318,9 +318,9 @@ pub(crate) fn tool_input_activity(input: Option<&ToolInput>) -> Activity {
         Some(ToolInput::EditFile { path, .. }) => ("edit".to_string(), Some(path.clone())),
         Some(ToolInput::WriteFile { path, .. }) => ("write".to_string(), Some(path.clone())),
         Some(ToolInput::Shell { command }) => ("shell".to_string(), Some(command.clone())),
-        Some(ToolInput::GitStatus | ToolInput::GitDiff | ToolInput::GitLog) => {
-            ("git".to_string(), None)
-        }
+        Some(
+            ToolInput::GitStatus | ToolInput::GitDiff | ToolInput::GitLog | ToolInput::GitBranch,
+        ) => ("git".to_string(), None),
         None => ("tool".to_string(), None),
     };
     Activity::ExecutingTools { tool, detail }

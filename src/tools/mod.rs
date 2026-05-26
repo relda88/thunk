@@ -1,4 +1,5 @@
 mod edit_file;
+mod git_branch;
 mod git_diff;
 mod git_log;
 mod git_status;

@@ -17,6 +17,7 @@ pub enum Command {
     Undo,
     ProvidersList,
     ProvidersUse(String),
+    GitBranch,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -83,6 +84,10 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
                     Some(Ok(Command::ProvidersUse(name)))
                 }
             }
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
+        "/git" => match arg {
+            Some("branch") => Some(Ok(Command::GitBranch)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
         "/sessions" => Some(Ok(Command::Sessions)),
@@ -244,5 +249,10 @@ mod tests {
     #[test]
     fn unknown_session_subcommand_returns_unknown_command() {
         assert_eq!(parse("/session list"), Some(Err(ParseError::UnknownCommand)));
+    }
+
+    #[test]
+    fn parses_git_branch() {
+        assert_eq!(parse("/git branch"), Some(Ok(Command::GitBranch)));
     }
 }

@@ -163,6 +163,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::Undo => "undo",
         RuntimeRequest::ProvidersList => "providers_list",
         RuntimeRequest::ProvidersUse { .. } => "providers_use",
+        RuntimeRequest::GitBranch => "git_branch",
     }
 }
 

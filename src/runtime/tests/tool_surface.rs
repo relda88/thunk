@@ -203,7 +203,7 @@ fn tool_surface_hint_renders_from_canonical_surface_membership() {
             ToolSurface::GitReadOnly.as_str(),
             ToolSurface::GitReadOnly.allowed_tool_names()
         ),
-        "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log."
+        "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log, git_branch."
     );
 }
 
@@ -514,7 +514,7 @@ fn git_read_only_surface_hint_is_sent_to_model() {
         first.messages.iter().any(|m| {
             m.role == Role::System
                 && m.content
-                    == "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log."
+                    == "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log, git_branch."
         }),
         "GitReadOnly surface hint must be injected into backend request: {:?}",
         first.messages
