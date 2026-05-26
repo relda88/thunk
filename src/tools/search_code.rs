@@ -66,6 +66,15 @@ pub struct SearchCodeTool {
 impl SearchCodeTool {
     pub fn new(root: PathBuf) -> Self {
         let root = root.canonicalize().unwrap_or(root);
+        #[cfg(target_os = "windows")]
+        let root = {
+            let s = root.to_string_lossy();
+            if s.starts_with(r"\\?\") {
+                PathBuf::from(&s[4..])
+            } else {
+                root
+            }
+        };
         Self { root }
     }
 }
@@ -245,7 +254,8 @@ fn parse_rg_match_line(raw: &str, scope_prefix: Option<&str>) -> Option<SearchMa
             continue;
         }
 
-        let relative_path = raw[..path_end].trim_start_matches("./").replace('\\', "/");
+        let relative_path = raw[..path_end].replace('\\', "/");
+        let relative_path = relative_path.trim_start_matches("./");
         let file = match scope_prefix {
             Some(prefix) if !prefix.is_empty() && prefix != "." => {
                 format!("{prefix}/{relative_path}")
@@ -836,5 +846,19 @@ mod tests {
             .expect("should parse");
         assert_eq!(m.file, "sandbox/models/task.py");
         assert_eq!(m.line_number, 10);
+    }
+
+    #[test]
+    fn windows_dotslash_prefix_with_backslashes_and_scope_prefix_produces_correct_path() {
+        // On Windows, rg outputs .\-prefixed backslash paths when run inside a scoped
+        // directory. The backslash normalization must happen before ./ stripping so the
+        // .\\ prefix is converted to ./ before trim_start_matches sees it.
+        let m = parse_rg_match_line(
+            ".\\init_validation\\z_init_target.py:1:def foo()",
+            Some("sandbox"),
+        )
+        .expect("should parse");
+        assert_eq!(m.file, "sandbox/init_validation/z_init_target.py");
+        assert_eq!(m.line_number, 1);
     }
 }
