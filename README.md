@@ -34,12 +34,13 @@ The project is structured to keep model generation, tool execution, persistence,
 
 ## What It Does Today
 
-- Runs as a local terminal app with an alternate-screen TUI.
-- Supports two model backends: `mock` and `llama_cpp`.
+- Runs as a local terminal app with an alternate-screen TUI with scrollable output and expandable file reads.
+- Supports multiple model backends: `llama_cpp`, `openai`, `ollama`, `openrouter`, `groq`.
 - Builds a system prompt from the app name, project root, and registered tool specs.
 - Streams assistant output into the conversation while emitting UI-facing runtime events.
-- Parses tool calls centrally in `src/runtime/tool_codec.rs`.
+- Parses tool calls centrally in `src/runtime/protocol/tool_codec/`.
 - Executes read-only tools immediately and pauses for approval before mutating files.
+- Shows a before/after diff at mutation approval time.
 - Re-enters model generation after tool results so the assistant can synthesize a grounded same-turn answer.
 - Uses runtime-owned terminal answers when the runtime already knows the outcome, such as rejected mutations or failed file reads.
 - Enforces bounded per-turn `search_code` behavior at runtime instead of relying only on prompt wording.
@@ -53,14 +54,28 @@ Current built-in tools:
 - `search_code`
 - `edit_file`
 - `write_file`
+- `shell` (cargo only — requires approval)
+- `git_status`
+- `git_diff`
+- `git_log`
 
 Current control commands:
 
-- `/help`
-- `/clear`
-- `/quit`
-- `/approve`
-- `/reject`
+- `/help` — show available commands
+- `/clear` — clear transcript history
+- `/quit` — exit
+- `/approve` — confirm pending mutation or shell action
+- `/reject` — cancel pending action
+- `/undo` — revert last mutation
+- `/read <path>` — read a file directly
+- `/search <query>` — search code directly
+- `/last` — show last assistant response
+- `/anchors` — show current anchor state
+- `/history` — show conversation history
+- `/sessions` — list current project sessions
+- `/session clear` — delete current project sessions and start fresh
+- `/providers list` — list available providers
+- `/providers use <name>` — switch active provider (session-only)
 
 ---
 
@@ -78,7 +93,7 @@ At a high level:
 
 Some outcomes are deliberately terminal and runtime-owned: rejecting a pending mutation produces a cancellation answer without asking the model to summarize, and a failed `read_file` can end cleanly without retrying in a loop.
 
-`search_code` is a literal substring search. The runtime now simplifies model-generated search phrases into a single literal keyword and enforces a per-turn budget: one search is allowed, a second search is allowed only when the first returned no matches, and later search attempts are blocked with a correction so the model must answer cleanly.
+`search_code` is a literal substring search. The runtime simplifies model-generated search phrases into a single literal keyword and enforces a per-turn budget: one search is allowed, a second search is allowed only when the first returned no matches, and later search attempts are blocked with a correction so the model must answer cleanly.
 
 ---
 
@@ -100,8 +115,9 @@ This allows the system to remain correct and predictable even when the model mak
 
 ## Architecture
 
-The codebase is split into six main layers:
+The codebase is split into seven main layers:
 
+- `src/core/` — shared infrastructure types (AppError, Result, Config) — no dependencies on other layers
 - `src/app/` — startup, config, paths, session orchestration
 - `src/runtime/` — conversation loop, tool parsing, approval state, runtime events
 - `src/tools/` — tool contracts, registry, and implementations
@@ -111,25 +127,24 @@ The codebase is split into six main layers:
 
 Key architectural rules reflected in the code:
 
-- parsing of raw tool syntax lives in `runtime/tool_codec.rs`
+- parsing of raw tool syntax lives in `runtime/protocol/tool_codec/`
 - tools operate on typed `ToolInput` / `ToolOutput`, not raw model text
 - mutating tools separate `run()` from `execute_approved()`
 - the runtime does not depend on the TUI or SQLite directly
 - the TUI renders events but does not execute tools
+- all shared types (AppError, Config) are imported from `src/core/` — never from `app/`
 
 ---
 
 ## Current Limitations
 
-- No shell, git, web, or external integration tools yet.
+- Shell allowlist is restricted to `cargo` only — broader shell access not yet supported.
 - No LSP integration or advanced memory system.
 - No token-aware live context budgeting before generation.
 - Pending approvals are not persisted across restarts.
 - Restored session history is loaded into the runtime, but not replayed into the visible TUI transcript.
-- Tool UI is compact and text-based; there is no diff view or expandable preview UI yet.
-- Performance is currently dominated by repeated model rounds and prompt prefill.
-- No bounded answer synthesis yet after evidence is ready (planned).
 - No prompt caching or context compression yet.
+- Windows support is functional but ongoing — search_code path handling on Windows is an open item.
 
 ---
 
@@ -141,13 +156,19 @@ cargo build --release
 cargo install --path .
 ```
 
+Without llama-cpp (Windows or faster builds):
+```bash
+cargo build --release --no-default-features
+cargo install --path . --no-default-features
+```
+
 Once installed, run from any project directory:
 ```bash
 cd /your/project
 thunk
 ```
 
-thunk walks upward from the current directory to find `config.toml` and `.git`. Copy `config.toml.example` to your project root and edit `model_path` to point to your local `.gguf` model.
+thunk walks upward from the current directory to find `config.toml` and `.git`. Copy `config.toml.example` to your project root and configure your preferred provider.
 
 ---
 
@@ -156,11 +177,22 @@ thunk walks upward from the current directory to find `config.toml` and `.git`. 
 Requirements:
 - Rust stable
 - Interactive terminal (`stdout` must be a TTY and `TERM` must not be `dumb`)
-- A local `.gguf` model if using `llama_cpp`
+- A local `.gguf` model if using `llama_cpp`, or an API key for cloud providers
+- `ripgrep` (`rg`) in PATH — required for `search_code`
 
 Run during development:
 ```bash
-cargo run
+cargo run --release
+```
+
+With trace logging:
+```bash
+# Mac/Linux
+THUNK_TRACE_RUNTIME=1 cargo run --release
+
+# Windows (cmd)
+set THUNK_TRACE_RUNTIME=1
+cargo run --release --no-default-features
 ```
 
 Run tests:
@@ -169,9 +201,17 @@ cargo test
 ```
 
 Configuration lives in `config.toml`. See `config.toml.example` for all available options.
-- `llm.provider = "mock"` uses the built-in mock backend.
-- `llm.provider = "llama_cpp"` uses the local llama.cpp backend.
-- `llama_cpp.model_path` points to the local `.gguf` file to load.
+
+Provider API keys go in `.env` at the project root:
+```
+GROQ_API_KEY=...
+OPENAI_API_KEY=...
+OPENROUTER_API_KEY=...
+```
+
+Switch providers at runtime with `/providers use <name>`. Available: `llamacpp`, `openai`, `ollama`, `openrouter`, `groq`.
+
+Recommended daily driver: Groq (`llama-3.1-8b-instant`) for cloud, Ollama (`qwen2.5-coder:7b`) for local.
 
 ---
 
