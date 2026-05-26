@@ -17,13 +17,14 @@ config.toml
 ## Sandbox project
 sandbox/
 
-# Local files (.local is legacy)
-.local/
-.claude/
-
 # Memory files
 .memory/
-CLAUDE.md
+
+# Claude code workflows
+!.claude/
+!.claude/settings.json
+!.claude/rules/
+!.claude/rules/**
 
 # OS
 .DS_Store
