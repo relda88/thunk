@@ -934,6 +934,41 @@ pub(crate) fn run_tool_round(
                             };
                         }
                     }
+                    if matches!(investigation_mode, InvestigationMode::DefinitionLookup)
+                        && lsp.is_enabled()
+                    {
+                        if let ToolOutput::SearchResults(ref results) = output {
+                            if let Some(def_path) = investigation.first_definition_candidate() {
+                                if let Some(m) =
+                                    results.matches.iter().find(|m| m.file == def_path)
+                                {
+                                    let col = effective_search_input
+                                        .as_ref()
+                                        .and_then(|(q, _)| m.line.find(q.as_str()))
+                                        .map(|off| off + 1)
+                                        .unwrap_or(1);
+                                    trace_runtime_decision(
+                                        on_event,
+                                        "lsp_definition_seeded",
+                                        &[
+                                            ("path", m.file.clone()),
+                                            ("line", m.line_number.to_string()),
+                                            ("col", col.to_string()),
+                                            ("candidate", def_path.to_string()),
+                                        ],
+                                    );
+                                    return ToolRoundOutcome::RuntimeDispatch {
+                                        accumulated,
+                                        call: ToolInput::LspDefinition {
+                                            path: m.file.clone(),
+                                            line: m.line_number as u32,
+                                            col: col as u32,
+                                        },
+                                    };
+                                }
+                            }
+                        }
+                    }
                 }
                 let has_read_recovery = read_recovery.is_some();
                 if let Some((path, kind)) = read_recovery {
@@ -1865,5 +1900,68 @@ mod tests {
             investigation.evidence_ready(),
             "evidence must be ready after reading the usage candidate"
         );
+    }
+
+    #[test]
+    fn lsp_definition_seeded_on_definition_lookup_after_search() {
+        // On a DefinitionLookup turn with lsp.enabled=true, the runtime must dispatch
+        // lsp_definition to the top definition candidate immediately after search returns
+        // results — without waiting for the model to emit a block-format call.
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("lib.rs"), "fn target_fn() {}\n").unwrap();
+
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        let mut lsp = LspManager::new(
+            &LspConfig {
+                enabled: true,
+                ..LspConfig::default()
+            },
+            std::path::Path::new("."),
+        );
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed = 0usize;
+        let mut weak_query = 0usize;
+
+        let outcome = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::SearchCode {
+                query: "target_fn".into(),
+                path: None,
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut lsp,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            true,
+            InvestigationMode::DefinitionLookup,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        let ToolRoundOutcome::RuntimeDispatch { call, .. } = outcome else {
+            panic!("DefinitionLookup after search must seed lsp_definition dispatch");
+        };
+        assert!(
+            matches!(call, ToolInput::LspDefinition { .. }),
+            "dispatched call must be lsp_definition, got: {call:?}"
+        );
+        if let ToolInput::LspDefinition { path, line, col } = call {
+            assert_eq!(path, "lib.rs", "lsp_definition path must be the definition candidate");
+            assert!(line >= 1, "line must be 1-based and >= 1");
+            assert!(col >= 1, "col must be 1-based and >= 1");
+        }
     }
 }

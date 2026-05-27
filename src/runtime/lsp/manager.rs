@@ -48,6 +48,10 @@ impl LspManager {
         Ok(())
     }
 
+    pub fn is_enabled(&self) -> bool {
+        self.config.enabled
+    }
+
     pub fn is_running(&mut self) -> bool {
         self.session.as_mut().map_or(false, |s| s.is_alive())
     }
