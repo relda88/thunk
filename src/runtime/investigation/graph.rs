@@ -43,6 +43,11 @@ impl InvestigationGraph {
         }
     }
 
+    /// Returns true if the graph has any import edges.
+    pub(crate) fn has_edges(&self) -> bool {
+        self.graph.edge_count() > 0
+    }
+
     /// Returns unread files imported by any already-read file, in insertion order.
     pub(crate) fn promoted_candidates(&self) -> Vec<String> {
         let mut result = Vec::new();

@@ -511,6 +511,61 @@ mod tests {
         })
     }
 
+    // dynamic useful_candidate_reads_target tests
+
+    #[test]
+    fn dynamic_target_no_signals() {
+        // Single candidate, no broad lookup, low match count, no graph edges → target 1.
+        let mut state = InvestigationState::new();
+        let output = make_search_output_for_hint(vec![("src/foo.rs", "fn foo()")]);
+        state.record_search_results(&output, Some("foo"), &mut |_| {});
+        assert_eq!(
+            state.useful_candidate_reads_target_for_test(),
+            1,
+            "no signals → score 0 → target 1"
+        );
+    }
+
+    #[test]
+    fn dynamic_target_broad_usage_only() {
+        // Broad usage lookup + 2 substantive candidates fires the compound gate → target 2.
+        // "broad_usage_only" means only the broad compound signal contributes; paths < 6,
+        // matches < 10, and no graph edges.
+        let mut state = InvestigationState::new();
+        state.configure_usage_evidence_policy(true);
+        let output = make_search_output_for_hint(vec![
+            ("src/a.rs", "foo()"),
+            ("src/b.rs", "foo()"),
+        ]);
+        state.record_search_results(&output, Some("foo"), &mut |_| {});
+        assert_eq!(
+            state.useful_candidate_reads_target_for_test(),
+            2,
+            "broad + 2 substantive candidates → compound gate fires → score 1 → target 2"
+        );
+    }
+
+    #[test]
+    fn dynamic_target_broad_usage_plus_many_candidates() {
+        // Broad compound gate (2 substantive) + 6+ candidate files both fire → target 3.
+        let mut state = InvestigationState::new();
+        state.configure_usage_evidence_policy(true);
+        let output = make_search_output_for_hint(vec![
+            ("src/a.rs", "foo()"),
+            ("src/b.rs", "foo()"),
+            ("src/c.rs", "foo()"),
+            ("src/d.rs", "foo()"),
+            ("src/e.rs", "foo()"),
+            ("src/f.rs", "foo()"),
+        ]);
+        state.record_search_results(&output, Some("foo"), &mut |_| {});
+        assert_eq!(
+            state.useful_candidate_reads_target_for_test(),
+            3,
+            "broad compound + 6 candidate files → score 2 → target 3"
+        );
+    }
+
     #[test]
     fn candidate_preference_hint_returns_none_when_no_candidates() {
         let state = InvestigationState::new();

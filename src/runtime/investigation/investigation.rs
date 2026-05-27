@@ -648,6 +648,11 @@ impl InvestigationState {
         self.useful_accepted_candidate_reads
     }
 
+    #[cfg(test)]
+    pub(crate) fn useful_candidate_reads_target_for_test(&self) -> usize {
+        self.useful_candidate_reads_target
+    }
+
     pub(crate) fn search_attempted(&self) -> bool {
         self.search_attempted
     }
@@ -896,9 +901,34 @@ impl InvestigationState {
                 }
             }
 
-            if self.broad_usage_lookup && self.substantive_usage_candidate_count() >= 2 {
-                self.useful_candidate_reads_target = 2;
-            }
+            self.useful_candidate_reads_target = {
+                let mut score: usize = 0;
+
+                // broad usage lookup with multiple substantive candidates — known multi-site symbol.
+                // Compound gate: broad alone does not raise target; needs at least two
+                // substantive (non-definition-only, non-import-only, non-lockfile) candidates.
+                if self.broad_usage_lookup && self.substantive_usage_candidate_count() >= 2 {
+                    score += 1;
+                }
+
+                // many candidate files — symbol spans many files across the project
+                if self.search_candidate_paths.len() >= 6 {
+                    score += 1;
+                }
+
+                // high total match count — widely referenced symbol
+                if results.total_matches >= 10 {
+                    score += 1;
+                }
+
+                // graph already has edges from prior reads this session — cross-file context exists
+                if self.graph.has_edges() {
+                    score += 1;
+                }
+
+                // map score to target: 0→1, 1→2, 2→3, 3→4, 4+→5, never below 1 never above 5
+                (score + 1).clamp(1, 5)
+            };
         }
         trace_runtime_decision(
             on_event,
