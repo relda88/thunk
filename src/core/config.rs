@@ -129,6 +129,36 @@ pub struct ProjectConfig {
     pub test_command: Option<String>,
 }
 
+/// LSP provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LspConfig {
+    /// Must be explicitly set to true to activate LSP. Defaults to false so existing
+    /// users see zero behavior change.
+    pub enabled: bool,
+    /// Absolute path to a rust-analyzer binary. When absent, the runtime probes PATH
+    /// and common install locations.
+    pub rust_analyzer_path: Option<PathBuf>,
+    /// Milliseconds to wait for a single LSP query response before returning a timeout
+    /// error. The session is kept alive on timeout — only a crash clears it.
+    pub timeout_ms: u64,
+    /// Milliseconds to wait for the first `publishDiagnostics` notification after server
+    /// startup. This absorbs initial indexing time. Timeout here is not an error — the
+    /// session proceeds and per-query retries handle residual not-ready responses.
+    pub startup_timeout_ms: u64,
+}
+
+impl Default for LspConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            rust_analyzer_path: None,
+            timeout_ms: 5000,
+            startup_timeout_ms: 30000,
+        }
+    }
+}
+
 /// Main configuration struct for the application
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -141,6 +171,7 @@ pub struct Config {
     pub ollama: OllamaConfig,
     pub openrouter: OpenRouterConfig,
     pub groq: GroqConfig,
+    pub lsp: LspConfig,
     pub commands: HashMap<String, CustomCommandDef>,
     pub project: ProjectConfig,
 }
@@ -488,6 +519,15 @@ mod tests {
     fn empty_commands_map_is_valid() {
         let cfg = parse_config("[app]\nname = \"thunk\"");
         assert!(cfg.commands.is_empty());
+    }
+
+    #[test]
+    fn lsp_config_defaults() {
+        let cfg = parse_config("[lsp]");
+        assert!(!cfg.lsp.enabled);
+        assert_eq!(cfg.lsp.timeout_ms, 5000);
+        assert_eq!(cfg.lsp.startup_timeout_ms, 30000);
+        assert!(cfg.lsp.rust_analyzer_path.is_none());
     }
 
     #[test]

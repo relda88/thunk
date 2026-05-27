@@ -1,5 +1,6 @@
 mod conversation;
 mod investigation;
+pub(crate) mod lsp;
 mod orchestration;
 mod paths;
 pub(crate) mod project;

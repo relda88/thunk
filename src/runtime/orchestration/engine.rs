@@ -4,6 +4,8 @@ use crate::core::config::Config;
 use crate::llm::backend::ModelBackend;
 use crate::tools::{PendingAction, ToolInput, ToolOutput, ToolRegistry, ToolRunResult};
 
+use super::super::lsp::LspManager;
+
 use super::super::conversation::Conversation;
 use super::super::investigation::anchors::{
     has_same_scope_reference, is_last_read_file_anchor_prompt, is_last_search_anchor_prompt,
@@ -89,6 +91,9 @@ pub struct Runtime {
     /// Empty string for before_contents means the file did not exist before write_file created it.
     /// Capped at 5 entries — oldest dropped when exceeded.
     undo_stack: Vec<(String, String)>,
+    /// Persistent LSP server session. Starts lazily on first query when lsp.enabled = true.
+    /// Shut down in Drop via graceful shutdown → kill.
+    lsp: LspManager,
 }
 
 impl Runtime {
@@ -106,6 +111,7 @@ impl Runtime {
             false,
         );
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
+        let lsp = LspManager::new(&config.lsp, project_root.path());
         Self {
             project_root,
             conversation: Conversation::new(system_prompt.clone()),
@@ -119,6 +125,7 @@ impl Runtime {
             config: config.clone(),
             pending_runtime_call: None,
             undo_stack: Vec::new(),
+            lsp,
         }
     }
 
@@ -1362,6 +1369,12 @@ impl Runtime {
         &mut self,
     ) -> std::io::Result<ProjectStructureSnapshot> {
         self.get_or_build_project_snapshot().cloned()
+    }
+}
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        self.lsp.shutdown();
     }
 }
 
