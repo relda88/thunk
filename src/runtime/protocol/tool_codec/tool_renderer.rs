@@ -603,6 +603,13 @@ Show recent git commit history:
 Show local git branches:
 [git_branch]
 
+Look up a symbol definition via LSP:
+[lsp_definition]
+path: src/path/to/file.rs
+line: 42
+col: 7
+[/lsp_definition]
+
 Edit a file:
 [edit_file]
 path: path/to/file.rs
@@ -1188,6 +1195,7 @@ mod tests {
         assert!(instructions.contains("[git_status]"));
         assert!(instructions.contains("[git_diff]"));
         assert!(instructions.contains("[git_log]"));
+        assert!(instructions.contains("[lsp_definition]"));
         assert!(instructions.contains("[edit_file]"));
         assert!(instructions.contains("[/edit_file]"));
         assert!(instructions.contains("[write_file:"));

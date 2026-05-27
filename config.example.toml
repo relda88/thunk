@@ -56,3 +56,6 @@ args = { path = "{input}" }
 
 [project]
 test_command = "cargo test"
+
+[lsp]
+enabled = true
