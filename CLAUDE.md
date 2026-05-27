@@ -63,5 +63,5 @@ THUNK_TRACE_RUNTIME=1 cargo run --release --no-default-features  # debug
 - `.claude/dev/module-map.md` — module ownership and file locations. Read when adding new modules, tracing ownership boundaries, or unsure where a type lives.
 - `.claude/dev/core-loop.md` — runtime loop internals. Read when modifying `engine.rs` or orchestration.
 - `.claude/dev/tool-system.md` — tool inventory and wiring. Read when adding or modifying tools.
-- `.claude/dev/retrieval-flow.md` — investigation, guards, failure modes. Read when modifying investigation or candidate selection.
-- `.claude/dev/debugging.md` — debugging entry points. Read when diagnosing runtime failures.
+- `.claude/skills/debug-investigation/` — investigation, guards, failure modes. Read when modifying investigation or candidate selection.
+- `.claude/skills/debug-runtime/` — debugging entry points. Read when diagnosing runtime failures.
