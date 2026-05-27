@@ -4,7 +4,7 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 818 passing via `cargo test --no-default-features`
+Test baseline: 844 passing via `cargo test --no-default-features`
 Never make commits — user commits manually.
 
 ## Core Principles
@@ -57,3 +57,11 @@ THUNK_TRACE_RUNTIME=1 cargo run --release --no-default-features  # debug
 @.claude/rules/invariants.md
 @.claude/rules/architecture.md
 @.claude/rules/slice-discipline.md
+@.claude/rules/safe-modification.md
+
+## On-Demand Reference — Load Only When Relevant
+- `.claude/dev/module-map.md` — module ownership and file locations. Read when adding new modules, tracing ownership boundaries, or unsure where a type lives.
+- `.claude/dev/core-loop.md` — runtime loop internals. Read when modifying `engine.rs` or orchestration.
+- `.claude/dev/tool-system.md` — tool inventory and wiring. Read when adding or modifying tools.
+- `.claude/dev/retrieval-flow.md` — investigation, guards, failure modes. Read when modifying investigation or candidate selection.
+- `.claude/dev/debugging.md` — debugging entry points. Read when diagnosing runtime failures.

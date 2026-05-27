@@ -1,30 +1,40 @@
 # Enforced Invariants
 
 ## Mutation Approval Gate
-ShellTool, EditFileTool, WriteFileTool always return ToolRunResult::Approval(PendingAction).
-The only materialization path is ToolRegistry::execute_approved() in src/tools/registry.rs.
+`ShellTool`, `EditFileTool`, `WriteFileTool` always return `ToolRunResult::Approval(PendingAction)`.
+The only materialization path is `ToolRegistry::execute_approved()` in `src/tools/registry.rs`.
 There is no bypass. Never add one.
 
 ## Shell Allowlist
-is_permitted_shell_command() at src/runtime/investigation/prompt_analysis.rs — matches only "cargo".
-Enforced twice in TurnContext::build() in engine.rs: as an error gate (line ~1492) and in seed_pending_runtime_call() (line ~1526).
-Shell seeding is suppressed entirely on GitReadOnly turns.
+`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs` — matches only `"cargo"`.
+Enforced in `TurnContext` construction in `engine.rs` (~line 1535): non-permitted commands suppress shell seeding.
+Shell seeding is suppressed entirely on `GitReadOnly` turns.
 
 ## Surface Enforcement
-tool_allowed_for_surface() at src/runtime/investigation/tool_surface.rs.
-Surfaces and tool sets defined in TOOL_SURFACE_DEFINITIONS (static registry).
-Mutation tools return None from SurfaceTool::from_input() — they bypass surface enforcement and go through approval only.
+`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs`.
+Surfaces and tool sets defined in `TOOL_SURFACE_DEFINITIONS` (static registry).
+`RetrievalFirst` includes `lsp_definition`. `GitReadOnly` includes `git_branch`.
+Mutation tools (`edit_file`, `write_file`, `shell`) return `None` from `SurfaceTool::from_input()` — they bypass surface enforcement and go through the approval path only.
 
 ## Evidence Gates
-Eight named gates in InvestigationState::record_read_result() in investigation.rs.
-evidence_ready() at investigation.rs:612 — requires search_produced_results && useful_accepted_candidate_reads >= target.
+Eight named gates (plus sub-gates 5.5, 6a) in `InvestigationState::record_read_result()` in `investigation.rs`.
+`evidence_ready()` at `investigation.rs:617` — requires `search_produced_results && useful_accepted_candidate_reads >= useful_candidate_reads_target`.
 Gates are never weakened. Never add a bypass.
 
 ## System Prompt
-Always built fresh via build_system_prompt() from config — never persisted to SQLite.
-Always called with include_mutation_tools: false (engine.rs:106).
-Mutation tools appear only in the ephemeral per-turn hint for MutationEnabled turns.
+Always built fresh via `build_system_prompt()` from config — never persisted to SQLite.
+Always called with `include_mutation_tools: false` (`engine.rs:105`).
+Mutation tools appear only in the ephemeral per-turn hint for `MutationEnabled` turns.
 
 ## Session Scoping
-All tool inputs confined via resolve() in src/runtime/project/resolver.rs.
-ProjectRoot::new() canonicalizes and validates at construction.
+All tool inputs confined via `resolve()` in `src/runtime/project/resolver.rs`.
+`ProjectRoot::new()` canonicalizes and validates at construction; on Windows, strips the `\\?\` UNC prefix after `fs::canonicalize`.
+
+## LSP Is Never Load-Bearing
+`LspManager` errors produce an empty `LspDefinitionOutput`, not a terminal answer.
+The runtime must not depend on LSP availability for correctness. LSP results update `InvestigationGraph` only; graph candidates are advisory fallbacks, not primary candidates.
+`LspManager` is dispatched in `tool_round.rs` before `registry.dispatch()` because it requires `&mut self`; it is not registered in `ToolRegistry`.
+
+## InvestigationGraph Is Advisory
+`InvestigationGraph` (petgraph) owned by `InvestigationState.graph` records import edges and LSP definition edges.
+`promoted_candidates()` is consulted as a fallback read candidate; it does not override the search-candidate set or evidence gates.
