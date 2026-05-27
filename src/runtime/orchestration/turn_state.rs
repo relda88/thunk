@@ -120,7 +120,11 @@ mod tests {
 
     #[test]
     fn turn_signal_variants_exist() {
-        let signals = [TurnSignal::Continue, TurnSignal::Finish, TurnSignal::Suspend];
+        let signals = [
+            TurnSignal::Continue,
+            TurnSignal::Finish,
+            TurnSignal::Suspend,
+        ];
         assert_eq!(signals.len(), 3);
     }
 

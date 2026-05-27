@@ -841,12 +841,8 @@ fn usage_lookup_dispatches_definition_site_candidate_after_usage_exhausted() {
     )
     .unwrap();
 
-    let final_answer =
-        "target_fn is defined in impl.rs and called in caller_a.rs and caller_b.rs.";
-    let mut rt = make_runtime_in(
-        vec!["[search_code: target_fn]", final_answer],
-        tmp.path(),
-    );
+    let final_answer = "target_fn is defined in impl.rs and called in caller_a.rs and caller_b.rs.";
+    let mut rt = make_runtime_in(vec!["[search_code: target_fn]", final_answer], tmp.path());
 
     let events = collect_events(
         &mut rt,

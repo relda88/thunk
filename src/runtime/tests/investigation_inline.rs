@@ -533,10 +533,8 @@ mod tests {
         // matches < 10, and no graph edges.
         let mut state = InvestigationState::new();
         state.configure_usage_evidence_policy(true);
-        let output = make_search_output_for_hint(vec![
-            ("src/a.rs", "foo()"),
-            ("src/b.rs", "foo()"),
-        ]);
+        let output =
+            make_search_output_for_hint(vec![("src/a.rs", "foo()"), ("src/b.rs", "foo()")]);
         state.record_search_results(&output, Some("foo"), &mut |_| {});
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
@@ -963,7 +961,12 @@ mod tests {
     fn direct_read_does_not_increment_candidate_counts() {
         let mut state = InvestigationState::new();
         let output = make_file_contents_output("src/foo.rs", "fn main() {}");
-        state.record_read_result(&output, InvestigationMode::General, ReadClassification::Direct, &mut |_| {});
+        state.record_read_result(
+            &output,
+            InvestigationMode::General,
+            ReadClassification::Direct,
+            &mut |_| {},
+        );
         assert_eq!(state.direct_reads_count, 1);
         assert!(state.direct_read_paths.contains("src/foo.rs"));
         assert_eq!(state.candidate_reads_count, 0);
@@ -974,7 +977,12 @@ mod tests {
     fn direct_read_returns_no_recovery() {
         let mut state = InvestigationState::new();
         let output = make_file_contents_output("src/foo.rs", "fn main() {}");
-        let result = state.record_read_result(&output, InvestigationMode::General, ReadClassification::Direct, &mut |_| {});
+        let result = state.record_read_result(
+            &output,
+            InvestigationMode::General,
+            ReadClassification::Direct,
+            &mut |_| {},
+        );
         assert!(result.is_none());
     }
 
@@ -984,7 +992,12 @@ mod tests {
         let search_output = make_search_output_for_hint(vec![("src/foo.rs", "fn main()")]);
         state.record_search_results(&search_output, None, &mut |_| {});
         let output = make_file_contents_output("src/foo.rs", "fn main() {}");
-        state.record_read_result(&output, InvestigationMode::General, ReadClassification::Candidate, &mut |_| {});
+        state.record_read_result(
+            &output,
+            InvestigationMode::General,
+            ReadClassification::Candidate,
+            &mut |_| {},
+        );
         assert_eq!(state.candidate_reads_count, 1);
         assert_eq!(state.direct_reads_count, 0);
         assert!(state.direct_read_paths.is_empty());

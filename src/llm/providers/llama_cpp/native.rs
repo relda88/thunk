@@ -2,7 +2,10 @@ use std::num::NonZeroU32;
 use std::path::Path;
 
 use llama_cpp_2::{
-    context::{params::{KvCacheType, LlamaContextParams}, LlamaContext},
+    context::{
+        params::{KvCacheType, LlamaContextParams},
+        LlamaContext,
+    },
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
     model::{params::LlamaModelParams, AddBos, LlamaModel},
@@ -109,25 +112,28 @@ pub(super) fn load_model(config: &LlamaCppConfig, model_path: &Path) -> Result<L
 
     let ctx = {
         let _suppress = StderrSuppress::new();
-        let raw_ctx = model
-            .new_context(&backend, ctx_params)
-            .map_err(|error| {
-                AppError::Runtime(format!(
-                    "{} (context_tokens={}, batch_tokens={}, n_ubatch={}, trained_context={})",
-                    error,
-                    config.context_tokens,
-                    config.batch_tokens,
-                    config.batch_tokens,
-                    model.n_ctx_train()
-                ))
-            })?;
+        let raw_ctx = model.new_context(&backend, ctx_params).map_err(|error| {
+            AppError::Runtime(format!(
+                "{} (context_tokens={}, batch_tokens={}, n_ubatch={}, trained_context={})",
+                error,
+                config.context_tokens,
+                config.batch_tokens,
+                config.batch_tokens,
+                model.n_ctx_train()
+            ))
+        })?;
         // SAFETY: model is heap-allocated (Box), so its address is stable across moves of
         // LoadedLlama. ctx is declared before model in the struct, ensuring it is dropped
         // first. The 'static lifetime is manually upheld by these two invariants.
         unsafe { std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>(raw_ctx) }
     };
 
-    Ok(LoadedLlama { ctx, model, backend, last_prefill_token_count: 0 })
+    Ok(LoadedLlama {
+        ctx,
+        model,
+        backend,
+        last_prefill_token_count: 0,
+    })
 }
 
 pub(super) fn run_generation(
@@ -176,13 +182,22 @@ pub(super) fn run_generation(
     let t_prefill_start = Instant::now();
 
     if tokens.len() < loaded.last_prefill_token_count {
-        loaded.ctx.clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), None).ok();
+        loaded
+            .ctx
+            .clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), None)
+            .ok();
         loaded.last_prefill_token_count = tokens.len();
     }
     let new_start = loaded.last_prefill_token_count;
 
     let mut batch = LlamaBatch::new(batch_tokens as usize, 1);
-    let prefill_result = do_prefill(&mut loaded.ctx, &mut batch, &tokens, new_start, batch_tokens);
+    let prefill_result = do_prefill(
+        &mut loaded.ctx,
+        &mut batch,
+        &tokens,
+        new_start,
+        batch_tokens,
+    );
     let prefill_result = match prefill_result {
         Err(_) if new_start > 0 => {
             loaded.ctx.clear_kv_cache();
@@ -238,7 +253,10 @@ pub(super) fn run_generation(
         loaded.ctx.decode(&mut batch).map_err(map_llama_error)?;
     }
 
-    loaded.ctx.clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), Some(current_pos as u32)).ok();
+    loaded
+        .ctx
+        .clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), Some(current_pos as u32))
+        .ok();
     loaded.last_prefill_token_count = tokens.len();
     on_event(BackendEvent::Timing {
         stage: BackendTimingStage::GenerationDone,

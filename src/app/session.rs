@@ -22,7 +22,11 @@ impl ActiveSession {
     pub fn open_or_restore(
         db_path: &Path,
         project_root: &ProjectRoot,
-    ) -> Result<(Self, Vec<Message>, (Option<String>, Option<String>, Option<String>))> {
+    ) -> Result<(
+        Self,
+        Vec<Message>,
+        (Option<String>, Option<String>, Option<String>),
+    )> {
         let store = SessionStore::open(db_path)?;
         let current_root = project_root.path();
         let current_root_str = current_root.to_string_lossy();
@@ -266,7 +270,10 @@ fn render_summary_items(items: &[String]) -> String {
 }
 
 fn summarized_line(content: &str) -> Option<String> {
-    let line = content.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let line = content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
     let normalized = line.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.is_empty() {
         None
@@ -327,8 +334,7 @@ fn extract_file_references(content: &str) -> Vec<String> {
         let trimmed = token.trim_matches(|c: char| {
             matches!(
                 c,
-                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ','
-                    | ';'
+                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ';'
             )
         });
         let trimmed = trimmed
@@ -352,9 +358,9 @@ fn extract_file_references(content: &str) -> Vec<String> {
 
 fn is_file_reference(candidate: &str) -> bool {
     const FILE_EXTENSIONS: &[&str] = &[
-        ".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".json",
-        ".jsx", ".kt", ".lock", ".md", ".py", ".rs", ".scss", ".sh", ".sql", ".toml", ".ts",
-        ".tsx", ".txt", ".yaml", ".yml",
+        ".c", ".cc", ".cpp", ".css", ".go", ".h", ".hpp", ".html", ".java", ".js", ".json", ".jsx",
+        ".kt", ".lock", ".md", ".py", ".rs", ".scss", ".sh", ".sql", ".toml", ".ts", ".tsx",
+        ".txt", ".yaml", ".yml",
     ];
 
     if candidate == "." || candidate == ".." {
@@ -469,7 +475,10 @@ mod tests {
         assert_eq!(restored[0].role, Role::System);
         assert!(restored[0].content.contains("[Session Summary]"));
         assert_eq!(restored[1].content, "msg 4");
-        assert_eq!(restored[RESTORE_WINDOW].content, format!("msg {}", total - 1));
+        assert_eq!(
+            restored[RESTORE_WINDOW].content,
+            format!("msg {}", total - 1)
+        );
     }
 
     #[test]
@@ -682,13 +691,13 @@ mod tests {
         assert!(restored[0].content.contains("Key Decisions:"));
         assert!(restored[0].content.contains("Files Referenced:"));
         assert!(restored[0].content.contains("Searches:"));
-        assert!(restored[0].content.contains("RESTORE_WINDOW in src/app/session.rs"));
+        assert!(restored[0]
+            .content
+            .contains("RESTORE_WINDOW in src/app/session.rs"));
         assert!(restored[0].content.contains("src/app/session.rs"));
-        assert!(
-            restored[0]
-                .content
-                .contains("We should keep restore filtering before summarization.")
-        );
+        assert!(restored[0]
+            .content
+            .contains("We should keep restore filtering before summarization."));
     }
 
     #[test]
@@ -791,7 +800,9 @@ mod tests {
         let restored = from_stored(&saved);
         let summary = &restored[0];
         assert_eq!(summary.role, Role::System);
-        assert!(summary.content.contains("please investigate the restore flow"));
+        assert!(summary
+            .content
+            .contains("please investigate the restore flow"));
         assert!(!summary.content.contains("secret.rs"));
         assert!(!summary.content.contains("super secret"));
         assert!(!summary.content.contains("tool_result"));
@@ -835,11 +846,9 @@ mod tests {
         let stored = to_stored(&restored);
         assert_eq!(stored.len(), RESTORE_WINDOW);
         assert!(stored.iter().all(|message| message.role != "system"));
-        assert!(
-            stored
-                .iter()
-                .all(|message| !message.content.contains("[Session Summary]"))
-        );
+        assert!(stored
+            .iter()
+            .all(|message| !message.content.contains("[Session Summary]")));
     }
 
     fn temp_project_root() -> tempfile::TempDir {
@@ -882,7 +891,8 @@ mod tests {
             )
             .unwrap();
 
-        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &root).unwrap();
+        let (_session, history, _anchors) =
+            ActiveSession::open_or_restore(&db_path, &root).unwrap();
 
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "hello");
@@ -917,7 +927,8 @@ mod tests {
             )
             .unwrap();
 
-        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &current_root).unwrap();
+        let (_session, history, _anchors) =
+            ActiveSession::open_or_restore(&db_path, &current_root).unwrap();
 
         assert!(history.is_empty());
 
@@ -972,7 +983,8 @@ mod tests {
             .unwrap();
 
         // Returning to project A must restore A's session, not start fresh
-        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &root_a).unwrap();
+        let (_session, history, _anchors) =
+            ActiveSession::open_or_restore(&db_path, &root_a).unwrap();
 
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].content, "project a history");
@@ -1033,7 +1045,8 @@ mod tests {
         .unwrap();
         drop(conn);
 
-        let (_session, history, _anchors) = ActiveSession::open_or_restore(&db_path, &root).unwrap();
+        let (_session, history, _anchors) =
+            ActiveSession::open_or_restore(&db_path, &root).unwrap();
         assert!(history.is_empty());
 
         let store = SessionStore::open(&db_path).unwrap();
@@ -1088,9 +1101,7 @@ mod tests {
 
         let store = SessionStore::open(&db_path).unwrap();
         let meta = store.create(root.path()).unwrap();
-        store
-            .save(&meta.id, &[], None, None, None)
-            .unwrap();
+        store.save(&meta.id, &[], None, None, None).unwrap();
 
         let (_session, _history, anchors) =
             ActiveSession::open_or_restore(&db_path, &root).unwrap();
@@ -1173,7 +1184,9 @@ mod tests {
         );
 
         let store = SessionStore::open(&db_path).unwrap();
-        let other_sessions = store.list_for_project(root_b.path().to_string_lossy().as_ref()).unwrap();
+        let other_sessions = store
+            .list_for_project(root_b.path().to_string_lossy().as_ref())
+            .unwrap();
         assert_eq!(other_sessions.len(), 1);
         assert_eq!(other_sessions[0].id, other.id);
     }

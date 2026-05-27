@@ -5,7 +5,7 @@ use crate::tools::{ExecutionKind, ToolError, ToolInput, ToolRunResult};
 use super::super::super::investigation::investigation::{InvestigationMode, InvestigationState};
 use super::super::super::investigation::tool_surface::ToolSurface;
 use super::super::super::protocol::response_text::{
-    direct_read_fallback_answer, LAST_SEARCH_REPLAY_FAILED, LAST_SEARCH_REPLAYED,
+    direct_read_fallback_answer, LAST_SEARCH_REPLAYED, LAST_SEARCH_REPLAY_FAILED,
 };
 use super::super::super::protocol::tool_codec;
 use super::super::super::resolve;
@@ -87,7 +87,10 @@ impl Runtime {
                         .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                 }
                 self.pending_action = Some(pending.clone());
-                on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
+                on_event(RuntimeEvent::ApprovalRequired {
+                    pending,
+                    evidence: vec![],
+                });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
             ToolRoundOutcome::RuntimeDispatch { .. } => {
@@ -193,7 +196,10 @@ impl Runtime {
                     "tool '{name}' requested approval but spec declares Immediate"
                 );
                 self.pending_action = Some(pending.clone());
-                on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
+                on_event(RuntimeEvent::ApprovalRequired {
+                    pending,
+                    evidence: vec![],
+                });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
             Err(e) => {

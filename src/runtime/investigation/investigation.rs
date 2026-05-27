@@ -3,9 +3,9 @@ use std::path::Path;
 
 use crate::tools::ToolOutput;
 
-use super::graph::InvestigationGraph;
 use super::super::paths::normalize_evidence_path;
 use super::super::types::RuntimeEvent;
+use super::graph::InvestigationGraph;
 
 const RUNTIME_TRACE_ENV: &str = "THUNK_TRACE_RUNTIME";
 
@@ -1080,7 +1080,8 @@ impl InvestigationState {
                 // supplemental runtime dispatches and must not consume a candidate slot.
                 self.candidate_reads_count -= 1;
                 self.useful_accepted_candidate_reads += 1;
-                self.useful_accepted_candidate_paths.insert(read_path.clone());
+                self.useful_accepted_candidate_paths
+                    .insert(read_path.clone());
                 trace_runtime_decision(
                     on_event,
                     "read_evidence",
@@ -1319,14 +1320,17 @@ impl InvestigationState {
             // Gate 6a (LoadLookup | General): load candidates whose load-term lines are all
             // definition sites are structurally insufficient when call-site load candidates exist.
             // Fire once; fall through if no call-site load candidates exist.
-            else if matches!(mode, InvestigationMode::LoadLookup | InvestigationMode::General)
-                && is_load_candidate
+            else if matches!(
+                mode,
+                InvestigationMode::LoadLookup | InvestigationMode::General
+            ) && is_load_candidate
                 && is_load_def_only
                 && self.has_non_definition_load_candidates
             {
                 if !self.load_definition_only_correction_issued {
-                    let suggested_path =
-                        self.first_non_definition_load_candidate().map(str::to_string);
+                    let suggested_path = self
+                        .first_non_definition_load_candidate()
+                        .map(str::to_string);
                     if suggested_path.is_some() {
                         self.load_definition_only_correction_issued = true;
                     }
@@ -1351,7 +1355,10 @@ impl InvestigationState {
                     &[
                         ("path", read_path.clone()),
                         ("accepted", "false".into()),
-                        ("reason", "load_definition_only_recovery_already_issued".into()),
+                        (
+                            "reason",
+                            "load_definition_only_recovery_already_issued".into(),
+                        ),
                     ],
                 );
                 // Correction already issued: fall through without accepting.

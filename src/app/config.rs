@@ -1,1 +1,1 @@
-pub use crate::core::config::{AllowedCommandTool, Config, load};
+pub use crate::core::config::{load, AllowedCommandTool, Config};

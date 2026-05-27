@@ -905,9 +905,7 @@ pub(crate) fn run_tool_round(
                                 path: path.to_string(),
                             },
                         };
-                    } else if let Some(def_path) =
-                        investigation.first_definition_site_candidate()
-                    {
+                    } else if let Some(def_path) = investigation.first_definition_site_candidate() {
                         let normalized = normalize_evidence_path(&def_path);
                         if !reads_this_turn.contains(&normalized) {
                             trace_runtime_decision(
@@ -1712,7 +1710,10 @@ mod tests {
         let ToolInput::ReadFile { path: usage_path } = call else {
             panic!("dispatch must be read_file");
         };
-        assert_eq!(usage_path, "usage.rs", "preferred candidate must be usage.rs");
+        assert_eq!(
+            usage_path, "usage.rs",
+            "preferred candidate must be usage.rs"
+        );
 
         // Round 2: read usage.rs — evidence satisfied; runtime then dispatches definition.rs
         let after_usage_read = run_tool_round(

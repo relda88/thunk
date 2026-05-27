@@ -96,7 +96,8 @@ impl AppContext {
 
         if should_save {
             let anchors = self.runtime.anchors_snapshot();
-            self.session.save(&self.runtime.messages_snapshot(), anchors)?;
+            self.session
+                .save(&self.runtime.messages_snapshot(), anchors)?;
         }
         Ok(())
     }
@@ -177,7 +178,9 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         RuntimeEvent::ActivityChanged(a) => Some(format!("activity: {}", a.clone().label())),
         RuntimeEvent::AnswerReady(source) => Some(format!("answer ready: {source:?}")),
         RuntimeEvent::Failed { message } => Some(format!("failed: {message}")),
-        RuntimeEvent::ApprovalRequired { pending: p, .. } => Some(format!("approval required: {}", p.summary)),
+        RuntimeEvent::ApprovalRequired { pending: p, .. } => {
+            Some(format!("approval required: {}", p.summary))
+        }
         RuntimeEvent::InfoMessage(text) => Some(format!("info: {text}")),
         RuntimeEvent::SystemMessage(text) => Some(format!("system: {text}")),
         // Handled with timing in handle():

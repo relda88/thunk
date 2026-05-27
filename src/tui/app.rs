@@ -511,8 +511,14 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         }
         RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
         RuntimeEvent::SystemMessage(text) => state.add_system_message(text),
-        RuntimeEvent::FileReadFinished { path, line_count, content: _ } => {
-            state.add_system_message(format!("read {path} ({line_count} lines) — Ctrl+O to expand"));
+        RuntimeEvent::FileReadFinished {
+            path,
+            line_count,
+            content: _,
+        } => {
+            state.add_system_message(format!(
+                "read {path} ({line_count} lines) — Ctrl+O to expand"
+            ));
         }
         RuntimeEvent::DirectReadCompleted => {
             let message_index = state.messages.len() - 1;
@@ -680,10 +686,7 @@ mod tests {
     #[test]
     fn session_timestamp_formats_as_utc_datetime() {
         let ts = 1_778_198_400_000_000_000_u64;
-        assert_eq!(
-            format_session_updated_at(ts),
-            "2026-05-08 00:00:00 UTC"
-        );
+        assert_eq!(format_session_updated_at(ts), "2026-05-08 00:00:00 UTC");
     }
 
     #[test]
@@ -792,7 +795,13 @@ mod tests {
         let sessions_after_submit = harness.app.list_sessions().unwrap();
         assert_eq!(sessions_after_submit.len(), 1);
         assert_eq!(sessions_after_submit[0].message_count, 2);
-        assert_eq!(store.list_for_project(other_root.to_string_lossy().as_ref()).unwrap().len(), 1);
+        assert_eq!(
+            store
+                .list_for_project(other_root.to_string_lossy().as_ref())
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     struct TestHarness {

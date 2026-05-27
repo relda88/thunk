@@ -185,8 +185,7 @@ pub(super) fn wait_for_diagnostics(
 ) -> Result<Vec<LspDiagnostic>> {
     loop {
         let message = recv(rx, timeout)?;
-        if message.get("method").and_then(|v| v.as_str())
-            == Some("textDocument/publishDiagnostics")
+        if message.get("method").and_then(|v| v.as_str()) == Some("textDocument/publishDiagnostics")
         {
             let params = &message["params"];
             if params["uri"].as_str() == Some(target_uri) {

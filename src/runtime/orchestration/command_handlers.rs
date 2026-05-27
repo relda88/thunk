@@ -162,7 +162,10 @@ impl Runtime {
             }
             Ok(ToolRunResult::Approval(pending)) => {
                 self.pending_action = Some(pending.clone());
-                on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
+                on_event(RuntimeEvent::ApprovalRequired {
+                    pending,
+                    evidence: vec![],
+                });
             }
             Err(e) => {
                 on_event(RuntimeEvent::InfoMessage(format!("error: {e}")));
@@ -207,11 +210,7 @@ impl Runtime {
         self.dispatch_command_tool(CommandTool::GitLog, on_event);
     }
 
-    pub(super) fn handle_list_dir(
-        &mut self,
-        path: String,
-        on_event: &mut dyn FnMut(RuntimeEvent),
-    ) {
+    pub(super) fn handle_list_dir(&mut self, path: String, on_event: &mut dyn FnMut(RuntimeEvent)) {
         self.dispatch_command_tool(CommandTool::ListDir { path }, on_event);
     }
 
@@ -276,7 +275,11 @@ impl Runtime {
         ];
         let mut lines = vec!["providers:".to_string()];
         for (display, internal) in &providers {
-            let marker = if *internal == current { " (active)" } else { "" };
+            let marker = if *internal == current {
+                " (active)"
+            } else {
+                ""
+            };
             lines.push(format!("  {}{}", display, marker));
         }
         on_event(RuntimeEvent::SystemMessage(lines.join("\n")));

@@ -34,7 +34,10 @@ pub(super) fn run_generate_turn(
 
     let result = backend.generate(request, &mut |event| match event {
         BackendEvent::StatusChanged(status) => {
-            on_event(RuntimeEvent::ActivityChanged(map_backend_status(status, investigation_mode)));
+            on_event(RuntimeEvent::ActivityChanged(map_backend_status(
+                status,
+                investigation_mode,
+            )));
         }
         BackendEvent::TextDelta(chunk) => {
             response.push_str(&chunk);

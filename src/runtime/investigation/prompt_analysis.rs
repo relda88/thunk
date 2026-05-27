@@ -213,13 +213,34 @@ pub(crate) fn user_requested_mutation(text: &str) -> bool {
 }
 
 pub(crate) fn user_requested_execution(text: &str) -> bool {
-    text.split(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | '?' | '!' | ';' | ':' | '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '/' | '\\'))
-        .any(|token| {
-            matches!(
-                token.to_ascii_lowercase().as_str(),
-                "run" | "execute" | "cargo" | "check" | "build" | "test" | "clippy"
+    text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                ',' | '.'
+                    | '?'
+                    | '!'
+                    | ';'
+                    | ':'
+                    | '"'
+                    | '\''
+                    | '`'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '/'
+                    | '\\'
             )
-        })
+    })
+    .any(|token| {
+        matches!(
+            token.to_ascii_lowercase().as_str(),
+            "run" | "execute" | "cargo" | "check" | "build" | "test" | "clippy"
+        )
+    })
 }
 
 pub(crate) fn requested_shell_command(text: &str) -> Option<String> {
@@ -289,8 +310,7 @@ pub(crate) fn requested_simple_edit(text: &str) -> Option<SimpleEditRequest> {
                 '`' | '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
             )
         });
-        if path.is_empty() || path.chars().any(char::is_whitespace) || !looks_like_file_path(path)
-        {
+        if path.is_empty() || path.chars().any(char::is_whitespace) || !looks_like_file_path(path) {
             continue;
         }
 
@@ -1024,9 +1044,8 @@ mod tests {
 
     #[test]
     fn requested_simple_edit_detects_to_change_form() {
-        let edit =
-            requested_simple_edit("Edit config.txt to change old_value to new_value")
-                .expect("expected simple edit");
+        let edit = requested_simple_edit("Edit config.txt to change old_value to new_value")
+            .expect("expected simple edit");
         assert_eq!(edit.path, "config.txt");
         assert_eq!(edit.search, "old_value");
         assert_eq!(edit.replace, "new_value");

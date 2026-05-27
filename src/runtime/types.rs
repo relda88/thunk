@@ -9,10 +9,17 @@ pub enum Activity {
     CreatingContext,
     Tokenizing,
     Prefilling,
-    Generating { mode: Option<String> },
+    Generating {
+        mode: Option<String>,
+    },
     Responding,
-    ExecutingTools { tool: String, detail: Option<String> },
-    AwaitingApproval { tool: String },
+    ExecutingTools {
+        tool: String,
+        detail: Option<String>,
+    },
+    AwaitingApproval {
+        tool: String,
+    },
 }
 
 impl Activity {
@@ -27,7 +34,10 @@ impl Activity {
             Self::Generating { mode: Some(m) } => format!("{}...", m),
             Self::Generating { mode: None } => "generating...".to_string(),
             Self::Responding => "responding".to_string(),
-            Self::ExecutingTools { tool, detail: Some(d) } => format!("{}: {}", tool, d),
+            Self::ExecutingTools {
+                tool,
+                detail: Some(d),
+            } => format!("{}: {}", tool, d),
             Self::ExecutingTools { tool, detail: None } => format!("{}...", tool),
             Self::AwaitingApproval { tool } => format!("approval: {}", tool),
         }
@@ -109,7 +119,9 @@ pub enum RuntimeRequest {
     /// Lists all known providers and indicates which is currently active.
     ProvidersList,
     /// Switches the active backend provider by name.
-    ProvidersUse { name: String },
+    ProvidersUse {
+        name: String,
+    },
     /// Command-triggered git_branch invocation. Goes through CommandTool allowlist.
     /// Does not mutate conversation or trigger session save.
     GitBranch,
@@ -124,7 +136,9 @@ pub enum RuntimeRequest {
     GitLog,
     /// Command-triggered list_dir invocation. Goes through CommandTool allowlist.
     /// Does not mutate conversation or trigger session save.
-    ListDir { path: String },
+    ListDir {
+        path: String,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
@@ -145,7 +159,10 @@ pub enum RuntimeEvent {
     },
     /// Fired when a mutating tool requires user approval before execution.
     /// The turn is paused until RuntimeRequest::Approve or Reject is received.
-    ApprovalRequired { pending: PendingAction, evidence: Vec<String> },
+    ApprovalRequired {
+        pending: PendingAction,
+        evidence: Vec<String>,
+    },
     AnswerReady(AnswerSource),
     Failed {
         message: String,

@@ -253,4 +253,3 @@ pub enum ToolError {
     #[error("invalid tool input: {0}")]
     InvalidInput(String),
 }
-

@@ -41,12 +41,14 @@ impl LspSession {
         startup_timeout: Duration,
     ) -> Result<Self> {
         let mut child = spawn_language_server(spec, project_root)?;
-        let mut stdin = child.stdin.take().ok_or_else(|| {
-            AppError::Tool("failed to open LSP server stdin".to_string())
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AppError::Tool("failed to open LSP server stdout".to_string())
-        })?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Tool("failed to open LSP server stdin".to_string()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::Tool("failed to open LSP server stdout".to_string()))?;
         let rx = spawn_reader(stdout);
 
         let root_uri = path_to_file_uri(project_root);

@@ -70,7 +70,11 @@ fn draw_transcript(
         let is_expanded_file_content = state.expanded_file_read
             && state.last_file_read_index.map_or(false, |idx| i == idx)
             && message.role == Role::Assistant;
-        let prefix = if is_expanded_file_content { "" } else { role_prefix(message) };
+        let prefix = if is_expanded_file_content {
+            ""
+        } else {
+            role_prefix(message)
+        };
         let wrapped = wrap_text(
             &format!("{prefix}{}", message.content),
             available_width.max(8),
@@ -100,7 +104,11 @@ fn draw_transcript(
             MessageKind::Error => queue!(stdout, SetForegroundColor(Color::Red))?,
             MessageKind::Normal => {}
         }
-        queue!(stdout, Print(fit_line(line, width)), SetAttribute(Attribute::Reset))?;
+        queue!(
+            stdout,
+            Print(fit_line(line, width)),
+            SetAttribute(Attribute::Reset)
+        )?;
     }
 
     if offset > 0 && !visible.is_empty() {

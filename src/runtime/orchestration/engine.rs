@@ -11,9 +11,7 @@ use super::super::investigation::anchors::{
     has_same_scope_reference, is_last_read_file_anchor_prompt, is_last_search_anchor_prompt,
     AnchorState,
 };
-use super::super::investigation::investigation::{
-    detect_investigation_mode, InvestigationMode,
-};
+use super::super::investigation::investigation::{detect_investigation_mode, InvestigationMode};
 use super::super::paths::{normalize_evidence_path, path_is_within_scope};
 use super::super::project::ProjectRoot;
 use super::super::project::ProjectStructureSnapshot;
@@ -27,8 +25,7 @@ use super::super::types::{
 use super::context_policy::ContextPolicy;
 use super::generation::{emit_visible_assistant_message, run_generate_turn};
 use super::tool_round::{
-    run_tool_round, ToolRoundOutcome, MAX_CANDIDATE_READS_PER_INVESTIGATION,
-    MAX_READS_PER_TURN,
+    run_tool_round, ToolRoundOutcome, MAX_CANDIDATE_READS_PER_INVESTIGATION, MAX_READS_PER_TURN,
 };
 
 #[path = "anchor_resolution.rs"]
@@ -49,7 +46,9 @@ const MAX_CORRECTIONS: usize = 1;
 use super::super::protocol::response_text::*;
 use super::super::trace::trace_runtime_decision;
 use super::context_cap::{cap_tool_result_blocks, estimate_generation_prompt_chars};
-use super::engine_guards::{extract_claimed_paths, is_definition_only_usage_answer, usage_lookup_is_broad};
+use super::engine_guards::{
+    extract_claimed_paths, is_definition_only_usage_answer, usage_lookup_is_broad,
+};
 use super::telemetry::{
     infer_post_tool_round_cause, short_tool_name, tool_input_activity,
     trace_insufficient_evidence_terminal, GenerationRoundCause, GenerationRoundLabel,
@@ -57,15 +56,13 @@ use super::telemetry::{
 
 use super::super::investigation::tool_surface::{select_tool_surface, ToolSurface};
 
-use super::turn_state::{
-    AnswerPhaseKind, PendingRuntimeCall, TurnContext, TurnSignal, TurnState,
-};
+use super::turn_state::{AnswerPhaseKind, PendingRuntimeCall, TurnContext, TurnSignal, TurnState};
 
 /// Returns true if the prompt contains a token that looks like a code identifier.
 /// Only two structural patterns are checked — no NLP, no heuristics.
 use super::super::investigation::prompt_analysis::{
-    classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
-    is_permitted_shell_command, requested_shell_command, requested_simple_edit,
+    classify_retrieval_intent, extract_investigation_path_scope, is_permitted_shell_command,
+    prompt_requires_investigation, requested_shell_command, requested_simple_edit,
     user_requested_execution, user_requested_mutation, DirectReadMode, RetrievalIntent,
 };
 
@@ -104,12 +101,8 @@ impl Runtime {
         registry: ToolRegistry,
     ) -> Self {
         let specs = registry.specs();
-        let system_prompt = prompt::build_system_prompt(
-            &config.app.name,
-            project_root.path(),
-            &specs,
-            false,
-        );
+        let system_prompt =
+            prompt::build_system_prompt(&config.app.name, project_root.path(), &specs, false);
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
         let lsp = LspManager::new(&config.lsp, project_root.path());
         Self {
@@ -381,13 +374,16 @@ impl Runtime {
                             match self.registry.dispatch(resolved) {
                                 Ok(ToolRunResult::Approval(pending)) => {
                                     self.pending_action = Some(pending.clone());
-                                    on_event(RuntimeEvent::ApprovalRequired { pending, evidence: vec![] });
+                                    on_event(RuntimeEvent::ApprovalRequired {
+                                        pending,
+                                        evidence: vec![],
+                                    });
                                 }
                                 Ok(ToolRunResult::Immediate(output)) => {
                                     self.invalidate_project_snapshot_if_needed(&output);
-                                    self.commit_tool_results(
-                                        tool_codec::format_tool_result("shell", &output),
-                                    );
+                                    self.commit_tool_results(tool_codec::format_tool_result(
+                                        "shell", &output,
+                                    ));
                                 }
                                 Err(_) => {}
                             }
@@ -455,9 +451,7 @@ impl Runtime {
         start_in_post_read_answer_phase: bool,
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) {
-        let Ok(ctx) =
-            TurnContext::build(self, tool_rounds, &reads_this_turn, on_event)
-        else {
+        let Ok(ctx) = TurnContext::build(self, tool_rounds, &reads_this_turn, on_event) else {
             return;
         };
         let mut state = TurnState::new(
@@ -491,40 +485,45 @@ impl Runtime {
         } else {
             ctx.tool_surface
         };
-            if matches!(effective_surface, ToolSurface::AnswerOnly) {
-                trace_runtime_decision(
-                    on_event,
-                    "answer_phase_synthesis_bounded",
-                    &[("surface", "AnswerOnly".into())],
-                );
-            }
-            let is_correction_round = !matches!(
-                state.next_round_cause,
-                GenerationRoundCause::Initial
-                    | GenerationRoundCause::ToolResults
-                    | GenerationRoundCause::ReadRequestToolRequired
-                    | GenerationRoundCause::ReadBeforeAnsweringCorrection
+        if matches!(effective_surface, ToolSurface::AnswerOnly) {
+            trace_runtime_decision(
+                on_event,
+                "answer_phase_synthesis_bounded",
+                &[("surface", "AnswerOnly".into())],
             );
-            let project_snapshot_hint = if state.pending_runtime_call.is_none() && !is_correction_round {
-                self.maybe_render_project_snapshot_hint(effective_surface)
-            } else {
-                None
-            };
-            let prompt_chars = if state.turn_perf.is_enabled() {
-                estimate_generation_prompt_chars(
-                    &self.conversation,
-                    effective_surface,
-                    project_snapshot_hint.as_deref(),
-                )
-            } else {
-                0
-            };
+        }
+        let is_correction_round = !matches!(
+            state.next_round_cause,
+            GenerationRoundCause::Initial
+                | GenerationRoundCause::ToolResults
+                | GenerationRoundCause::ReadRequestToolRequired
+                | GenerationRoundCause::ReadBeforeAnsweringCorrection
+        );
+        let project_snapshot_hint = if state.pending_runtime_call.is_none() && !is_correction_round
+        {
+            self.maybe_render_project_snapshot_hint(effective_surface)
+        } else {
+            None
+        };
+        let prompt_chars = if state.turn_perf.is_enabled() {
+            estimate_generation_prompt_chars(
+                &self.conversation,
+                effective_surface,
+                project_snapshot_hint.as_deref(),
+            )
+        } else {
+            0
+        };
 
-            state.turn_perf.start_round(state.next_round_label, state.next_round_cause, prompt_chars, on_event);
+        state.turn_perf.start_round(
+            state.next_round_label,
+            state.next_round_cause,
+            prompt_chars,
+            on_event,
+        );
 
-            let (calls, response, seeded_pre_generation) = if let Some(pending) =
-                state.pending_runtime_call.take()
-            {
+        let (calls, response, seeded_pre_generation) =
+            if let Some(pending) = state.pending_runtime_call.take() {
                 (vec![pending.input], None, pending.seeded_pre_generation)
             } else {
                 let response = {
@@ -568,16 +567,18 @@ impl Runtime {
                 (calls, Some(response), false)
             };
 
-            if let Some(signal) = self.check_tool_call_gates(ctx, state, &calls, response.as_deref(), on_event) {
-                return signal;
-            }
+        if let Some(signal) =
+            self.check_tool_call_gates(ctx, state, &calls, response.as_deref(), on_event)
+        {
+            return signal;
+        }
 
-            if calls.is_empty() {
-                let response = response.expect("response exists when calls are empty");
-                return self.handle_no_tool_call(ctx, state, response, seeded_pre_generation, on_event);
-            }
+        if calls.is_empty() {
+            let response = response.expect("response exists when calls are empty");
+            return self.handle_no_tool_call(ctx, state, response, seeded_pre_generation, on_event);
+        }
 
-            return self.dispatch_tool_round(ctx, state, calls, seeded_pre_generation, on_event);
+        return self.dispatch_tool_round(ctx, state, calls, seeded_pre_generation, on_event);
     }
 
     fn dispatch_tool_round(
@@ -598,7 +599,9 @@ impl Runtime {
             }
         }
 
-        on_event(RuntimeEvent::ActivityChanged(tool_input_activity(calls.first())));
+        on_event(RuntimeEvent::ActivityChanged(tool_input_activity(
+            calls.first(),
+        )));
         let t_tool_start = if state.turn_perf.is_enabled() {
             Some(std::time::Instant::now())
         } else {
@@ -632,7 +635,10 @@ impl Runtime {
                 if seeded_pre_generation {
                     state.seeded_tool_executed = true;
                     state.last_call_key = None;
-                    if matches!(ctx.retrieval_intent, RetrievalIntent::DirectoryListing { .. }) {
+                    if matches!(
+                        ctx.retrieval_intent,
+                        RetrievalIntent::DirectoryListing { .. }
+                    ) {
                         state.answer_phase = Some(AnswerPhaseKind::PostRead);
                     }
                     // Invariant: ctx.requested_read_path.is_some() identifies a DirectRead turn.
@@ -646,7 +652,9 @@ impl Runtime {
                     }
                 }
                 if let Some(t) = t_tool_start {
-                    state.turn_perf.record_tool_elapsed(t.elapsed().as_millis() as u64);
+                    state
+                        .turn_perf
+                        .record_tool_elapsed(t.elapsed().as_millis() as u64);
                 }
                 if seeded_pre_generation
                     && matches!(ctx.direct_read_mode, Some(DirectReadMode::Raw))
@@ -708,7 +716,9 @@ impl Runtime {
                 reason,
             } => {
                 if let Some(t) = t_tool_start {
-                    state.turn_perf.record_tool_elapsed(t.elapsed().as_millis() as u64);
+                    state
+                        .turn_perf
+                        .record_tool_elapsed(t.elapsed().as_millis() as u64);
                 }
                 self.commit_tool_results(results);
                 self.conversation
@@ -728,7 +738,9 @@ impl Runtime {
                 pending,
             } => {
                 if let Some(t) = t_tool_start {
-                    state.turn_perf.record_tool_elapsed(t.elapsed().as_millis() as u64);
+                    state
+                        .turn_perf
+                        .record_tool_elapsed(t.elapsed().as_millis() as u64);
                 }
                 if !accumulated.is_empty() {
                     self.commit_tool_results(accumulated);
@@ -743,7 +755,9 @@ impl Runtime {
             }
             ToolRoundOutcome::RuntimeDispatch { accumulated, call } => {
                 if let Some(t) = t_tool_start {
-                    state.turn_perf.record_tool_elapsed(t.elapsed().as_millis() as u64);
+                    state
+                        .turn_perf
+                        .record_tool_elapsed(t.elapsed().as_millis() as u64);
                 }
                 if !accumulated.is_empty() {
                     self.commit_tool_results(accumulated);
@@ -772,10 +786,9 @@ impl Runtime {
             // Detect correction echoes by sentinel prefix OR by known correction
             // substrings. The latter catches cases where the model parrots the
             // correction text back without the [runtime:correction] prefix.
-            let is_correction_echo =
-                response.trim_start().starts_with("[runtime:correction]")
-                    || response.contains("The file was already read this turn")
-                    || response.contains("Evidence is already ready from the file");
+            let is_correction_echo = response.trim_start().starts_with("[runtime:correction]")
+                || response.contains("The file was already read this turn")
+                || response.contains("Evidence is already ready from the file");
             if is_correction_echo {
                 self.conversation.discard_last_if_assistant();
                 if state.post_answer_phase_correction_echo_retries == 0 {
@@ -797,18 +810,17 @@ impl Runtime {
 
                 let (answer, reason): (String, RuntimeTerminalReason) = match phase {
                     AnswerPhaseKind::PostRead => {
-                        let answer =
-                            if matches!(ctx.direct_read_mode, Some(DirectReadMode::Raw)) {
-                                state.direct_read_result
-                                    .as_deref()
-                                    .map(direct_read_fallback_answer)
-                                    .unwrap_or_else(|| {
-                                        repeated_tool_after_answer_phase_final_answer()
-                                            .to_string()
-                                    })
-                            } else {
-                                repeated_tool_after_answer_phase_final_answer().to_string()
-                            };
+                        let answer = if matches!(ctx.direct_read_mode, Some(DirectReadMode::Raw)) {
+                            state
+                                .direct_read_result
+                                .as_deref()
+                                .map(direct_read_fallback_answer)
+                                .unwrap_or_else(|| {
+                                    repeated_tool_after_answer_phase_final_answer().to_string()
+                                })
+                        } else {
+                            repeated_tool_after_answer_phase_final_answer().to_string()
+                        };
                         (answer, RuntimeTerminalReason::RepeatedToolAfterAnswerPhase)
                     }
                     AnswerPhaseKind::InvestigationEvidenceReady => (
@@ -885,12 +897,11 @@ impl Runtime {
             state.escalation.malformed_tool_syntax_violations += 1;
             self.conversation.discard_last_if_assistant();
             if state.escalation.malformed_tool_syntax_violations == 1 {
-                let correction =
-                    match tool_codec::detected_malformed_mutation_tool(&response) {
-                        Some("edit_file") => malformed_edit_file_correction(),
-                        Some("write_file") => malformed_write_file_correction(),
-                        _ => MALFORMED_BLOCK_CORRECTION.to_string(),
-                    };
+                let correction = match tool_codec::detected_malformed_mutation_tool(&response) {
+                    Some("edit_file") => malformed_edit_file_correction(),
+                    Some("write_file") => malformed_write_file_correction(),
+                    _ => MALFORMED_BLOCK_CORRECTION.to_string(),
+                };
                 self.conversation.push_user(correction);
                 state.next_round_label = GenerationRoundLabel::CorrectionRetry;
                 state.next_round_cause = GenerationRoundCause::MalformedBlockCorrection;
@@ -964,8 +975,7 @@ impl Runtime {
                     self.conversation
                         .push_user(SEARCH_BEFORE_ANSWERING.to_string());
                     state.next_round_label = GenerationRoundLabel::CorrectionRetry;
-                    state.next_round_cause =
-                        GenerationRoundCause::SearchBeforeAnsweringCorrection;
+                    state.next_round_cause = GenerationRoundCause::SearchBeforeAnsweringCorrection;
                     return TurnSignal::Continue;
                 }
 
@@ -1012,7 +1022,8 @@ impl Runtime {
                 }
 
                 if state.corrections < MAX_CORRECTIONS {
-                    let candidate = state.investigation
+                    let candidate = state
+                        .investigation
                         .best_candidate_for_mode(ctx.investigation_mode)
                         .map(str::to_string);
                     if let Some(candidate) = candidate {
@@ -1064,7 +1075,9 @@ impl Runtime {
         // 16.3.2: UsageLookup with definition-only reads.
         if matches!(ctx.investigation_mode, InvestigationMode::UsageLookup)
             && ctx.investigation_required
-            && state.investigation.all_useful_accepted_reads_are_definition_only()
+            && state
+                .investigation
+                .all_useful_accepted_reads_are_definition_only()
             && (state.investigation.has_non_definition_candidates()
                 || is_definition_only_usage_answer(&response))
         {
@@ -1091,15 +1104,16 @@ impl Runtime {
         if ctx.investigation_required && state.investigation.search_produced_results() {
             let claimed = extract_claimed_paths(&response);
             if let Some(scope) = ctx.investigation_path_scope.as_deref() {
-                if let Some(bad_path) = claimed
-                    .iter()
-                    .map(|p| normalize_evidence_path(p))
-                    .find(|p| {
-                        !path_is_within_scope(p, scope)
-                            && !state.reads_this_turn.contains(&normalize_evidence_path(
-                                &format!("{}/{p}", scope.trim_end_matches('/')),
-                            ))
-                    })
+                if let Some(bad_path) =
+                    claimed
+                        .iter()
+                        .map(|p| normalize_evidence_path(p))
+                        .find(|p| {
+                            !path_is_within_scope(p, scope)
+                                && !state.reads_this_turn.contains(&normalize_evidence_path(
+                                    &format!("{}/{p}", scope.trim_end_matches('/')),
+                                ))
+                        })
                 {
                     trace_runtime_decision(
                         on_event,
@@ -1132,7 +1146,8 @@ impl Runtime {
                     sorted.join(",")
                 };
                 let can_dispatch = !state.answer_guard_retry_entered
-                    && state.investigation
+                    && state
+                        .investigation
                         .is_search_candidate_path(&normalize_evidence_path(bad_path))
                     && state.investigation.candidate_reads_count()
                         < MAX_CANDIDATE_READS_PER_INVESTIGATION
@@ -1159,7 +1174,10 @@ impl Runtime {
                             ("path", bad_path.clone()),
                             ("reads_count", state.reads_this_turn.len().to_string()),
                             ("reads", reads_list.clone()),
-                            ("evidence_ready", state.investigation.evidence_ready().to_string()),
+                            (
+                                "evidence_ready",
+                                state.investigation.evidence_ready().to_string(),
+                            ),
                             ("retry_available", "true".to_string()),
                             ("action", "retry".to_string()),
                         ],
@@ -1178,7 +1196,10 @@ impl Runtime {
                         ("path", bad_path.clone()),
                         ("reads_count", state.reads_this_turn.len().to_string()),
                         ("reads", reads_list),
-                        ("evidence_ready", state.investigation.evidence_ready().to_string()),
+                        (
+                            "evidence_ready",
+                            state.investigation.evidence_ready().to_string(),
+                        ),
                         ("retry_available", "false".to_string()),
                         ("action", "terminal".to_string()),
                     ],
@@ -1232,7 +1253,10 @@ impl Runtime {
                         on_event,
                         "post_evidence_tool_call_rejected",
                         &[
-                            ("attempts", state.post_answer_phase_tool_attempts.to_string()),
+                            (
+                                "attempts",
+                                state.post_answer_phase_tool_attempts.to_string(),
+                            ),
                             ("tool_count", calls.len().to_string()),
                         ],
                     );
@@ -1265,7 +1289,8 @@ impl Runtime {
                 let (answer, reason): (String, RuntimeTerminalReason) = match phase {
                     AnswerPhaseKind::PostRead => {
                         let answer = if matches!(ctx.direct_read_mode, Some(DirectReadMode::Raw)) {
-                            state.direct_read_result
+                            state
+                                .direct_read_result
                                 .as_deref()
                                 .map(direct_read_fallback_answer)
                                 .unwrap_or_else(|| {
@@ -1446,7 +1471,11 @@ impl TurnContext {
                     "anchor_prompt_matched",
                     &[("kind", "same_scope".into())],
                 );
-                match runtime.anchors.last_scoped_search_scope().map(str::to_string) {
+                match runtime
+                    .anchors
+                    .last_scoped_search_scope()
+                    .map(str::to_string)
+                {
                     Some(scope) => {
                         trace_runtime_decision(
                             on_event,
@@ -1531,15 +1560,19 @@ impl TurnContext {
 }
 
 fn seed_pending_runtime_call(ctx: &TurnContext, state: &mut TurnState) {
-    state.investigation.configure_usage_evidence_policy(usage_lookup_is_broad(
-        ctx.investigation_mode,
-        ctx.requested_read_path.as_deref(),
-        ctx.investigation_path_scope.as_deref(),
-    ));
+    state
+        .investigation
+        .configure_usage_evidence_policy(usage_lookup_is_broad(
+            ctx.investigation_mode,
+            ctx.requested_read_path.as_deref(),
+            ctx.investigation_path_scope.as_deref(),
+        ));
     if !ctx.investigation_required && ctx.tool_surface != ToolSurface::GitReadOnly {
         if let Some(cmd) = ctx.shell_request.as_ref() {
             state.pending_runtime_call = Some(PendingRuntimeCall {
-                input: ToolInput::Shell { command: cmd.clone() },
+                input: ToolInput::Shell {
+                    command: cmd.clone(),
+                },
                 seeded_pre_generation: true,
             });
         } else if let Some(edit) = ctx.simple_edit_request.as_ref() {
@@ -1602,4 +1635,3 @@ fn last_injected_was_edit_error(conversation: &Conversation) -> bool {
         .map(|c| c.starts_with("=== tool_error: edit_file ==="))
         .unwrap_or(false)
 }
-

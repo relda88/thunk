@@ -97,14 +97,14 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("log") => Some(Ok(Command::GitLog)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
-        "/ls" => Some(Ok(Command::Ls(
-            arg.unwrap_or(".").to_string(),
-        ))),
+        "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
             Some("clear") => Some(Ok(Command::SessionClear)),
             Some(_) => Some(Err(ParseError::UnknownCommand)),
-            None => Some(Err(ParseError::MissingArgument { command: "/session" })),
+            None => Some(Err(ParseError::MissingArgument {
+                command: "/session",
+            })),
         },
         _ => Some(Err(ParseError::UnknownCommand)),
     }
@@ -258,7 +258,10 @@ mod tests {
 
     #[test]
     fn unknown_session_subcommand_returns_unknown_command() {
-        assert_eq!(parse("/session list"), Some(Err(ParseError::UnknownCommand)));
+        assert_eq!(
+            parse("/session list"),
+            Some(Err(ParseError::UnknownCommand))
+        );
     }
 
     #[test]

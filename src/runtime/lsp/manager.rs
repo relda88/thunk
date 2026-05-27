@@ -29,8 +29,7 @@ impl LspManager {
     pub fn start(&mut self) -> Result<()> {
         if !self.config.enabled {
             return Err(AppError::Config(
-                "LSP is disabled; set [lsp].enabled = true in config.toml to enable it"
-                    .to_string(),
+                "LSP is disabled; set [lsp].enabled = true in config.toml to enable it".to_string(),
             ));
         }
 

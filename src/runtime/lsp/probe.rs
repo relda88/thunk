@@ -37,9 +37,7 @@ pub fn rust_lsp_health_report(lsp_cfg: &LspConfig) -> String {
         output.push_str(
             "- Install the rust-analyzer component with `rustup component add rust-analyzer`\n",
         );
-        output.push_str(
-            "- Or set [lsp].rust_analyzer_path in config.toml to a runnable binary\n",
-        );
+        output.push_str("- Or set [lsp].rust_analyzer_path in config.toml to a runnable binary\n");
     }
     output
 }
@@ -134,11 +132,7 @@ fn discover_rust_analyzer_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn push_candidate(
-    candidates: &mut Vec<PathBuf>,
-    seen: &mut HashSet<PathBuf>,
-    candidate: PathBuf,
-) {
+fn push_candidate(candidates: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, candidate: PathBuf) {
     if candidate.exists() && seen.insert(candidate.clone()) {
         candidates.push(candidate);
     }

@@ -335,7 +335,10 @@ fn anchored_read_replay_returns_raw_content_without_synthesis() {
         .iter()
         .filter(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "read_file"))
         .count();
-    assert_eq!(read_starts, 1, "anchor replay must dispatch exactly one read");
+    assert_eq!(
+        read_starts, 1,
+        "anchor replay must dispatch exactly one read"
+    );
 
     let answer_source = events.iter().find_map(|e| {
         if let RuntimeEvent::AnswerReady(src) = e {

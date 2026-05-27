@@ -115,7 +115,11 @@ fn run_bounded_git_command(
     let stdout = join_capture(stdout_reader)?;
     let stderr = join_capture(stderr_reader)?;
 
-    Ok(BoundedGitOutput { status, stdout, stderr })
+    Ok(BoundedGitOutput {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn read_bounded_stream<R: Read>(mut reader: R, limit: usize) -> io::Result<BoundedCapture> {
@@ -145,7 +149,10 @@ fn read_bounded_stream<R: Read>(mut reader: R, limit: usize) -> io::Result<Bound
         io::copy(&mut reader, &mut io::sink())?;
     }
 
-    Ok(BoundedCapture { bytes, _truncated: truncated })
+    Ok(BoundedCapture {
+        bytes,
+        _truncated: truncated,
+    })
 }
 
 fn join_capture(
@@ -182,7 +189,9 @@ fn parse_branch_list(stdout: &str) -> Vec<String> {
     stdout
         .lines()
         .filter_map(|line| {
-            let stripped = line.strip_prefix("* ").or_else(|| line.strip_prefix("  "))?;
+            let stripped = line
+                .strip_prefix("* ")
+                .or_else(|| line.strip_prefix("  "))?;
             let name = stripped.trim();
             if name.is_empty() {
                 None

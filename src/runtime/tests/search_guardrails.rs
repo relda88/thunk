@@ -203,7 +203,9 @@ fn lockfile_read_rejected_when_matched_source_candidate_exists() {
         "lockfile read should execute, then recovery should read source evidence"
     );
     assert!(
-        snapshot.iter().any(|m| m.content.contains("render_git_status")),
+        snapshot
+            .iter()
+            .any(|m| m.content.contains("render_git_status")),
         "runtime should dispatch to the source candidate after lockfile read"
     );
     let last_assistant = snapshot

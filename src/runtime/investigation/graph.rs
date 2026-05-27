@@ -90,7 +90,10 @@ impl InvestigationGraph {
                     }
                 }
             // Python: `from foo.bar import Baz`
-            } else if trimmed.starts_with("from ") && !trimmed.contains("from '") && !trimmed.contains("from \"") {
+            } else if trimmed.starts_with("from ")
+                && !trimmed.contains("from '")
+                && !trimmed.contains("from \"")
+            {
                 let rest = &trimmed["from ".len()..];
                 if let Some(module_part) = rest.split(" import").next() {
                     let module = module_part.trim();
@@ -107,7 +110,12 @@ impl InvestigationGraph {
             // this branch records no candidates. Kept for future extension.
             } else if trimmed.starts_with("use ") {
                 let rest = &trimmed["use ".len()..];
-                let component = rest.split("::").next().unwrap_or("").trim_matches('{').trim();
+                let component = rest
+                    .split("::")
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches('{')
+                    .trim();
                 match component {
                     "std" | "core" | "alloc" | "crate" | "super" | "self" => {}
                     _ => {
@@ -213,6 +221,9 @@ mod tests {
     fn promoted_candidates_empty_before_any_read() {
         let graph = InvestigationGraph::new();
         let promoted = graph.promoted_candidates();
-        assert!(promoted.is_empty(), "expected empty before any reads, got {promoted:?}");
+        assert!(
+            promoted.is_empty(),
+            "expected empty before any reads, got {promoted:?}"
+        );
     }
 }

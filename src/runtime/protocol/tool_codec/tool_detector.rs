@@ -7,7 +7,6 @@ pub(crate) fn is_tool_call_message(content: &str) -> bool {
     content.trim_start().starts_with('[')
 }
 
-
 /// Returns true if the text contains a fabricated tool result or error block.
 /// Assistant output must never contain these — they are runtime-injected only.
 /// Used by the engine to detect and surface model misbehavior rather than

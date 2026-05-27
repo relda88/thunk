@@ -267,10 +267,10 @@ fn edit_old_new_content_format_requests_approval_and_executes() {
         "submit failed: {submit_events:?}"
     );
     assert!(
-        submit_events
-            .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. }
-            if p.tool_name == "edit_file")),
+        submit_events.iter().any(
+            |e| matches!(e, RuntimeEvent::ApprovalRequired { pending: p, .. }
+            if p.tool_name == "edit_file")
+        ),
         "edit must request approval instead of falling back to Direct: {submit_events:?}"
     );
     assert_eq!(fs::read_to_string(&file).unwrap(), "hello world");
