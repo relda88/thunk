@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::tools::ToolOutput;
 
+use super::graph::InvestigationGraph;
 use super::super::paths::normalize_evidence_path;
 use super::super::types::RuntimeEvent;
 
@@ -549,6 +550,9 @@ pub(crate) struct InvestigationState {
     /// Path dispatched as a definition-site read after usage candidates were exhausted.
     /// When set, Gate 1 is bypassed for this path so the read is accepted as evidence.
     definition_site_dispatch_issued: Option<String>,
+    /// Graph-shaped candidate tracker. Records import edges from read files and surfaces
+    /// unread imported files as promoted candidates after search candidates are exhausted.
+    pub(crate) graph: InvestigationGraph,
 }
 
 impl InvestigationState {
@@ -602,6 +606,7 @@ impl InvestigationState {
             direct_read_paths: HashSet::new(),
             accepted_search_summaries: vec![],
             definition_site_dispatch_issued: None,
+            graph: InvestigationGraph::new(),
         }
     }
 
@@ -675,7 +680,9 @@ impl InvestigationState {
             InvestigationMode::LoadLookup => self.first_load_candidate(),
             InvestigationMode::SaveLookup => self.first_save_candidate(),
             InvestigationMode::DefinitionLookup => self.first_definition_candidate(),
-            InvestigationMode::UsageLookup => self.preferred_usage_candidate(),
+            InvestigationMode::UsageLookup => {
+                self.preferred_usage_candidate_with_filters(&HashSet::new(), false)
+            }
             InvestigationMode::General => self.first_source_candidate(),
         };
         mode_specific.or_else(|| self.search_candidate_paths.first().map(String::as_str))
@@ -1564,8 +1571,11 @@ impl InvestigationState {
             .map(String::as_str)
     }
 
-    pub(crate) fn preferred_usage_candidate(&self) -> Option<&str> {
-        self.preferred_usage_candidate_with_filters(&HashSet::new(), false)
+    pub(crate) fn preferred_usage_candidate(&self) -> Option<String> {
+        if let Some(path) = self.preferred_usage_candidate_with_filters(&HashSet::new(), false) {
+            return Some(path.to_string());
+        }
+        self.graph.promoted_candidates().into_iter().next()
     }
 
     pub(crate) fn next_usage_evidence_candidate(&self) -> Option<&str> {
@@ -1629,11 +1639,15 @@ impl InvestigationState {
     /// Returns the first candidate that contains an exact definition of the queried symbol,
     /// regardless of whether it is also in definition_only_candidates. Used by the
     /// UsageLookup supplemental dispatch after all usage candidates are exhausted.
-    pub(crate) fn first_definition_site_candidate(&self) -> Option<&str> {
-        self.search_candidate_paths
+    pub(crate) fn first_definition_site_candidate(&self) -> Option<String> {
+        if let Some(path) = self
+            .search_candidate_paths
             .iter()
             .find(|path| self.definition_site_candidates.contains(*path))
-            .map(String::as_str)
+        {
+            return Some(path.clone());
+        }
+        self.graph.promoted_candidates().into_iter().next()
     }
 
     fn first_non_import_candidate(&self) -> Option<&str> {

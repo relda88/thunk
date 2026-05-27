@@ -704,7 +704,7 @@ mod tests {
         state.record_search_results(&output, Some("TaskStatus"), &mut |_| {});
 
         assert_eq!(
-            state.preferred_usage_candidate(),
+            state.preferred_usage_candidate().as_deref(),
             Some("services/runner.py"),
             "substantive source file should outrank definition-only and import-only candidates"
         );
@@ -731,7 +731,7 @@ mod tests {
         state.record_search_results(&output, Some("TaskStatus"), &mut |_| {});
 
         assert_eq!(
-            state.preferred_usage_candidate(),
+            state.preferred_usage_candidate().as_deref(),
             Some("sandbox/services/runner.py"),
             "normal source files should outrank initialization candidates for UsageLookup"
         );

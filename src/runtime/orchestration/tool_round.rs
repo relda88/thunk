@@ -820,6 +820,7 @@ pub(crate) fn run_tool_round(
                             line_count: fc.total_lines,
                             content: fc.contents.clone(),
                         });
+                        investigation.graph.record_read(&fc.path, &fc.contents);
                     }
                 }
                 if is_git_read_only_tool {
@@ -907,7 +908,7 @@ pub(crate) fn run_tool_round(
                     } else if let Some(def_path) =
                         investigation.first_definition_site_candidate()
                     {
-                        let normalized = normalize_evidence_path(def_path);
+                        let normalized = normalize_evidence_path(&def_path);
                         if !reads_this_turn.contains(&normalized) {
                             trace_runtime_decision(
                                 on_event,
