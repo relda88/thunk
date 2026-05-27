@@ -230,12 +230,18 @@ fn resolve_write_path(root: &ProjectRoot, raw: &str) -> Result<ProjectPath, Path
 
 fn resolve_scope(root: &ProjectRoot, raw: &str) -> Result<ProjectScope, PathResolutionError> {
     let path = resolve_read_path(root, raw)?;
-    if !path.absolute().is_dir() {
-        return Err(PathResolutionError::NotADirectory {
-            raw: raw.to_string(),
-        });
+    if path.absolute().is_dir() {
+        return Ok(ProjectScope::from_trusted_path(path));
     }
-    Ok(ProjectScope::from_trusted_path(path))
+    // raw pointed to a file — use its parent directory as the scope
+    let parent = path
+        .absolute()
+        .parent()
+        .ok_or_else(|| PathResolutionError::NotADirectory {
+            raw: raw.to_string(),
+        })?;
+    let parent_path = project_path_from_absolute(root, raw, parent.to_path_buf())?;
+    Ok(ProjectScope::from_trusted_path(parent_path))
 }
 
 fn project_path_from_absolute(
@@ -563,13 +569,24 @@ mod tests {
     }
 
     #[test]
-    fn scope_file_is_not_a_directory() {
+    fn scope_file_path_falls_back_to_parent_directory() {
+        let (_dir, root) = make_root();
+        write_file(&root.path().join("src/lib.rs"), "// lib\n");
+
+        let scope = resolve_scope(&root, "src/lib.rs").unwrap();
+
+        assert_eq!(scope.absolute(), root.path().join("src"));
+        assert_eq!(scope.display(), "src");
+    }
+
+    #[test]
+    fn scope_file_at_root_falls_back_to_root_directory() {
         let (_dir, root) = make_root();
         write_file(&root.path().join("notes.txt"), "notes\n");
 
-        let err = resolve_scope(&root, "notes.txt").unwrap_err();
+        let scope = resolve_scope(&root, "notes.txt").unwrap();
 
-        assert!(matches!(err, PathResolutionError::NotADirectory { .. }));
+        assert_eq!(scope.absolute(), root.path());
     }
 
     #[test]
