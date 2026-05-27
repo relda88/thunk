@@ -129,6 +129,16 @@ fn is_general_doc_like_candidate_path(path: &str) -> bool {
             .any(|segment| matches!(segment, "doc" | "docs" | "benchmark" | "benchmarks"))
 }
 
+fn is_declaration_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.starts_with("//") || t.starts_with("/*") || t.starts_with("use ") {
+        return false;
+    }
+    t.contains("struct ") || t.contains("fn ") || t.contains("enum ")
+        || t.contains("trait ") || t.contains("type ") || t.contains("impl ")
+        || t.contains("const ") || t.contains("static ") || t.contains("macro_rules!")
+}
+
 /// Outcome of dispatching one round of tool calls.
 pub(crate) enum ToolRoundOutcome {
     /// All tools in this round completed immediately; results are ready to push.
@@ -939,9 +949,11 @@ pub(crate) fn run_tool_round(
                     {
                         if let ToolOutput::SearchResults(ref results) = output {
                             if let Some(def_path) = investigation.first_definition_candidate() {
-                                if let Some(m) =
-                                    results.matches.iter().find(|m| m.file == def_path)
-                                {
+                                let candidate_matches = results.matches.iter().filter(|m| m.file == def_path);
+                                let best_match = candidate_matches.clone()
+                                    .find(|m| is_declaration_line(&m.line))
+                                    .or_else(|| results.matches.iter().find(|m| m.file == def_path));
+                                if let Some(m) = best_match {
                                     let col = effective_search_input
                                         .as_ref()
                                         .and_then(|(q, _)| m.line.find(q.as_str()))
@@ -1963,5 +1975,83 @@ mod tests {
             assert!(line >= 1, "line must be 1-based and >= 1");
             assert!(col >= 1, "col must be 1-based and >= 1");
         }
+    }
+
+    #[test]
+    fn is_declaration_line_accepts_struct() {
+        assert!(is_declaration_line("pub(crate) struct InvestigationGraph {"));
+    }
+
+    #[test]
+    fn is_declaration_line_rejects_comment() {
+        assert!(!is_declaration_line(
+            "// InvestigationGraph — graph-shaped candidate tracker."
+        ));
+    }
+
+    #[test]
+    fn lsp_definition_seeded_prefers_declaration_line() {
+        // Two matches in the same file: comment first (line 1), struct declaration second (line 2).
+        // The seeded lsp_definition must use the struct declaration line, not the comment.
+        let (_dir, root, registry) = temp_root();
+        fs::write(
+            root.path().join("lib.rs"),
+            "// InvestigationGraph here\npub struct InvestigationGraph {}\n",
+        )
+        .unwrap();
+
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        let mut lsp = LspManager::new(
+            &LspConfig {
+                enabled: true,
+                ..LspConfig::default()
+            },
+            std::path::Path::new("."),
+        );
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed = 0usize;
+        let mut weak_query = 0usize;
+
+        let outcome = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::SearchCode {
+                query: "InvestigationGraph".into(),
+                path: None,
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut lsp,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            true,
+            InvestigationMode::DefinitionLookup,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        let ToolRoundOutcome::RuntimeDispatch { call, .. } = outcome else {
+            panic!("DefinitionLookup after search must seed lsp_definition dispatch");
+        };
+        let ToolInput::LspDefinition { path, line, col } = call else {
+            panic!("dispatched call must be lsp_definition");
+        };
+        assert_eq!(path, "lib.rs");
+        assert_eq!(
+            line, 2,
+            "lsp_definition must use the declaration line (2), not the comment line (1)"
+        );
+        assert!(col >= 1);
     }
 }
