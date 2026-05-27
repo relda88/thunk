@@ -615,6 +615,7 @@ impl Runtime {
             &mut state.last_call_key,
             &mut state.search_budget,
             &mut state.investigation,
+            &mut self.lsp,
             &mut state.reads_this_turn,
             &mut self.anchors,
             ctx.tool_surface,

@@ -321,6 +321,7 @@ pub(crate) fn tool_input_activity(input: Option<&ToolInput>) -> Activity {
         Some(
             ToolInput::GitStatus | ToolInput::GitDiff | ToolInput::GitLog | ToolInput::GitBranch,
         ) => ("git".to_string(), None),
+        Some(ToolInput::LspDefinition { path, .. }) => ("lsp".to_string(), Some(path.clone())),
         None => ("tool".to_string(), None),
     };
     Activity::ExecutingTools { tool, detail }

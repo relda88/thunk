@@ -45,6 +45,12 @@ pub enum ToolInput {
         /// The command to run, e.g. "cargo check" or "cargo test my_test"
         command: String,
     },
+    LspDefinition {
+        /// Path relative to the project root, or absolute.
+        path: String,
+        line: u32,
+        col: u32,
+    },
 }
 
 impl ToolInput {
@@ -62,6 +68,7 @@ impl ToolInput {
             ToolInput::EditFile { .. } => "edit_file",
             ToolInput::WriteFile { .. } => "write_file",
             ToolInput::Shell { .. } => "shell",
+            ToolInput::LspDefinition { .. } => "lsp_definition",
         }
     }
 }
@@ -82,6 +89,7 @@ pub enum ToolOutput {
     EditFile(EditFileOutput),
     WriteFile(WriteFileOutput),
     Shell(ShellOutput),
+    LspDefinition(LspDefinitionOutput),
 }
 
 #[derive(Debug, Clone)]
@@ -204,6 +212,13 @@ pub struct ShellOutput {
     pub truncated: bool,
     pub total_bytes: usize,
     pub timed_out: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LspDefinitionOutput {
+    pub source_path: String,
+    pub target_path: String,
+    pub target_line: u32,
 }
 
 // Run result

@@ -39,6 +39,11 @@ pub enum ResolvedToolInput {
     },
     GitLog,
     GitBranch,
+    LspDefinition {
+        path: String,
+        line: u32,
+        col: u32,
+    },
 }
 
 impl ResolvedToolInput {
@@ -54,6 +59,7 @@ impl ResolvedToolInput {
             Self::GitDiff { .. } => "git_diff",
             Self::GitLog => "git_log",
             Self::GitBranch => "git_branch",
+            Self::LspDefinition { .. } => "lsp_definition",
         }
     }
 }
@@ -96,6 +102,9 @@ impl From<ResolvedToolInput> for ToolInput {
             ResolvedToolInput::GitDiff { .. } => ToolInput::GitDiff,
             ResolvedToolInput::GitLog => ToolInput::GitLog,
             ResolvedToolInput::GitBranch => ToolInput::GitBranch,
+            ResolvedToolInput::LspDefinition { path, line, col } => {
+                ToolInput::LspDefinition { path, line, col }
+            }
         }
     }
 }

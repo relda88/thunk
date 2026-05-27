@@ -1,15 +1,15 @@
-
 use super::super::investigation::anchors::{
     has_same_scope_reference, is_last_search_anchor_prompt, AnchorState,
 };
 use super::super::investigation::investigation::{InvestigationMode, InvestigationState};
 use super::super::investigation::tool_surface::ToolSurface;
+use super::super::lsp::LspManager;
 use super::super::orchestration::context_cap::cap_tool_result_blocks;
 use super::super::orchestration::tool_round::{run_tool_round, SearchBudget, ToolRoundOutcome};
 use super::super::protocol::response_text::*;
 use super::super::types::RuntimeTerminalReason;
 use super::*;
-use crate::core::config::Config;
+use crate::core::config::{Config, LspConfig};
 use crate::llm::backend::{BackendCapabilities, BackendEvent, GenerateRequest, ModelBackend};
 use crate::runtime::ProjectRoot;
 use crate::tools::{default_registry, ToolInput};
@@ -383,6 +383,7 @@ fn search_anchor_stores_effective_clamped_scope() {
         &mut last_call_key,
         &mut search_budget,
         &mut investigation,
+        &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
         &mut reads_this_turn,
         &mut anchors,
         ToolSurface::RetrievalFirst,
@@ -442,6 +443,7 @@ fn failed_search_code_does_not_update_last_search_anchor() {
         &mut last_call_key,
         &mut search_budget,
         &mut investigation,
+        &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
         &mut reads_this_turn,
         &mut anchors,
         ToolSurface::RetrievalFirst,
@@ -472,6 +474,7 @@ fn failed_search_code_does_not_update_last_search_anchor() {
         &mut last_call_key,
         &mut search_budget,
         &mut investigation,
+        &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
         &mut reads_this_turn,
         &mut anchors,
         ToolSurface::RetrievalFirst,
@@ -613,6 +616,7 @@ fn same_scope_forced_broader_path_clamps_to_prior_scoped_search() {
         &mut seed_last_call_key,
         &mut seed_search_budget,
         &mut seed_investigation,
+        &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
         &mut seed_reads_this_turn,
         &mut anchors,
         ToolSurface::RetrievalFirst,
@@ -656,6 +660,7 @@ fn same_scope_forced_broader_path_clamps_to_prior_scoped_search() {
         &mut last_call_key,
         &mut search_budget,
         &mut investigation,
+        &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
         &mut reads_this_turn,
         &mut anchors,
         ToolSurface::RetrievalFirst,

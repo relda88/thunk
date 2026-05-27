@@ -9,6 +9,8 @@ const EDIT_OPEN: &str = "[edit_file]";
 const EDIT_CLOSE: &str = "[/edit_file]";
 const SEARCH_CODE_OPEN: &str = "[search_code]";
 const SEARCH_CODE_CLOSE: &str = "[/search_code]";
+const LSP_DEFINITION_OPEN: &str = "[lsp_definition]";
+const LSP_DEFINITION_CLOSE: &str = "[/lsp_definition]";
 
 const SEARCH_DELIM: &str = "---search---";
 const REPLACE_DELIM: &str = "---replace---";
@@ -33,6 +35,7 @@ pub fn parse_all_tool_inputs(text: &str) -> Vec<ToolInput> {
     all.extend(scan_edit_blocks(text));
     all.extend(scan_write_blocks(text));
     all.extend(scan_search_code_blocks(text));
+    all.extend(scan_lsp_definition_blocks(text));
     if !fences.is_empty() {
         all.retain(|(pos, _)| !fences.iter().any(|&(s, e)| *pos >= s && *pos < e));
     }
@@ -215,6 +218,43 @@ fn scan_write_blocks(text: &str) -> Vec<(usize, ToolInput)> {
     }
 
     results
+}
+
+/// Handles the block form `[lsp_definition]\npath: ...\nline: N\ncol: N\n[/lsp_definition]`.
+fn scan_lsp_definition_blocks(text: &str) -> Vec<(usize, ToolInput)> {
+    let mut results = Vec::new();
+    let mut remaining = text;
+    let mut offset = 0usize;
+
+    while let Some(open_pos) = remaining.find(LSP_DEFINITION_OPEN) {
+        let after_open = &remaining[open_pos + LSP_DEFINITION_OPEN.len()..];
+        match after_open.find(LSP_DEFINITION_CLOSE) {
+            Some(close_pos) => {
+                let block = &after_open[..close_pos];
+                if let Some(input) = parse_lsp_definition_block(block) {
+                    results.push((offset + open_pos, input));
+                }
+                let advance =
+                    open_pos + LSP_DEFINITION_OPEN.len() + close_pos + LSP_DEFINITION_CLOSE.len();
+                offset += advance;
+                remaining = &remaining[advance..];
+            }
+            None => break,
+        }
+    }
+
+    results
+}
+
+fn parse_lsp_definition_block(block: &str) -> Option<ToolInput> {
+    let kvs = parse_kvs(block);
+    let path = kvs.get("path")?.clone();
+    if path.is_empty() {
+        return None;
+    }
+    let line: u32 = kvs.get("line")?.parse().ok()?;
+    let col: u32 = kvs.get("col")?.parse().ok()?;
+    Some(ToolInput::LspDefinition { path, line, col })
 }
 
 /// Handles the block form `[search_code]\n...\n[/search_code]` that the model
@@ -1037,5 +1077,30 @@ mod tests {
         assert_eq!(inputs.len(), 2);
         assert!(matches!(&inputs[0], ToolInput::WriteFile { path, .. } if path == "first.rs"));
         assert!(matches!(&inputs[1], ToolInput::ReadFile { path } if path == "second.rs"));
+    }
+
+    #[test]
+    fn parses_lsp_definition_block() {
+        let text = "[lsp_definition]\npath: src/main.rs\nline: 42\ncol: 8\n[/lsp_definition]";
+        let inputs = parse_all_tool_inputs(text);
+        assert_eq!(inputs.len(), 1);
+        assert!(
+            matches!(&inputs[0], ToolInput::LspDefinition { path, line, col }
+                if path == "src/main.rs" && *line == 42 && *col == 8),
+            "expected LspDefinition with correct fields, got: {:?}",
+            inputs
+        );
+    }
+
+    #[test]
+    fn lsp_definition_block_missing_path_is_skipped() {
+        let text = "[lsp_definition]\nline: 1\ncol: 0\n[/lsp_definition]";
+        assert!(parse_all_tool_inputs(text).is_empty());
+    }
+
+    #[test]
+    fn lsp_definition_block_missing_close_tag_is_skipped() {
+        let text = "[lsp_definition]\npath: src/main.rs\nline: 1\ncol: 0";
+        assert!(parse_all_tool_inputs(text).is_empty());
     }
 }

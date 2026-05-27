@@ -1,5 +1,6 @@
 // Outbound: ToolOutput -> conversation text
 
+use crate::tools::types::LspDefinitionOutput;
 use crate::tools::{EntryKind, ToolOutput};
 
 /// Returns a compact one-line summary of a tool result for TUI display.
@@ -100,6 +101,13 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
                 format!("shell exit {}: {} (truncated)", s.exit_code, s.command)
             } else {
                 format!("shell exit {}: {}", s.exit_code, s.command)
+            }
+        }
+        ToolOutput::LspDefinition(d) => {
+            if d.target_path.is_empty() {
+                format!("lsp_definition: no definition found for {}", d.source_path)
+            } else {
+                format!("lsp_definition: {} line {}", d.target_path, d.target_line)
             }
         }
     }
@@ -535,6 +543,15 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
             }
             lines.join("\n")
         }
+        ToolOutput::LspDefinition(d) => render_lsp_definition(d),
+    }
+}
+
+fn render_lsp_definition(d: &LspDefinitionOutput) -> String {
+    if d.target_path.is_empty() {
+        "no definition found".to_string()
+    } else {
+        format!("definition found: {} line {}", d.target_path, d.target_line)
     }
 }
 
@@ -1486,5 +1503,32 @@ mod tests {
             unordered_body, body,
             "output must be identical when no definition files are present"
         );
+    }
+
+    #[test]
+    fn render_lsp_definition_output() {
+        use crate::tools::types::LspDefinitionOutput;
+        let output = ToolOutput::LspDefinition(LspDefinitionOutput {
+            source_path: "src/main.rs".into(),
+            target_path: "src/lib.rs".into(),
+            target_line: 42,
+        });
+        let result = format_tool_result("lsp_definition", &output);
+        assert!(result.starts_with("=== tool_result: lsp_definition ==="));
+        assert!(result.contains("src/lib.rs"));
+        assert!(result.contains("42"));
+        assert!(result.contains("=== /tool_result ==="));
+    }
+
+    #[test]
+    fn render_lsp_definition_output_empty_target() {
+        use crate::tools::types::LspDefinitionOutput;
+        let output = ToolOutput::LspDefinition(LspDefinitionOutput {
+            source_path: "src/main.rs".into(),
+            target_path: String::new(),
+            target_line: 0,
+        });
+        let body = render_output(&output);
+        assert_eq!(body, "no definition found");
     }
 }

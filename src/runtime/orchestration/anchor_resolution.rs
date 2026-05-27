@@ -39,6 +39,7 @@ impl Runtime {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut self.lsp,
             &mut reads_this_turn,
             &mut self.anchors,
             ToolSurface::RetrievalFirst,

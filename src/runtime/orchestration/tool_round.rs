@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::path::Path;
 
+use crate::tools::types::LspDefinitionOutput;
 use crate::tools::{
     ExecutionKind, PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
 };
@@ -12,6 +14,7 @@ use super::super::investigation::search_query::{simplify_search_input, weak_sear
 use super::super::investigation::tool_surface::{
     is_git_read_only_tool_input, tool_allowed_for_surface, ToolSurface,
 };
+use super::super::lsp::LspManager;
 use super::super::paths::{normalize_evidence_path, path_is_within_scope, path_matches_requested};
 use super::super::protocol::response_text::*;
 use super::super::protocol::tool_codec;
@@ -101,6 +104,9 @@ fn call_fingerprint(input: &ToolInput) -> String {
             format!("write_file\x00{path}\x00{content}")
         }
         ToolInput::Shell { command } => format!("shell\x00{command}"),
+        ToolInput::LspDefinition { path, line, col } => {
+            format!("lsp_definition\x00{path}\x00{line}\x00{col}")
+        }
     }
 }
 
@@ -169,6 +175,7 @@ pub(crate) fn run_tool_round(
     last_call_key: &mut Option<String>,
     search_budget: &mut SearchBudget,
     investigation: &mut InvestigationState,
+    lsp: &mut LspManager,
     reads_this_turn: &mut HashSet<String>,
     anchors: &mut AnchorState,
     tool_surface: ToolSurface,
@@ -733,6 +740,66 @@ pub(crate) fn run_tool_round(
             }
         };
 
+        // LSP intercept: must run before registry.dispatch() because Tool::run() is &self
+        // but LspManager::query_definition() requires &mut self.
+        if let super::super::project::ResolvedToolInput::LspDefinition { path, line, col } =
+            &resolved
+        {
+            let path = path.clone();
+            let line = *line;
+            let col = *col;
+            let source = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(e) => {
+                    on_event(RuntimeEvent::ToolCallFinished {
+                        name: name.clone(),
+                        summary: None,
+                    });
+                    accumulated.push_str(&tool_codec::format_tool_error(&name, &e.to_string()));
+                    *last_call_key = Some(key);
+                    continue;
+                }
+            };
+            let output = match lsp.query_definition(
+                Path::new(&path),
+                &source,
+                line as usize,
+                col as usize,
+            ) {
+                Ok(locations) => {
+                    let (target_path, target_line) = locations
+                        .first()
+                        .map(|l| (l.path.to_string_lossy().into_owned(), l.line as u32))
+                        .unwrap_or_default();
+                    ToolOutput::LspDefinition(LspDefinitionOutput {
+                        source_path: path.clone(),
+                        target_path,
+                        target_line,
+                    })
+                }
+                Err(_) => ToolOutput::LspDefinition(LspDefinitionOutput {
+                    source_path: path.clone(),
+                    target_path: String::new(),
+                    target_line: 0,
+                }),
+            };
+            if let ToolOutput::LspDefinition(ref d) = output {
+                if !d.target_path.is_empty() {
+                    investigation
+                        .graph
+                        .record_definition_target(&d.source_path, &d.target_path);
+                }
+            }
+            let summary = tool_codec::render_compact_summary(&output);
+            on_event(RuntimeEvent::ToolCallFinished {
+                name: name.clone(),
+                summary: Some(summary),
+            });
+            accumulated.push_str(&tool_codec::format_tool_result(&name, &output));
+            *last_call_key = Some(key);
+            continue;
+        }
+
         match registry.dispatch(resolved) {
             Ok(ToolRunResult::Immediate(output)) => {
                 // Guard: spec must agree that this tool is Immediate.
@@ -996,6 +1063,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::core::config::LspConfig;
     use crate::runtime::ProjectRoot;
     use crate::tools::types::FileContentsOutput;
     use crate::tools::{
@@ -1050,6 +1118,7 @@ mod tests {
         let mut last_call_key = None;
         let mut search_budget = SearchBudget::new();
         let mut investigation = InvestigationState::new();
+        let mut lsp = LspManager::new(&LspConfig::default(), std::path::Path::new("."));
         let mut reads_this_turn = HashSet::new();
         let mut anchors = AnchorState::default();
         let mut requested_read_completed = false;
@@ -1063,6 +1132,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut lsp,
             &mut reads_this_turn,
             &mut anchors,
             tool_surface,
@@ -1298,6 +1368,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1328,6 +1399,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1383,6 +1455,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1407,6 +1480,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1437,6 +1511,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1496,6 +1571,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1520,6 +1596,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1548,6 +1625,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1607,6 +1685,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1635,6 +1714,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1690,6 +1770,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1725,6 +1806,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,
@@ -1760,6 +1842,7 @@ mod tests {
             &mut last_call_key,
             &mut search_budget,
             &mut investigation,
+            &mut LspManager::new(&LspConfig::default(), std::path::Path::new(".")),
             &mut reads_this_turn,
             &mut anchors,
             ToolSurface::RetrievalFirst,

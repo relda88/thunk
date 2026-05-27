@@ -9,6 +9,7 @@ use petgraph::graph::{Graph, NodeIndex};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Relation {
     Imports,
+    DefinitionOf,
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +154,15 @@ impl InvestigationGraph {
         None
     }
 
+    /// Records that `from_path` defines a symbol found at `to_path`.
+    /// Neither node is marked as read — this only inserts the graph edge.
+    pub(crate) fn record_definition_target(&mut self, from_path: &str, to_path: &str) {
+        let from_idx = self.get_or_create_node(from_path.to_string());
+        let to_idx = self.get_or_create_node(to_path.to_string());
+        self.graph
+            .add_edge(from_idx, to_idx, Relation::DefinitionOf);
+    }
+
     fn get_or_create_node(&mut self, path: String) -> NodeIndex {
         if let Some(&idx) = self.file_to_node.get(&path) {
             return idx;
@@ -224,6 +234,18 @@ mod tests {
         assert!(
             promoted.is_empty(),
             "expected empty before any reads, got {promoted:?}"
+        );
+    }
+
+    #[test]
+    fn record_definition_target_promotes_candidate() {
+        let mut graph = InvestigationGraph::new();
+        graph.record_read("app/main.py", "");
+        graph.record_definition_target("app/main.py", "models/task.py");
+        let promoted = graph.promoted_candidates();
+        assert!(
+            promoted.contains(&"models/task.py".to_string()),
+            "definition target must be promoted; got {promoted:?}"
         );
     }
 }

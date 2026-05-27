@@ -45,12 +45,14 @@ pub(crate) enum SurfaceTool {
     GitDiff,
     GitLog,
     GitBranch,
+    LspDefinition,
 }
 
 const RETRIEVAL_FIRST_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::SearchCode,
     SurfaceTool::ReadFile,
     SurfaceTool::ListDir,
+    SurfaceTool::LspDefinition,
 ];
 const GIT_READ_ONLY_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::GitStatus,
@@ -103,6 +105,7 @@ impl SurfaceTool {
             ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } | ToolInput::Shell { .. } => {
                 None
             }
+            ToolInput::LspDefinition { .. } => Some(Self::LspDefinition),
         }
     }
 
@@ -115,6 +118,7 @@ impl SurfaceTool {
             Self::GitDiff => "git_diff",
             Self::GitLog => "git_log",
             Self::GitBranch => "git_branch",
+            Self::LspDefinition => "lsp_definition",
         }
     }
 }

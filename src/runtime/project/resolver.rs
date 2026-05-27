@@ -99,6 +99,14 @@ pub fn resolve(
         ToolInput::GitDiff => Ok(ResolvedToolInput::GitDiff { path: None }),
         ToolInput::GitLog => Ok(ResolvedToolInput::GitLog),
         ToolInput::GitBranch => Ok(ResolvedToolInput::GitBranch),
+        ToolInput::LspDefinition { path, line, col } => {
+            let resolved = resolve_read_path(root, path)?;
+            Ok(ResolvedToolInput::LspDefinition {
+                path: resolved.absolute().to_string_lossy().into_owned(),
+                line: *line,
+                col: *col,
+            })
+        }
     }
 }
 

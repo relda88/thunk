@@ -196,7 +196,7 @@ fn tool_surface_hint_renders_from_canonical_surface_membership() {
             ToolSurface::RetrievalFirst.as_str(),
             ToolSurface::RetrievalFirst.allowed_tool_names()
         ),
-        "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir."
+        "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir, lsp_definition."
     );
     assert_eq!(
         prompt::render_tool_surface_hint(
