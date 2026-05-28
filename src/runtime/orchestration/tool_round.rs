@@ -987,38 +987,42 @@ pub(crate) fn run_tool_round(
                     {
                         if let ToolOutput::SearchResults(ref results) = output {
                             if let Some(def_path) = investigation.first_definition_candidate() {
-                                let candidate_matches =
-                                    results.matches.iter().filter(|m| m.file == def_path);
-                                let best_match = candidate_matches
-                                    .clone()
-                                    .find(|m| is_declaration_line(&m.line))
-                                    .or_else(|| {
-                                        results.matches.iter().find(|m| m.file == def_path)
-                                    });
-                                if let Some(m) = best_match {
-                                    let col = effective_search_input
-                                        .as_ref()
-                                        .and_then(|(q, _)| m.line.find(q.as_str()))
-                                        .map(|off| off + 1)
-                                        .unwrap_or(1);
-                                    trace_runtime_decision(
-                                        on_event,
-                                        "lsp_definition_seeded",
-                                        &[
-                                            ("path", m.file.clone()),
-                                            ("line", m.line_number.to_string()),
-                                            ("col", col.to_string()),
-                                            ("candidate", def_path.to_string()),
-                                        ],
-                                    );
-                                    return ToolRoundOutcome::RuntimeDispatch {
-                                        accumulated,
-                                        call: ToolInput::LspDefinition {
-                                            path: m.file.clone(),
-                                            line: m.line_number as u32,
-                                            col: col as u32,
-                                        },
-                                    };
+                                if def_path.ends_with(".rs") {
+                                    // Non-Rust files: rust-analyzer cannot serve definitions;
+                                    // skip LSP seeding and fall through to candidate read path.
+                                    let candidate_matches =
+                                        results.matches.iter().filter(|m| m.file == def_path);
+                                    let best_match = candidate_matches
+                                        .clone()
+                                        .find(|m| is_declaration_line(&m.line))
+                                        .or_else(|| {
+                                            results.matches.iter().find(|m| m.file == def_path)
+                                        });
+                                    if let Some(m) = best_match {
+                                        let col = effective_search_input
+                                            .as_ref()
+                                            .and_then(|(q, _)| m.line.find(q.as_str()))
+                                            .map(|off| off + 1)
+                                            .unwrap_or(1);
+                                        trace_runtime_decision(
+                                            on_event,
+                                            "lsp_definition_seeded",
+                                            &[
+                                                ("path", m.file.clone()),
+                                                ("line", m.line_number.to_string()),
+                                                ("col", col.to_string()),
+                                                ("candidate", def_path.to_string()),
+                                            ],
+                                        );
+                                        return ToolRoundOutcome::RuntimeDispatch {
+                                            accumulated,
+                                            call: ToolInput::LspDefinition {
+                                                path: m.file.clone(),
+                                                line: m.line_number as u32,
+                                                col: col as u32,
+                                            },
+                                        };
+                                    }
                                 }
                             }
                         }
@@ -2153,6 +2157,71 @@ mod tests {
         assert!(
             !results.contains("lsp_hover"),
             "no hover block must appear when LSP is disabled: {results}"
+        );
+    }
+
+    #[test]
+    fn lsp_definition_not_seeded_for_python_file() {
+        // DefinitionLookup + LSP enabled must NOT seed LspDefinition when the
+        // definition candidate is a non-Rust file — rust-analyzer returns empty
+        // results for .py paths, which previously caused a recovery loop.
+        let (_dir, root, registry) = temp_root();
+        fs::write(
+            root.path().join("module.py"),
+            "def my_symbol(x):\n    pass\n",
+        )
+        .unwrap();
+
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        let mut lsp = LspManager::new(
+            &LspConfig {
+                enabled: true,
+                ..Default::default()
+            },
+            std::path::Path::new("."),
+        );
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed = 0usize;
+        let mut weak_query = 0usize;
+
+        let outcome = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::SearchCode {
+                query: "my_symbol".into(),
+                path: None,
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut lsp,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            true,
+            InvestigationMode::DefinitionLookup,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        assert!(
+            !matches!(
+                outcome,
+                ToolRoundOutcome::RuntimeDispatch {
+                    call: ToolInput::LspDefinition { .. },
+                    ..
+                }
+            ),
+            "LSP seeding must be skipped for non-Rust (.py) definition candidates"
         );
     }
 }
