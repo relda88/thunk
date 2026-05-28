@@ -100,6 +100,17 @@ impl LspManager {
         }
     }
 
+    pub fn health_report(&mut self) -> String {
+        if !self.config.enabled {
+            return "LSP disabled (lsp.enabled = false in config)".to_string();
+        }
+        if self.is_running() {
+            "LSP running — rust-analyzer active, session alive".to_string()
+        } else {
+            "LSP enabled — no active session (not yet started or crashed)".to_string()
+        }
+    }
+
     /// Inspects the error to decide whether the session is still viable.
     /// A "LSP session crashed" error means the server process died — clear the session.
     /// Any other error (timeout, parse failure, server-level error) leaves the session intact.

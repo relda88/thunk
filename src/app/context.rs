@@ -169,6 +169,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::GitDiff => "git_diff",
         RuntimeRequest::GitLog => "git_log",
         RuntimeRequest::ListDir { .. } => "list_dir",
+        RuntimeRequest::LspStatus => "lsp_status",
     }
 }
 

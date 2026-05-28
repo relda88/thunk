@@ -139,6 +139,9 @@ pub enum RuntimeRequest {
     ListDir {
         path: String,
     },
+    /// Read-only LSP health query. Returns LSP status as a SystemMessage event.
+    /// Does not mutate conversation state or trigger session save.
+    LspStatus,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

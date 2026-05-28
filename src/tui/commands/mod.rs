@@ -22,6 +22,7 @@ pub enum Command {
     GitDiff,
     GitLog,
     Ls(String),
+    LspStatus,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -95,6 +96,10 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") => Some(Ok(Command::GitStatus)),
             Some("diff") => Some(Ok(Command::GitDiff)),
             Some("log") => Some(Ok(Command::GitLog)),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
+        "/lsp" => match arg {
+            Some("status") => Some(Ok(Command::LspStatus)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
@@ -287,6 +292,11 @@ mod tests {
     #[test]
     fn parses_ls_with_path() {
         assert_eq!(parse("/ls src/"), Some(Ok(Command::Ls("src/".to_string()))));
+    }
+
+    #[test]
+    fn parses_lsp_status() {
+        assert_eq!(parse("/lsp status"), Some(Ok(Command::LspStatus)));
     }
 
     #[test]

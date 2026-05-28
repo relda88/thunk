@@ -264,6 +264,11 @@ impl Runtime {
         }
     }
 
+    pub(super) fn handle_lsp_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let report = self.lsp.health_report();
+        on_event(RuntimeEvent::SystemMessage(report));
+    }
+
     pub(super) fn handle_providers_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let current = self.config.llm.provider.as_str();
         let providers = [

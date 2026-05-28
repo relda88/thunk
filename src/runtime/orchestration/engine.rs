@@ -197,6 +197,7 @@ impl Runtime {
             RuntimeRequest::GitDiff => self.handle_git_diff(on_event),
             RuntimeRequest::GitLog => self.handle_git_log(on_event),
             RuntimeRequest::ListDir { path } => self.handle_list_dir(path, on_event),
+            RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
         }
     }
 

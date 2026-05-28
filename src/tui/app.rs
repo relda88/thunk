@@ -201,6 +201,7 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
         commands::Command::GitDiff => CommandAction::Runtime(RuntimeRequest::GitDiff),
         commands::Command::GitLog => CommandAction::Runtime(RuntimeRequest::GitLog),
         commands::Command::Ls(path) => CommandAction::Runtime(RuntimeRequest::ListDir { path }),
+        commands::Command::LspStatus => CommandAction::Runtime(RuntimeRequest::LspStatus),
     }
 }
 
