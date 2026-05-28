@@ -181,7 +181,8 @@ impl LspSession {
                         definitions = items;
                     }
                     DefinitionResponse::NoInfo => {}
-                    DefinitionResponse::RetryableError(_) => {
+                    DefinitionResponse::RetryableError(ref msg) => {
+                        let _ = msg;
                         std::thread::sleep(Duration::from_millis(75));
                         continue;
                     }
@@ -236,7 +237,8 @@ impl LspSession {
                         hover = Some(text);
                     }
                     HoverResponse::NoInfo => {}
-                    HoverResponse::RetryableError(_) => {
+                    HoverResponse::RetryableError(ref msg) => {
+                        let _ = msg;
                         std::thread::sleep(Duration::from_millis(75));
                         continue;
                     }

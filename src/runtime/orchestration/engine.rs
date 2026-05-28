@@ -380,8 +380,12 @@ impl Runtime {
                                             .iter()
                                             .map(|d| {
                                                 format!(
-                                                    "[{}] line {}: {}",
-                                                    d.severity, d.line, d.message
+                                                    "[{}] line {}:{} {}: {}",
+                                                    d.severity,
+                                                    d.line,
+                                                    d.column,
+                                                    d.source.as_deref().unwrap_or("rust-analyzer"),
+                                                    d.message
                                                 )
                                             })
                                             .collect::<Vec<_>>()

@@ -104,10 +104,11 @@ impl LspManager {
         if !self.config.enabled {
             return "LSP disabled (lsp.enabled = false in config)".to_string();
         }
+        let probe_report = crate::runtime::lsp::probe::rust_lsp_health_report(&self.config);
         if self.is_running() {
-            "LSP running — rust-analyzer active, session alive".to_string()
+            format!("LSP running — rust-analyzer active, session alive\n\nProbe report:\n{probe_report}")
         } else {
-            "LSP enabled — no active session (not yet started or crashed)".to_string()
+            format!("LSP enabled — no active session (not yet started or crashed)\n\nProbe report:\n{probe_report}")
         }
     }
 

@@ -8,4 +8,3 @@ mod transport;
 mod types;
 
 pub use manager::LspManager;
-pub use types::{DefinitionLocation, LspDiagnostic};
