@@ -89,7 +89,10 @@ fn search_code_with_file_scope_uses_parent_directory() {
         },
     );
 
-    assert!(!has_failed(&events), "file-scoped search must not fail: {events:?}");
+    assert!(
+        !has_failed(&events),
+        "file-scoped search must not fail: {events:?}"
+    );
 
     let snapshot = rt.messages_snapshot();
     assert!(
@@ -145,7 +148,10 @@ fn search_code_with_directory_scope_succeeds() {
         },
     );
 
-    assert!(!has_failed(&events), "directory-scoped search must not fail: {events:?}");
+    assert!(
+        !has_failed(&events),
+        "directory-scoped search must not fail: {events:?}"
+    );
     let snapshot = rt.messages_snapshot();
     assert!(
         snapshot
@@ -266,7 +272,10 @@ fn lsp_definition_seeded_on_definition_lookup_with_real_search() {
     let ToolInput::LspDefinition { path, line, col } = call else {
         panic!("dispatched call must be lsp_definition, got: {call:?}");
     };
-    assert_eq!(path, "mymodule.rs", "lsp_definition must target the definition candidate");
+    assert_eq!(
+        path, "mymodule.rs",
+        "lsp_definition must target the definition candidate"
+    );
     assert_eq!(
         line, 3,
         "lsp_definition must use declaration line (3), not comment line (1): line={line}"
@@ -278,7 +287,11 @@ fn lsp_definition_seeded_on_definition_lookup_with_real_search() {
 #[test]
 fn non_candidate_read_redirects_to_candidate_with_real_files() {
     let (dir, root, registry) = temp_root();
-    fs::write(dir.path().join("candidate.rs"), "fn needle_29_7_unique() {}\n").unwrap();
+    fs::write(
+        dir.path().join("candidate.rs"),
+        "fn needle_29_7_unique() {}\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("other.rs"), "fn unrelated() {}\n").unwrap();
 
     let mut last_call_key = None;
@@ -352,7 +365,10 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
     let ToolInput::ReadFile { path } = call else {
         panic!("dispatched call must be read_file, got: {call:?}");
     };
-    assert_eq!(path, "candidate.rs", "dispatch must target the preferred candidate");
+    assert_eq!(
+        path, "candidate.rs",
+        "dispatch must target the preferred candidate"
+    );
 }
 
 // 6. Resolver rejects paths that escape the project root via ../.

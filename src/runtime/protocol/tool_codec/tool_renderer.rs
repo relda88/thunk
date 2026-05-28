@@ -1539,4 +1539,24 @@ mod tests {
         let body = render_output(&output);
         assert_eq!(body, "no definition found");
     }
+
+    #[test]
+    fn lsp_definition_output_uses_relative_path() {
+        use crate::tools::types::LspDefinitionOutput;
+        let output = ToolOutput::LspDefinition(LspDefinitionOutput {
+            source_path: "src/main.rs".into(),
+            target_path: "src/lib.rs".into(),
+            target_line: 10,
+        });
+        let result = format_tool_result("lsp_definition", &output);
+        assert!(
+            !result.contains("/Users/"),
+            "output must not contain absolute path prefix"
+        );
+        assert!(
+            !result.contains("/home/"),
+            "output must not contain absolute path prefix"
+        );
+        assert!(result.contains("src/lib.rs"));
+    }
 }

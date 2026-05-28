@@ -134,9 +134,15 @@ fn is_declaration_line(line: &str) -> bool {
     if t.starts_with("//") || t.starts_with("/*") || t.starts_with("use ") {
         return false;
     }
-    t.contains("struct ") || t.contains("fn ") || t.contains("enum ")
-        || t.contains("trait ") || t.contains("type ") || t.contains("impl ")
-        || t.contains("const ") || t.contains("static ") || t.contains("macro_rules!")
+    t.contains("struct ")
+        || t.contains("fn ")
+        || t.contains("enum ")
+        || t.contains("trait ")
+        || t.contains("type ")
+        || t.contains("impl ")
+        || t.contains("const ")
+        || t.contains("static ")
+        || t.contains("macro_rules!")
 }
 
 /// Outcome of dispatching one round of tool calls.
@@ -779,7 +785,14 @@ pub(crate) fn run_tool_round(
                 Ok(locations) => {
                     let (target_path, target_line) = locations
                         .first()
-                        .map(|l| (l.path.to_string_lossy().into_owned(), l.line as u32))
+                        .map(|l| {
+                            let abs = l.path.to_string_lossy().into_owned();
+                            let rel = Path::new(&abs)
+                                .strip_prefix(project_root.path())
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .unwrap_or(abs);
+                            (rel, l.line as u32)
+                        })
                         .unwrap_or_default();
                     ToolOutput::LspDefinition(LspDefinitionOutput {
                         source_path: path.clone(),
@@ -800,9 +813,10 @@ pub(crate) fn run_tool_round(
                         .record_definition_target(&d.source_path, &d.target_path);
 
                     if lsp.is_enabled() {
-                        if let Ok(target_source) = std::fs::read_to_string(&d.target_path) {
+                        let target_abs = project_root.path().join(&d.target_path);
+                        if let Ok(target_source) = std::fs::read_to_string(&target_abs) {
                             if let Ok(Some(hover_text)) = lsp.query_hover(
-                                Path::new(&d.target_path),
+                                &target_abs,
                                 &target_source,
                                 d.target_line as usize,
                                 1,
@@ -973,10 +987,14 @@ pub(crate) fn run_tool_round(
                     {
                         if let ToolOutput::SearchResults(ref results) = output {
                             if let Some(def_path) = investigation.first_definition_candidate() {
-                                let candidate_matches = results.matches.iter().filter(|m| m.file == def_path);
-                                let best_match = candidate_matches.clone()
+                                let candidate_matches =
+                                    results.matches.iter().filter(|m| m.file == def_path);
+                                let best_match = candidate_matches
+                                    .clone()
                                     .find(|m| is_declaration_line(&m.line))
-                                    .or_else(|| results.matches.iter().find(|m| m.file == def_path));
+                                    .or_else(|| {
+                                        results.matches.iter().find(|m| m.file == def_path)
+                                    });
                                 if let Some(m) = best_match {
                                     let col = effective_search_input
                                         .as_ref()
@@ -1995,7 +2013,10 @@ mod tests {
             "dispatched call must be lsp_definition, got: {call:?}"
         );
         if let ToolInput::LspDefinition { path, line, col } = call {
-            assert_eq!(path, "lib.rs", "lsp_definition path must be the definition candidate");
+            assert_eq!(
+                path, "lib.rs",
+                "lsp_definition path must be the definition candidate"
+            );
             assert!(line >= 1, "line must be 1-based and >= 1");
             assert!(col >= 1, "col must be 1-based and >= 1");
         }
@@ -2003,7 +2024,9 @@ mod tests {
 
     #[test]
     fn is_declaration_line_accepts_struct() {
-        assert!(is_declaration_line("pub(crate) struct InvestigationGraph {"));
+        assert!(is_declaration_line(
+            "pub(crate) struct InvestigationGraph {"
+        ));
     }
 
     #[test]
