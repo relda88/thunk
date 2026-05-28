@@ -361,6 +361,48 @@ impl Runtime {
                 self.commit_tool_results(tool_codec::format_tool_result(&tool_name, &output));
                 self.conversation
                     .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
+                if matches!(tool_name.as_str(), "edit_file" | "write_file") && self.lsp.is_enabled()
+                {
+                    if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
+                        if std::path::Path::new(&abs_path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            == Some("rs")
+                        {
+                            if let Ok(source) = std::fs::read_to_string(&abs_path) {
+                                if let Ok(diagnostics) = self
+                                    .lsp
+                                    .query_diagnostics(std::path::Path::new(&abs_path), &source)
+                                {
+                                    if !diagnostics.is_empty() {
+                                        let diag_text = diagnostics
+                                            .iter()
+                                            .map(|d| {
+                                                format!(
+                                                    "[{}] line {}: {}",
+                                                    d.severity, d.line, d.message
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        trace_runtime_decision(
+                                            on_event,
+                                            "lsp_diagnostics_injected",
+                                            &[
+                                                ("path", abs_path.clone()),
+                                                ("count", diagnostics.len().to_string()),
+                                            ],
+                                        );
+                                        self.commit_tool_results(format!(
+                                            "\n=== lsp_diagnostics: {} ===\n{}\n=== /lsp_diagnostics ===\n",
+                                            abs_path, diag_text
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 self.finish_with_runtime_answer(
                     &final_answer,
                     AnswerSource::ToolAssisted { rounds: 1 },

@@ -593,3 +593,35 @@ fn mutation_turn_with_preparatory_read_still_reaches_edit_file_approval() {
         "file must be updated after approval"
     );
 }
+
+#[test]
+fn diagnostics_not_injected_when_lsp_disabled() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("lib.rs");
+    fs::write(&file, "fn hello() {}\n").unwrap();
+    let abs_path = file.to_string_lossy().into_owned();
+    let payload = format!("{}\x00fn hello()\x00fn world()", abs_path);
+
+    // Config::default() has lsp.enabled = false — diagnostics must not be injected.
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path());
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Medium,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+
+    let snapshot = rt.messages_snapshot();
+    assert!(
+        !snapshot
+            .iter()
+            .any(|m| m.content.contains("lsp_diagnostics")),
+        "lsp_diagnostics must not appear when LSP is disabled: {snapshot:?}"
+    );
+}
