@@ -518,7 +518,12 @@ mod tests {
         // Single candidate, no broad lookup, low match count, no graph edges → target 1.
         let mut state = InvestigationState::new();
         let output = make_search_output_for_hint(vec![("src/foo.rs", "fn foo()")]);
-        state.record_search_results(&output, Some("foo"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("foo"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
             1,
@@ -535,7 +540,12 @@ mod tests {
         state.configure_usage_evidence_policy(true);
         let output =
             make_search_output_for_hint(vec![("src/a.rs", "foo()"), ("src/b.rs", "foo()")]);
-        state.record_search_results(&output, Some("foo"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("foo"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
             2,
@@ -545,7 +555,7 @@ mod tests {
 
     #[test]
     fn dynamic_target_broad_usage_plus_many_candidates() {
-        // Broad compound gate (2 substantive) + 6+ candidate files both fire → target 3.
+        // Broad compound gate (2 substantive) + 6+ candidate files both fire → score 2 → target capped at 2.
         let mut state = InvestigationState::new();
         state.configure_usage_evidence_policy(true);
         let output = make_search_output_for_hint(vec![
@@ -556,11 +566,16 @@ mod tests {
             ("src/e.rs", "foo()"),
             ("src/f.rs", "foo()"),
         ]);
-        state.record_search_results(&output, Some("foo"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("foo"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
-            3,
-            "broad compound + 6 candidate files → score 2 → target 3"
+            2,
+            "broad compound + 6 candidate files → score 2 → target capped at 2"
         );
     }
 
@@ -574,23 +589,38 @@ mod tests {
             ("sandbox/models/enums.py", "    TODO = 'todo'"),
             ("sandbox/models/enums.py", "    IN_PROGRESS = 'in_progress'"),
             ("sandbox/models/enums.py", "    COMPLETED = 'completed'"),
-            ("sandbox/tasks/manager.py", "from models.enums import TaskStatus"),
+            (
+                "sandbox/tasks/manager.py",
+                "from models.enums import TaskStatus",
+            ),
             ("sandbox/tasks/manager.py", "status: TaskStatus"),
             ("sandbox/tasks/manager.py", "TaskStatus.TODO"),
             ("sandbox/tasks/manager.py", "TaskStatus.COMPLETED"),
-            ("sandbox/api/routes.py", "from models.enums import TaskStatus"),
+            (
+                "sandbox/api/routes.py",
+                "from models.enums import TaskStatus",
+            ),
             ("sandbox/api/routes.py", "TaskStatus.IN_PROGRESS"),
             ("sandbox/api/routes.py", "TaskStatus.COMPLETED"),
             ("sandbox/api/routes.py", "TaskStatus.TODO"),
-            ("sandbox/tests/test_tasks.py", "from models.enums import TaskStatus"),
+            (
+                "sandbox/tests/test_tasks.py",
+                "from models.enums import TaskStatus",
+            ),
             ("sandbox/tests/test_tasks.py", "TaskStatus.TODO"),
             ("sandbox/tests/test_tasks.py", "TaskStatus.IN_PROGRESS"),
             ("sandbox/tests/test_tasks.py", "TaskStatus.COMPLETED"),
-            ("sandbox/cli/commands.py", "from models.enums import TaskStatus"),
+            (
+                "sandbox/cli/commands.py",
+                "from models.enums import TaskStatus",
+            ),
             ("sandbox/cli/commands.py", "TaskStatus.TODO"),
             ("sandbox/cli/commands.py", "TaskStatus.COMPLETED"),
             ("sandbox/cli/commands.py", "TaskStatus.IN_PROGRESS"),
-            ("sandbox/workers/processor.py", "from models.enums import TaskStatus"),
+            (
+                "sandbox/workers/processor.py",
+                "from models.enums import TaskStatus",
+            ),
             ("sandbox/workers/processor.py", "TaskStatus.COMPLETED"),
         ]);
         state.record_search_results(
@@ -796,7 +826,12 @@ mod tests {
             ),
             ("services/runner.py", "audit_status(TaskStatus.PENDING)"),
         ]);
-        state.record_search_results(&output, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("TaskStatus"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
 
         assert_eq!(
             state.preferred_usage_candidate().as_deref(),
@@ -823,7 +858,12 @@ mod tests {
                 "if task.status == TaskStatus.PENDING:",
             ),
         ]);
-        state.record_search_results(&output, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("TaskStatus"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
 
         assert_eq!(
             state.preferred_usage_candidate().as_deref(),
@@ -846,7 +886,12 @@ mod tests {
                 "if task.completed:\n    filtered.append(task)",
             ),
         ]);
-        state.record_search_results(&output, Some("completed"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("completed"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
 
         assert_eq!(
             state.best_candidate_for_mode(InvestigationMode::General),
@@ -869,8 +914,18 @@ mod tests {
         let mut state2 = InvestigationState::new();
         let output1 = make_search_output_for_hint(matches.clone());
         let output2 = make_search_output_for_hint(matches);
-        state1.record_search_results(&output1, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
-        state2.record_search_results(&output2, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
+        state1.record_search_results(
+            &output1,
+            Some("TaskStatus"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
+        state2.record_search_results(
+            &output2,
+            Some("TaskStatus"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
 
         assert_eq!(
             state1.preferred_usage_candidate(),
@@ -947,7 +1002,12 @@ mod tests {
             "models/task_status.py",
             "class TaskStatus(str, Enum):",
         )]);
-        state.record_search_results(&output, Some("Task"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("Task"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         assert!(
             !state
                 .definition_only_candidates
@@ -965,7 +1025,12 @@ mod tests {
         // query="Task": "class Task:" IS a definition-only line.
         let mut state = InvestigationState::new();
         let output = make_search_output_for_hint(vec![("models/task.py", "class Task(Base):")]);
-        state.record_search_results(&output, Some("Task"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("Task"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         assert!(
             state.definition_only_candidates.contains("models/task.py"),
             "class Task must be definition-only for symbol 'Task'"
@@ -982,7 +1047,12 @@ mod tests {
         let mut state = InvestigationState::new();
         let output =
             make_search_output_for_hint(vec![("models/enums.py", "class TaskStatus(str, Enum):")]);
-        state.record_search_results(&output, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("TaskStatus"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         assert!(
             state.definition_only_candidates.contains("models/enums.py"),
             "class TaskStatus must be definition-only for symbol 'TaskStatus'"
@@ -1032,7 +1102,12 @@ mod tests {
     fn candidate_read_path_unchanged() {
         let mut state = InvestigationState::new();
         let search_output = make_search_output_for_hint(vec![("src/foo.rs", "fn main()")]);
-        state.record_search_results(&search_output, None, InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &search_output,
+            None,
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         let output = make_file_contents_output("src/foo.rs", "fn main() {}");
         state.record_read_result(
             &output,
@@ -1143,7 +1218,12 @@ mod tests {
             ("src/definitions.rs", "pub fn process_task(t: Task) {"),
             ("src/callers.rs", "process_task(my_task)"),
         ]);
-        state.record_search_results(&search_output, Some("process_task"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &search_output,
+            Some("process_task"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
 
         assert!(
             state.call_site_candidates.contains("src/callers.rs"),
@@ -1180,7 +1260,12 @@ mod tests {
             "src/definitions.rs",
             "pub fn process_task(t: Task) {",
         )]);
-        state.record_search_results(&search_output, Some("process_task"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &search_output,
+            Some("process_task"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
 
         assert!(
             state.call_site_candidates.is_empty(),
@@ -1212,7 +1297,12 @@ mod tests {
             ("src/definitions.rs", "pub fn process_task(t: Task) {"),
             ("src/callers.rs", "process_task(my_task)"),
         ]);
-        state.record_search_results(&output, Some("process_task"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("process_task"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         let hint = state.candidate_preference_hint(InvestigationMode::CallSiteLookup);
         assert!(
             hint.is_some(),
@@ -1231,11 +1321,96 @@ mod tests {
             ("src/a.rs", "process_task(task_a)"),
             ("src/b.rs", "process_task(task_b)"),
         ]);
-        state.record_search_results(&output, Some("process_task"), InvestigationMode::General, &mut |_| {});
+        state.record_search_results(
+            &output,
+            Some("process_task"),
+            InvestigationMode::General,
+            &mut |_| {},
+        );
         let hint = state.candidate_preference_hint(InvestigationMode::CallSiteLookup);
         assert!(
             hint.is_none(),
             "hint must not fire when all candidates are call-site files"
+        );
+    }
+
+    #[test]
+    fn dynamic_target_never_exceeds_candidate_read_cap() {
+        // Broad UsageLookup with 6 candidates and 22 matches — all three scoring signals fire
+        // (broad_usage_lookup + substantive candidates, candidate count >= 6, total_matches >= 10).
+        // Target must not exceed MAX_CANDIDATE_READS_PER_INVESTIGATION=2 regardless of score.
+        let mut state = InvestigationState::new();
+        state.configure_usage_evidence_policy(true);
+        let matches: Vec<(&str, &str)> = vec![
+            ("src/a.rs", "process(x)"),
+            ("src/a.rs", "process(y)"),
+            ("src/a.rs", "process(z)"),
+            ("src/a.rs", "process(w)"),
+            ("src/b.rs", "process(x)"),
+            ("src/b.rs", "process(y)"),
+            ("src/b.rs", "process(z)"),
+            ("src/b.rs", "process(w)"),
+            ("src/c.rs", "process(x)"),
+            ("src/c.rs", "process(y)"),
+            ("src/c.rs", "process(z)"),
+            ("src/c.rs", "process(w)"),
+            ("src/d.rs", "process(x)"),
+            ("src/d.rs", "process(y)"),
+            ("src/d.rs", "process(z)"),
+            ("src/d.rs", "process(w)"),
+            ("src/e.rs", "process(x)"),
+            ("src/e.rs", "process(y)"),
+            ("src/e.rs", "process(z)"),
+            ("src/f.rs", "process(x)"),
+            ("src/f.rs", "process(y)"),
+            ("src/f.rs", "process(z)"),
+        ];
+        let output = make_search_output_for_hint(matches);
+        state.record_search_results(
+            &output,
+            Some("process"),
+            InvestigationMode::UsageLookup,
+            &mut |_| {},
+        );
+        assert!(
+            state.useful_candidate_reads_target_for_test() <= 2,
+            "target must not exceed MAX_CANDIDATE_READS_PER_INVESTIGATION=2, got {}",
+            state.useful_candidate_reads_target_for_test()
+        );
+    }
+
+    // Phase 29.15: definition_refinement_issued is set by dispatch, not record_search_results.
+    #[test]
+    fn definition_refinement_flag_not_set_by_record_search_results() {
+        use crate::tools::types::{SearchMatch, SearchResultsOutput};
+        // Build truncated results with usage lines only (no fn declaration) — 16 matches, 1 file.
+        let matches: Vec<SearchMatch> = (1..=16)
+            .map(|i| SearchMatch {
+                file: "src/worker.rs".to_string(),
+                line_number: i,
+                line: format!("let _ = process_29_15(job_{});", i),
+            })
+            .collect();
+        let output = crate::tools::ToolOutput::SearchResults(SearchResultsOutput {
+            query: "process_29_15".into(),
+            matches,
+            total_matches: 20,
+            truncated: true,
+        });
+        let mut state = InvestigationState::new();
+        state.record_search_results(
+            &output,
+            Some("process_29_15"),
+            InvestigationMode::DefinitionLookup,
+            &mut |_| {},
+        );
+        assert!(
+            !state.definition_refinement_issued(),
+            "record_search_results must not set definition_refinement_issued — dispatch only"
+        );
+        assert!(
+            state.first_definition_candidate().is_none(),
+            "usage-only lines must not produce a definition candidate"
         );
     }
 }

@@ -437,7 +437,10 @@ pub(crate) fn run_tool_round(
 
         // Per-turn search budget: 1 search always allowed; a second only when the first
         // returned no results; further searches are always blocked.
-        if matches!(input, ToolInput::SearchCode { .. }) && !search_budget.is_allowed() {
+        if matches!(input, ToolInput::SearchCode { .. })
+            && !search_budget.is_allowed()
+            && !(investigation.definition_refinement_issued() && search_budget.calls == 1)
+        {
             if search_budget.empty_retry_exhausted()
                 && !investigation.search_produced_results()
                 && investigation.files_read_count() == 0
@@ -981,6 +984,34 @@ pub(crate) fn run_tool_round(
                                     path: path.to_string(),
                                 },
                             };
+                        }
+                    }
+                    if matches!(investigation_mode, InvestigationMode::DefinitionLookup) {
+                        if let ToolOutput::SearchResults(ref results) = output {
+                            if results.truncated
+                                && investigation.first_definition_candidate().is_none()
+                                && !investigation.definition_refinement_issued()
+                            {
+                                if let Some((original_query, scope)) = &effective_search_input {
+                                    investigation.set_definition_refinement_issued();
+                                    let refined_query = format!("fn {}", original_query);
+                                    trace_runtime_decision(
+                                        on_event,
+                                        "definition_refinement_dispatch",
+                                        &[
+                                            ("original_query", original_query.to_string()),
+                                            ("refined_query", refined_query.clone()),
+                                        ],
+                                    );
+                                    return ToolRoundOutcome::RuntimeDispatch {
+                                        accumulated,
+                                        call: ToolInput::SearchCode {
+                                            query: refined_query,
+                                            path: scope.clone(),
+                                        },
+                                    };
+                                }
+                            }
                         }
                     }
                     if matches!(investigation_mode, InvestigationMode::DefinitionLookup)

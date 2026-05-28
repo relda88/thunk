@@ -550,6 +550,10 @@ pub(crate) struct InvestigationState {
     /// Path dispatched as a definition-site read after usage candidates were exhausted.
     /// When set, Gate 1 is bypassed for this path so the read is accepted as evidence.
     definition_site_dispatch_issued: Option<String>,
+    /// True after a runtime-issued refinement search ("fn {query}") has been dispatched.
+    /// Set by the dispatch, not by record_search_results. Never cleared — persists through
+    /// the refinement pass so the budget bypass fires only once (calls == 1 guard).
+    definition_refinement_issued: bool,
     /// Graph-shaped candidate tracker. Records import edges from read files and surfaces
     /// unread imported files as promoted candidates after search candidates are exhausted.
     pub(crate) graph: InvestigationGraph,
@@ -606,6 +610,7 @@ impl InvestigationState {
             direct_read_paths: HashSet::new(),
             accepted_search_summaries: vec![],
             definition_site_dispatch_issued: None,
+            definition_refinement_issued: false,
             graph: InvestigationGraph::new(),
         }
     }
@@ -934,8 +939,8 @@ impl InvestigationState {
                         score += 1;
                     }
 
-                    // map score to target: 0→1, 1→2, 2→3, 3→4, 4+→5, never below 1 never above 5
-                    (score + 1).clamp(1, 5)
+                    // map score to target: 0→1, 1→2, 2+→2; capped at MAX_CANDIDATE_READS_PER_INVESTIGATION=2
+                    (score + 1).clamp(1, 2)
                 };
             }
         }
@@ -1874,6 +1879,14 @@ impl InvestigationState {
 
     pub(crate) fn set_definition_site_dispatched(&mut self, path: &str) {
         self.definition_site_dispatch_issued = Some(normalize_evidence_path(path));
+    }
+
+    pub(crate) fn definition_refinement_issued(&self) -> bool {
+        self.definition_refinement_issued
+    }
+
+    pub(crate) fn set_definition_refinement_issued(&mut self) {
+        self.definition_refinement_issued = true;
     }
 
     pub fn evidence_summary(&self) -> Vec<String> {

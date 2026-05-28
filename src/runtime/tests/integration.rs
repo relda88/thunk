@@ -407,7 +407,75 @@ fn resolver_rejects_path_outside_project_root() {
     );
 }
 
-// 7. search_code with a nonexistent scope path fails gracefully (no panic).
+// 7. DefinitionLookup: truncated results with no declaration dispatches refined "fn {query}" search.
+#[test]
+fn definition_lookup_truncated_no_declaration_dispatches_refinement() {
+    // Create 6 files × 3 usage lines each = 18 matches, exceeding MAX_RESULTS_SHOWN (15).
+    // None of the lines contains a declaration, so first_definition_candidate() returns None.
+    // The runtime must dispatch RuntimeDispatch::SearchCode with query "fn process_29_15".
+    let (dir, root, registry) = temp_root();
+    for i in 0..6usize {
+        let filename = format!("worker_{i}.rs");
+        let content = format!(
+            "let _ = process_29_15(job_{i}_a);\nlet _ = process_29_15(job_{i}_b);\nlet _ = process_29_15(job_{i}_c);\n"
+        );
+        fs::write(dir.path().join(&filename), &content).unwrap();
+    }
+
+    let mut last_call_key = None;
+    let mut search_budget = SearchBudget::new();
+    let mut investigation = InvestigationState::new();
+    let mut lsp = LspManager::new(&LspConfig::default(), root.path());
+    let mut reads_this_turn = HashSet::new();
+    let mut anchors = AnchorState::default();
+    let mut requested_read_completed = false;
+    let mut disallowed = 0usize;
+    let mut weak_query = 0usize;
+
+    let outcome = run_tool_round(
+        &root,
+        &registry,
+        vec![ToolInput::SearchCode {
+            query: "process_29_15".into(),
+            path: None,
+        }],
+        &mut last_call_key,
+        &mut search_budget,
+        &mut investigation,
+        &mut lsp,
+        &mut reads_this_turn,
+        &mut anchors,
+        ToolSurface::RetrievalFirst,
+        &mut disallowed,
+        &mut weak_query,
+        false,
+        true,
+        InvestigationMode::DefinitionLookup,
+        None,
+        &mut requested_read_completed,
+        None,
+        &mut |_| {},
+    );
+
+    let ToolRoundOutcome::RuntimeDispatch { call, .. } = outcome else {
+        panic!(
+            "truncated DefinitionLookup with no declaration must dispatch refinement (RuntimeDispatch)"
+        );
+    };
+    let ToolInput::SearchCode { query, .. } = call else {
+        panic!("dispatched call must be search_code, got: {call:?}");
+    };
+    assert!(
+        query.starts_with("fn "),
+        "refined query must start with 'fn ', got: {query:?}"
+    );
+    assert!(
+        investigation.definition_refinement_issued(),
+        "definition_refinement_issued must be true after dispatch"
+    );
+}
+
+// 8. search_code with a nonexistent scope path fails gracefully (no panic).
 #[test]
 fn search_code_with_nonexistent_scope_path_fails_gracefully() {
     let (_dir, root, registry) = temp_root();
