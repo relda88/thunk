@@ -65,3 +65,4 @@ THUNK_TRACE_RUNTIME=1 cargo run --release --no-default-features  # debug
 - `.claude/dev/tool-system.md` — tool inventory and wiring. Read when adding or modifying tools.
 - `.claude/skills/debug-investigation/` — investigation, guards, failure modes. Read when modifying investigation or candidate selection.
 - `.claude/skills/debug-runtime/` — debugging entry points. Read when diagnosing runtime failures.
+- `.claude/skills/investigate/SKILL.md` — evidence-first exploration before any implementation. Read before writing any implementation prompt.
