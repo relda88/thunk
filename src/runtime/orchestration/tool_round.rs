@@ -798,6 +798,30 @@ pub(crate) fn run_tool_round(
                     investigation
                         .graph
                         .record_definition_target(&d.source_path, &d.target_path);
+
+                    if lsp.is_enabled() {
+                        if let Ok(target_source) = std::fs::read_to_string(&d.target_path) {
+                            if let Ok(Some(hover_text)) = lsp.query_hover(
+                                Path::new(&d.target_path),
+                                &target_source,
+                                d.target_line as usize,
+                                1,
+                            ) {
+                                trace_runtime_decision(
+                                    on_event,
+                                    "lsp_hover_injected",
+                                    &[
+                                        ("path", d.target_path.clone()),
+                                        ("line", d.target_line.to_string()),
+                                    ],
+                                );
+                                accumulated.push_str(&format!(
+                                    "\n=== lsp_hover: {} ===\n{}\n=== /lsp_hover ===\n",
+                                    d.target_path, hover_text
+                                ));
+                            }
+                        }
+                    }
                 }
             }
             let summary = tool_codec::render_compact_summary(&output);
@@ -2053,5 +2077,59 @@ mod tests {
             "lsp_definition must use the declaration line (2), not the comment line (1)"
         );
         assert!(col >= 1);
+    }
+
+    #[test]
+    fn hover_not_injected_when_lsp_disabled() {
+        // With LspManager constructed with enabled: false, a successful lsp_definition
+        // result must not produce any lsp_hover block in the accumulated output.
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("lib.rs"), "pub fn target_fn() {}\n").unwrap();
+
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        // LSP disabled — hover must not fire even if lsp_definition result has a target.
+        let mut lsp = LspManager::new(&LspConfig::default(), std::path::Path::new("."));
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed = 0usize;
+        let mut weak_query = 0usize;
+
+        // Dispatch lsp_definition directly (skip seeding; use the intercept path).
+        let outcome = run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::LspDefinition {
+                path: "lib.rs".into(),
+                line: 1,
+                col: 1,
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut lsp,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            false,
+            InvestigationMode::General,
+            None,
+            &mut requested_read_completed,
+            None,
+            &mut |_| {},
+        );
+
+        let ToolRoundOutcome::Completed { results, .. } = outcome else {
+            panic!("lsp_definition dispatch must complete");
+        };
+        assert!(
+            !results.contains("lsp_hover"),
+            "no hover block must appear when LSP is disabled: {results}"
+        );
     }
 }
