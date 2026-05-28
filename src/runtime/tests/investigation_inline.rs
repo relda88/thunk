@@ -518,7 +518,7 @@ mod tests {
         // Single candidate, no broad lookup, low match count, no graph edges → target 1.
         let mut state = InvestigationState::new();
         let output = make_search_output_for_hint(vec![("src/foo.rs", "fn foo()")]);
-        state.record_search_results(&output, Some("foo"), &mut |_| {});
+        state.record_search_results(&output, Some("foo"), InvestigationMode::General, &mut |_| {});
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
             1,
@@ -535,7 +535,7 @@ mod tests {
         state.configure_usage_evidence_policy(true);
         let output =
             make_search_output_for_hint(vec![("src/a.rs", "foo()"), ("src/b.rs", "foo()")]);
-        state.record_search_results(&output, Some("foo"), &mut |_| {});
+        state.record_search_results(&output, Some("foo"), InvestigationMode::General, &mut |_| {});
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
             2,
@@ -556,11 +556,53 @@ mod tests {
             ("src/e.rs", "foo()"),
             ("src/f.rs", "foo()"),
         ]);
-        state.record_search_results(&output, Some("foo"), &mut |_| {});
+        state.record_search_results(&output, Some("foo"), InvestigationMode::General, &mut |_| {});
         assert_eq!(
             state.useful_candidate_reads_target_for_test(),
             3,
             "broad compound + 6 candidate files → score 2 → target 3"
+        );
+    }
+
+    #[test]
+    fn dynamic_target_definition_lookup_many_candidates() {
+        // 6 candidates + 22 total matches would score 2 → target 3 for any other mode.
+        // DefinitionLookup must ignore breadth signals and always return target 1.
+        let mut state = InvestigationState::new();
+        let output = make_search_output_for_hint(vec![
+            ("sandbox/models/enums.py", "class TaskStatus(str, Enum):"),
+            ("sandbox/models/enums.py", "    TODO = 'todo'"),
+            ("sandbox/models/enums.py", "    IN_PROGRESS = 'in_progress'"),
+            ("sandbox/models/enums.py", "    COMPLETED = 'completed'"),
+            ("sandbox/tasks/manager.py", "from models.enums import TaskStatus"),
+            ("sandbox/tasks/manager.py", "status: TaskStatus"),
+            ("sandbox/tasks/manager.py", "TaskStatus.TODO"),
+            ("sandbox/tasks/manager.py", "TaskStatus.COMPLETED"),
+            ("sandbox/api/routes.py", "from models.enums import TaskStatus"),
+            ("sandbox/api/routes.py", "TaskStatus.IN_PROGRESS"),
+            ("sandbox/api/routes.py", "TaskStatus.COMPLETED"),
+            ("sandbox/api/routes.py", "TaskStatus.TODO"),
+            ("sandbox/tests/test_tasks.py", "from models.enums import TaskStatus"),
+            ("sandbox/tests/test_tasks.py", "TaskStatus.TODO"),
+            ("sandbox/tests/test_tasks.py", "TaskStatus.IN_PROGRESS"),
+            ("sandbox/tests/test_tasks.py", "TaskStatus.COMPLETED"),
+            ("sandbox/cli/commands.py", "from models.enums import TaskStatus"),
+            ("sandbox/cli/commands.py", "TaskStatus.TODO"),
+            ("sandbox/cli/commands.py", "TaskStatus.COMPLETED"),
+            ("sandbox/cli/commands.py", "TaskStatus.IN_PROGRESS"),
+            ("sandbox/workers/processor.py", "from models.enums import TaskStatus"),
+            ("sandbox/workers/processor.py", "TaskStatus.COMPLETED"),
+        ]);
+        state.record_search_results(
+            &output,
+            Some("TaskStatus"),
+            InvestigationMode::DefinitionLookup,
+            &mut |_| {},
+        );
+        assert_eq!(
+            state.useful_candidate_reads_target_for_test(),
+            1,
+            "DefinitionLookup with 6 candidates and 22 matches must clamp target to 1"
         );
     }
 
@@ -580,7 +622,7 @@ mod tests {
             ("sandbox/cli/commands.py", "import logging"),
             ("sandbox/init/z_init.py", "def initialize_logging(): pass"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::InitializationLookup);
         assert!(
             hint.is_some(),
@@ -600,7 +642,7 @@ mod tests {
             ("sandbox/init/a.py", "logging.initialize()"),
             ("sandbox/init/b.py", "def initialization_setup(): pass"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::InitializationLookup);
         assert!(
             hint.is_none(),
@@ -621,7 +663,7 @@ mod tests {
                 "database:\n  url: postgres://localhost/mydb",
             ),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::ConfigLookup);
         assert!(
             hint.is_some(),
@@ -643,7 +685,7 @@ mod tests {
             ),
             ("services/user.py", "USER = UserService()"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::ConfigLookup);
         assert!(
             hint.is_none(),
@@ -658,7 +700,7 @@ mod tests {
             ("sandbox/init/z_init.py", "logging.basicConfig()"),
             ("sandbox/cli/commands.py", "import logging"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         assert!(
             state
                 .candidate_preference_hint(InvestigationMode::General)
@@ -675,7 +717,7 @@ mod tests {
             ("models/enums.py", "class TaskStatus(str, Enum):"),
             ("cli/commands.py", "from models.enums import TaskStatus"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         assert!(
             state
                 .candidate_preference_hint(InvestigationMode::DefinitionLookup)
@@ -693,7 +735,7 @@ mod tests {
             ("sandbox/init/a.py", "logging.initialize()"),
             ("sandbox/init/b.py", "def initialization_setup(): pass"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::InitializationLookup);
         assert!(hint.is_some());
         let hint = hint.unwrap();
@@ -717,8 +759,8 @@ mod tests {
         ];
         let output1 = make_search_output_for_hint(matches.clone());
         let output2 = make_search_output_for_hint(matches);
-        state1.record_search_results(&output1, None, &mut |_| {});
-        state2.record_search_results(&output2, None, &mut |_| {});
+        state1.record_search_results(&output1, None, InvestigationMode::General, &mut |_| {});
+        state2.record_search_results(&output2, None, InvestigationMode::General, &mut |_| {});
         assert_eq!(
             state1.candidate_preference_hint(InvestigationMode::InitializationLookup),
             state2.candidate_preference_hint(InvestigationMode::InitializationLookup),
@@ -733,7 +775,7 @@ mod tests {
             ("sandbox/init/z_init.py", "logging.basicConfig()"),
             ("sandbox/cli/commands.py", "logger.info(\"hello\")"),
         ]);
-        state.record_search_results(&output, None, &mut |_| {});
+        state.record_search_results(&output, None, InvestigationMode::General, &mut |_| {});
         assert!(
             state
                 .candidate_preference_hint(InvestigationMode::UsageLookup)
@@ -754,7 +796,7 @@ mod tests {
             ),
             ("services/runner.py", "audit_status(TaskStatus.PENDING)"),
         ]);
-        state.record_search_results(&output, Some("TaskStatus"), &mut |_| {});
+        state.record_search_results(&output, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
 
         assert_eq!(
             state.preferred_usage_candidate().as_deref(),
@@ -781,7 +823,7 @@ mod tests {
                 "if task.status == TaskStatus.PENDING:",
             ),
         ]);
-        state.record_search_results(&output, Some("TaskStatus"), &mut |_| {});
+        state.record_search_results(&output, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
 
         assert_eq!(
             state.preferred_usage_candidate().as_deref(),
@@ -804,7 +846,7 @@ mod tests {
                 "if task.completed:\n    filtered.append(task)",
             ),
         ]);
-        state.record_search_results(&output, Some("completed"), &mut |_| {});
+        state.record_search_results(&output, Some("completed"), InvestigationMode::General, &mut |_| {});
 
         assert_eq!(
             state.best_candidate_for_mode(InvestigationMode::General),
@@ -827,8 +869,8 @@ mod tests {
         let mut state2 = InvestigationState::new();
         let output1 = make_search_output_for_hint(matches.clone());
         let output2 = make_search_output_for_hint(matches);
-        state1.record_search_results(&output1, Some("TaskStatus"), &mut |_| {});
-        state2.record_search_results(&output2, Some("TaskStatus"), &mut |_| {});
+        state1.record_search_results(&output1, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
+        state2.record_search_results(&output2, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
 
         assert_eq!(
             state1.preferred_usage_candidate(),
@@ -905,7 +947,7 @@ mod tests {
             "models/task_status.py",
             "class TaskStatus(str, Enum):",
         )]);
-        state.record_search_results(&output, Some("Task"), &mut |_| {});
+        state.record_search_results(&output, Some("Task"), InvestigationMode::General, &mut |_| {});
         assert!(
             !state
                 .definition_only_candidates
@@ -923,7 +965,7 @@ mod tests {
         // query="Task": "class Task:" IS a definition-only line.
         let mut state = InvestigationState::new();
         let output = make_search_output_for_hint(vec![("models/task.py", "class Task(Base):")]);
-        state.record_search_results(&output, Some("Task"), &mut |_| {});
+        state.record_search_results(&output, Some("Task"), InvestigationMode::General, &mut |_| {});
         assert!(
             state.definition_only_candidates.contains("models/task.py"),
             "class Task must be definition-only for symbol 'Task'"
@@ -940,7 +982,7 @@ mod tests {
         let mut state = InvestigationState::new();
         let output =
             make_search_output_for_hint(vec![("models/enums.py", "class TaskStatus(str, Enum):")]);
-        state.record_search_results(&output, Some("TaskStatus"), &mut |_| {});
+        state.record_search_results(&output, Some("TaskStatus"), InvestigationMode::General, &mut |_| {});
         assert!(
             state.definition_only_candidates.contains("models/enums.py"),
             "class TaskStatus must be definition-only for symbol 'TaskStatus'"
@@ -990,7 +1032,7 @@ mod tests {
     fn candidate_read_path_unchanged() {
         let mut state = InvestigationState::new();
         let search_output = make_search_output_for_hint(vec![("src/foo.rs", "fn main()")]);
-        state.record_search_results(&search_output, None, &mut |_| {});
+        state.record_search_results(&search_output, None, InvestigationMode::General, &mut |_| {});
         let output = make_file_contents_output("src/foo.rs", "fn main() {}");
         state.record_read_result(
             &output,
@@ -1101,7 +1143,7 @@ mod tests {
             ("src/definitions.rs", "pub fn process_task(t: Task) {"),
             ("src/callers.rs", "process_task(my_task)"),
         ]);
-        state.record_search_results(&search_output, Some("process_task"), &mut |_| {});
+        state.record_search_results(&search_output, Some("process_task"), InvestigationMode::General, &mut |_| {});
 
         assert!(
             state.call_site_candidates.contains("src/callers.rs"),
@@ -1138,7 +1180,7 @@ mod tests {
             "src/definitions.rs",
             "pub fn process_task(t: Task) {",
         )]);
-        state.record_search_results(&search_output, Some("process_task"), &mut |_| {});
+        state.record_search_results(&search_output, Some("process_task"), InvestigationMode::General, &mut |_| {});
 
         assert!(
             state.call_site_candidates.is_empty(),
@@ -1170,7 +1212,7 @@ mod tests {
             ("src/definitions.rs", "pub fn process_task(t: Task) {"),
             ("src/callers.rs", "process_task(my_task)"),
         ]);
-        state.record_search_results(&output, Some("process_task"), &mut |_| {});
+        state.record_search_results(&output, Some("process_task"), InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::CallSiteLookup);
         assert!(
             hint.is_some(),
@@ -1189,7 +1231,7 @@ mod tests {
             ("src/a.rs", "process_task(task_a)"),
             ("src/b.rs", "process_task(task_b)"),
         ]);
-        state.record_search_results(&output, Some("process_task"), &mut |_| {});
+        state.record_search_results(&output, Some("process_task"), InvestigationMode::General, &mut |_| {});
         let hint = state.candidate_preference_hint(InvestigationMode::CallSiteLookup);
         assert!(
             hint.is_none(),

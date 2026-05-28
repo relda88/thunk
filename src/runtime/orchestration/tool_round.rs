@@ -879,6 +879,7 @@ pub(crate) fn run_tool_round(
                     let was_empty = investigation.record_search_results(
                         &output,
                         effective_search_input.as_ref().map(|(q, _)| q.as_str()),
+                        investigation_mode,
                         on_event,
                     );
                     search_budget.record(was_empty);
