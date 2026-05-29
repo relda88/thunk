@@ -531,6 +531,19 @@ impl Runtime {
             self.pending_runtime_call.take(),
             self.backend.capabilities().context_window_tokens,
         );
+        if let Some(ref store) = self.symbol_store {
+            let root_str = self.project_root.path().to_string_lossy().into_owned();
+            if store.import_count(&root_str).unwrap_or(0) > 0 {
+                if let Ok(edges) = store.all_imports(&root_str) {
+                    for edge in &edges {
+                        state
+                            .investigation
+                            .graph
+                            .record_import_edge(&edge.from_file, &edge.to_file);
+                    }
+                }
+            }
+        }
         seed_pending_runtime_call(&ctx, &mut state);
         loop {
             match self.run_loop_body(&ctx, &mut state, on_event) {

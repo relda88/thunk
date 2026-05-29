@@ -230,6 +230,30 @@ impl SymbolStore {
         }
         Ok(out)
     }
+    pub(crate) fn all_imports(&self, project_root: &str) -> Result<Vec<ImportEdge>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT from_file, to_file FROM index_imports \
+                 WHERE project_root = ?1",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![project_root], |row| {
+                Ok(ImportEdge {
+                    from_file: row.get(0)?,
+                    to_file: row.get(1)?,
+                })
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+        Ok(out)
+    }
 }
 
 fn now_str() -> String {
@@ -361,6 +385,39 @@ mod tests {
         store.upsert_file_metadata("root", "", 200, "h2").unwrap();
         let ts = store.last_build_time("root").unwrap();
         assert_eq!(ts.as_deref(), Some("200"));
+    }
+
+    #[test]
+    fn all_imports_returns_all_edges_for_project() {
+        let store = in_memory();
+        let edges = vec![
+            ImportEdge {
+                from_file: "src/a.rs".to_string(),
+                to_file: "src/b.rs".to_string(),
+            },
+            ImportEdge {
+                from_file: "src/c.rs".to_string(),
+                to_file: "src/d.rs".to_string(),
+            },
+        ];
+        store.upsert_imports("root", &edges).unwrap();
+        let all = store.all_imports("root").unwrap();
+        assert_eq!(all.len(), 2);
+        let froms: Vec<&str> = all.iter().map(|e| e.from_file.as_str()).collect();
+        assert!(froms.contains(&"src/a.rs"));
+        assert!(froms.contains(&"src/c.rs"));
+    }
+
+    #[test]
+    fn all_imports_empty_for_different_project() {
+        let store = in_memory();
+        let edges = vec![ImportEdge {
+            from_file: "src/a.rs".to_string(),
+            to_file: "src/b.rs".to_string(),
+        }];
+        store.upsert_imports("root1", &edges).unwrap();
+        let all = store.all_imports("root2").unwrap();
+        assert!(all.is_empty(), "must not return edges for a different project root");
     }
 
     #[test]

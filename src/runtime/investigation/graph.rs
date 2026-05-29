@@ -154,6 +154,15 @@ impl InvestigationGraph {
         None
     }
 
+    /// Records a pre-indexed import edge from `from_path` to `to_path`.
+    /// Neither node is marked as read — this only inserts the graph edge.
+    /// Used at turn start to pre-seed the graph from the symbol index.
+    pub(crate) fn record_import_edge(&mut self, from_path: &str, to_path: &str) {
+        let from_idx = self.get_or_create_node(from_path.to_string());
+        let to_idx = self.get_or_create_node(to_path.to_string());
+        self.graph.add_edge(from_idx, to_idx, Relation::Imports);
+    }
+
     /// Records that `from_path` defines a symbol found at `to_path`.
     /// Neither node is marked as read — this only inserts the graph edge.
     pub(crate) fn record_definition_target(&mut self, from_path: &str, to_path: &str) {
@@ -234,6 +243,18 @@ mod tests {
         assert!(
             promoted.is_empty(),
             "expected empty before any reads, got {promoted:?}"
+        );
+    }
+
+    #[test]
+    fn record_import_edge_pre_seeds_promoted_candidates() {
+        let mut graph = InvestigationGraph::new();
+        graph.record_read("src/main.rs", "");
+        graph.record_import_edge("src/main.rs", "src/lib.rs");
+        let promoted = graph.promoted_candidates();
+        assert!(
+            promoted.contains(&"src/lib.rs".to_string()),
+            "pre-seeded import edge must promote candidate; got {promoted:?}"
         );
     }
 

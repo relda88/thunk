@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::dirs::DEFAULT_SKIP_DIRS;
 use crate::runtime::project::ProjectRoot;
 
-use super::types::{ExtractedSymbol, SymbolConfidence, SymbolKind};
+use super::types::{ExtractedSymbol, ImportEdge, SymbolConfidence, SymbolKind};
 
 const SOURCE_EXTENSIONS: &[&str] = &[
     "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h", "hpp",
@@ -63,6 +63,148 @@ pub(crate) fn extract_symbols(root: &ProjectRoot) -> Vec<ExtractedSymbol> {
     symbols
 }
 
+pub(crate) fn extract_imports(root: &ProjectRoot) -> Vec<ImportEdge> {
+    let mut edges = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![root.path().to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let entries = match fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = match entry.file_name().into_string() {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+
+            if path.is_dir() {
+                if DEFAULT_SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                stack.push(path);
+            } else {
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase());
+                let is_source = ext
+                    .as_deref()
+                    .map(|e| SOURCE_EXTENSIONS.contains(&e))
+                    .unwrap_or(false);
+                if !is_source {
+                    continue;
+                }
+
+                let content = match fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                let rel = match path.strip_prefix(root.path()) {
+                    Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                    Err(_) => continue,
+                };
+
+                extract_imports_from_file(&content, &rel, &mut edges);
+            }
+        }
+    }
+
+    edges
+}
+
+fn extract_imports_from_file(content: &str, file_path: &str, out: &mut Vec<ImportEdge>) {
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+
+        // Python: `import foo.bar.baz`
+        if trimmed.starts_with("import ") {
+            let rest = &trimmed["import ".len()..];
+            let module = rest
+                .split(|c: char| c == ',' || c == ' ' || c == '#' || c == ';')
+                .next()
+                .unwrap_or("")
+                .trim();
+            if !module.is_empty() && !module.starts_with('.') {
+                let path = module.replace('.', "/");
+                if path.contains('/') {
+                    out.push(ImportEdge {
+                        from_file: file_path.to_string(),
+                        to_file: format!("{path}.py"),
+                    });
+                }
+            }
+        // Python: `from foo.bar import Baz`
+        } else if trimmed.starts_with("from ")
+            && !trimmed.contains("from '")
+            && !trimmed.contains("from \"")
+        {
+            let rest = &trimmed["from ".len()..];
+            if let Some(module_part) = rest.split(" import").next() {
+                let module = module_part.trim();
+                if !module.is_empty() && !module.starts_with('.') {
+                    let path = module.replace('.', "/");
+                    if path.contains('/') {
+                        out.push(ImportEdge {
+                            from_file: file_path.to_string(),
+                            to_file: format!("{path}.py"),
+                        });
+                    }
+                }
+            }
+        // Rust: `use path::component;` — conservative: only produces candidates when
+        // the first component is not a known stdlib/crate-relative prefix.
+        // In practice all current Rust imports are crate-relative or external, so
+        // this branch records no candidates. Kept for future extension.
+        } else if trimmed.starts_with("use ") {
+            let rest = &trimmed["use ".len()..];
+            let component = rest
+                .split("::")
+                .next()
+                .unwrap_or("")
+                .trim_matches('{')
+                .trim();
+            match component {
+                "std" | "core" | "alloc" | "crate" | "super" | "self" => {}
+                _ => {
+                    // External crate name — cannot map to a file path without manifest
+                    // inspection; skip to avoid false positives.
+                }
+            }
+        }
+
+        // JS/TS: `import ... from './path'` or `import ... from "./path"`
+        if trimmed.contains("from '") || trimmed.contains("from \"") {
+            if let Some(path) = extract_js_import_path(trimmed) {
+                if path.contains('/') && !path.starts_with("http") {
+                    out.push(ImportEdge {
+                        from_file: file_path.to_string(),
+                        to_file: path,
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn extract_js_import_path(line: &str) -> Option<String> {
+    for (quote_start, quote_end) in [("from '", '\''), ("from \"", '"')] {
+        if let Some(pos) = line.rfind(quote_start) {
+            let after = &line[pos + quote_start.len()..];
+            if let Some(end) = after.find(quote_end) {
+                let path = &after[..end];
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn extract_from_file(content: &str, file_path: &str, out: &mut Vec<ExtractedSymbol>) {
     for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
@@ -95,6 +237,14 @@ const PREFIXES: &[(&str, SymbolKind, bool)] = &[
     ("function ", SymbolKind::Function, false),
     ("interface ", SymbolKind::Interface, false),
     ("static ", SymbolKind::Static, false),
+    ("pub(crate) enum ", SymbolKind::Enum, true),
+    ("pub(crate) struct ", SymbolKind::Struct, true),
+    ("pub(crate) fn ", SymbolKind::Function, true),
+    ("pub(crate) type ", SymbolKind::TypeAlias, true),
+    ("pub(crate) trait ", SymbolKind::Trait, true),
+    ("pub(crate) const ", SymbolKind::Constant, true),
+    ("pub(crate) static ", SymbolKind::Static, true),
+    ("pub(super) fn ", SymbolKind::Function, true),
 ];
 
 fn classify_line(line: &str, file_path: &str, line_no: usize) -> Option<ExtractedSymbol> {
@@ -253,5 +403,52 @@ mod tests {
         let sym = syms.iter().find(|s| s.name == "Color").unwrap();
         assert!(matches!(sym.kind, SymbolKind::Enum));
         assert!(matches!(sym.confidence, SymbolConfidence::High));
+    }
+
+    #[test]
+    fn extract_imports_from_file_python_dotted() {
+        let mut edges = Vec::new();
+        extract_imports_from_file("from models.task import Task\n", "app/main.py", &mut edges);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].from_file, "app/main.py");
+        assert_eq!(edges[0].to_file, "models/task.py");
+    }
+
+    #[test]
+    fn extract_imports_from_file_js_relative() {
+        let mut edges = Vec::new();
+        extract_imports_from_file(
+            "import { Foo } from './components/foo';\n",
+            "src/app.ts",
+            &mut edges,
+        );
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].from_file, "src/app.ts");
+        assert_eq!(edges[0].to_file, "./components/foo");
+    }
+
+    #[test]
+    fn extract_imports_from_file_rust_crate_relative_skipped() {
+        let mut edges = Vec::new();
+        extract_imports_from_file(
+            "use crate::tools::types::ToolInput;\n",
+            "src/lib.rs",
+            &mut edges,
+        );
+        assert!(
+            edges.is_empty(),
+            "crate-relative Rust import must produce no edges, got {edges:?}"
+        );
+    }
+
+    #[test]
+    fn extract_imports_traverses_files() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "app/main.py", "from models.task import Task\n");
+        let root = make_root(&dir);
+        let edges = extract_imports(&root);
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].from_file, "app/main.py");
+        assert_eq!(edges[0].to_file, "models/task.py");
     }
 }

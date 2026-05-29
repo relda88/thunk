@@ -589,3 +589,52 @@ fn index_hit_promotes_definition_candidate_on_definition_lookup() {
         "index-promoted path must be the first definition candidate"
     );
 }
+
+// 10. Slice 30.5: import edges from the symbol index pre-seed the
+// InvestigationGraph at turn start so promoted_candidates can surface
+// index-sourced relations without requiring runtime file reads.
+#[test]
+fn import_edges_from_index_pre_seed_investigation_graph() {
+    use crate::storage::index::types::ImportEdge;
+    use crate::storage::index::SymbolStore;
+    use crate::storage::session::SessionStore;
+
+    let (dir, root, _registry) = temp_root();
+
+    let db_path = dir.path().join("thunk_30_5.db");
+    SessionStore::open(&db_path).unwrap();
+    let store = SymbolStore::open(&db_path).unwrap();
+    let root_str = root.path().to_string_lossy().to_string();
+
+    store
+        .upsert_imports(
+            &root_str,
+            &[ImportEdge {
+                from_file: "src/main.py".to_string(),
+                to_file: "models/task.py".to_string(),
+            }],
+        )
+        .unwrap();
+
+    // Apply the same pre-seeding logic as run_turns_with_initial_reads.
+    let mut investigation = InvestigationState::new();
+    if store.import_count(&root_str).unwrap_or(0) > 0 {
+        if let Ok(edges) = store.all_imports(&root_str) {
+            for edge in &edges {
+                investigation
+                    .graph
+                    .record_import_edge(&edge.from_file, &edge.to_file);
+            }
+        }
+    }
+
+    // Simulate a read of src/main.py with no content — edges are already
+    // pre-seeded, so the graph only needs the node marked as read.
+    investigation.graph.record_read("src/main.py", "");
+
+    let promoted = investigation.graph.promoted_candidates();
+    assert!(
+        promoted.contains(&"models/task.py".to_string()),
+        "index-pre-seeded import edge must promote candidate after source is read; got {promoted:?}"
+    );
+}

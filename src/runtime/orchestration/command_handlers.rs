@@ -298,6 +298,8 @@ impl Runtime {
                 )));
                 return;
             }
+            let imports = crate::runtime::index::extract_imports(&self.project_root);
+            let _ = store.upsert_imports(&project_root, &imports);
             // Record build timestamp via the project-level sentinel row.
             let _ = store.upsert_file_metadata(&project_root, "", now_secs, "");
             self.index_triggered = true;
@@ -358,6 +360,8 @@ impl Runtime {
         if let Some(ref store) = self.symbol_store {
             match store.upsert_symbols(&project_root, &symbols) {
                 Ok(()) => {
+                    let imports = crate::runtime::index::extract_imports(&self.project_root);
+                    let _ = store.upsert_imports(&project_root, &imports);
                     let _ = store.upsert_file_metadata(&project_root, "", now_secs, "");
                     on_event(RuntimeEvent::SystemMessage(format!(
                         "index: {count} symbols indexed"
