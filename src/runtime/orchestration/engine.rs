@@ -1093,10 +1093,10 @@ impl Runtime {
                 }
 
                 if state.corrections < MAX_CORRECTIONS {
-                    let candidate = state
-                        .investigation
-                        .best_candidate_for_mode(ctx.investigation_mode)
-                        .map(str::to_string);
+                    let candidate = state.investigation.best_unread_candidate_for_mode(
+                        ctx.investigation_mode,
+                        &state.reads_this_turn,
+                    );
                     if let Some(candidate) = candidate {
                         if state.investigation.candidate_reads_count()
                             < MAX_CANDIDATE_READS_PER_INVESTIGATION

@@ -698,6 +698,76 @@ impl InvestigationState {
         mode_specific.or_else(|| self.search_candidate_paths.first().map(String::as_str))
     }
 
+    /// Like `best_candidate_for_mode` but skips paths already present in `reads`.
+    /// Used by the premature synthesis correction dispatch so the recovery targets
+    /// an unread candidate rather than re-queuing one that DEDUP would immediately block.
+    pub(crate) fn best_unread_candidate_for_mode(
+        &self,
+        mode: InvestigationMode,
+        reads: &HashSet<String>,
+    ) -> Option<String> {
+        let mode_specific: Option<&str> = match mode {
+            InvestigationMode::InitializationLookup => {
+                self.first_in_candidate_set_excluding(&self.initialization_candidates, reads)
+            }
+            InvestigationMode::ConfigLookup => {
+                self.first_in_candidate_set_excluding(&self.config_file_candidates, reads)
+            }
+            InvestigationMode::CreateLookup => {
+                self.first_in_candidate_set_excluding(&self.create_candidates, reads)
+            }
+            InvestigationMode::RegisterLookup => {
+                self.first_in_candidate_set_excluding(&self.register_candidates, reads)
+            }
+            InvestigationMode::CallSiteLookup => {
+                self.first_in_candidate_set_excluding(&self.call_site_candidates, reads)
+            }
+            InvestigationMode::LoadLookup => {
+                self.first_in_candidate_set_excluding(&self.load_candidates, reads)
+            }
+            InvestigationMode::SaveLookup => {
+                self.first_in_candidate_set_excluding(&self.save_candidates, reads)
+            }
+            // DefinitionLookup always has useful_candidate_reads_target=1, so this path
+            // is unreachable for it; fall back to the non-excluding variant.
+            InvestigationMode::DefinitionLookup => self.first_definition_candidate(),
+            InvestigationMode::UsageLookup => {
+                self.preferred_usage_candidate_with_filters(reads, false)
+            }
+            InvestigationMode::General => self
+                .search_candidate_paths
+                .iter()
+                .find(|p| {
+                    !self.lockfile_candidates.contains(*p)
+                        && is_source_candidate_path(p)
+                        && !reads.contains(&normalize_evidence_path(p))
+                })
+                .map(String::as_str),
+        };
+        mode_specific
+            .or_else(|| {
+                self.search_candidate_paths
+                    .iter()
+                    .find(|p| !reads.contains(&normalize_evidence_path(p)))
+                    .map(String::as_str)
+            })
+            .map(str::to_string)
+    }
+
+    /// Returns the first path in `search_candidate_paths` that is both in `set`
+    /// and not already normalized-present in `reads`.
+    fn first_in_candidate_set_excluding<'a>(
+        &'a self,
+        set: &HashSet<String>,
+        reads: &HashSet<String>,
+    ) -> Option<&'a str> {
+        self.search_candidate_paths
+            .iter()
+            .filter(|p| set.contains(*p))
+            .find(|p| !reads.contains(&normalize_evidence_path(p)))
+            .map(String::as_str)
+    }
+
     pub(crate) fn issue_direct_answer_correction(&mut self) -> bool {
         if self.direct_answer_correction_issued {
             return false;
