@@ -5,6 +5,7 @@ use super::super::super::protocol::tool_codec;
 use super::super::super::resolve;
 use super::super::super::trace::trace_runtime_decision;
 use super::super::super::types::{Activity, RuntimeEvent};
+use super::super::telemetry::TurnPerformance;
 use super::Runtime;
 
 /// Bounds for /history output. Limits messages shown and chars per message to
@@ -241,6 +242,7 @@ impl Runtime {
             "anchor_cleared",
             &[("kind", "last_search".into())],
         );
+        self.context_75_warned = false;
         self.conversation.reset(self.system_prompt.clone());
         on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
     }
@@ -375,6 +377,30 @@ impl Runtime {
                 "compact: {count} stale tool result{} pruned",
                 if count == 1 { "" } else { "s" }
             )));
+        }
+    }
+
+    pub(super) fn maybe_warn_or_prune_context(
+        &mut self,
+        perf: &TurnPerformance,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        let Some(pct) = perf.context_used_pct() else {
+            return;
+        };
+        if pct >= 90 {
+            let count = self.conversation.compact_stale_tool_results();
+            if count > 0 {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "context at {pct}% — auto-compacted {count} stale tool result(s)"
+                )));
+            }
+            self.context_75_warned = true;
+        } else if pct >= 75 && !self.context_75_warned {
+            self.context_75_warned = true;
+            on_event(RuntimeEvent::SystemMessage(
+                "context at 75% — run /compact to free space".to_string(),
+            ));
         }
     }
 

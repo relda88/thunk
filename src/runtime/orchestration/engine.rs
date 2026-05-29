@@ -97,6 +97,9 @@ pub struct Runtime {
     /// Set to true after the first on-demand index build attempt this session.
     /// Ensures the trigger fires at most once per session.
     pub(super) index_triggered: bool,
+    /// Set to true after the 75% context warning fires. Cleared on reset so the
+    /// warning re-arms for the next session.
+    pub(super) context_75_warned: bool,
 }
 
 impl Runtime {
@@ -127,6 +130,7 @@ impl Runtime {
             lsp,
             symbol_store: None,
             index_triggered: false,
+            context_75_warned: false,
         }
     }
 
@@ -551,6 +555,7 @@ impl Runtime {
             match self.run_loop_body(&ctx, &mut state, on_event) {
                 TurnSignal::Finish => {
                     state.turn_perf.emit_summary(on_event);
+                    self.maybe_warn_or_prune_context(&state.turn_perf, on_event);
                     return;
                 }
                 TurnSignal::Continue => continue,

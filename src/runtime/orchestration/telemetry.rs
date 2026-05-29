@@ -176,9 +176,7 @@ impl TurnPerformance {
     }
 
     pub(crate) fn record_token_counts(&mut self, prompt: u32, completion: u32) {
-        if !self.enabled {
-            return;
-        }
+        // Always accumulate so context_used_pct() works regardless of trace mode.
         self.tokens_prompt += u64::from(prompt);
         self.tokens_completion += u64::from(completion);
     }
@@ -263,6 +261,16 @@ impl TurnPerformance {
             }
         }
         on_event(RuntimeEvent::RuntimeTrace(line));
+    }
+
+    pub(crate) fn context_used_pct(&self) -> Option<u8> {
+        let ctx = self.context_window_tokens.filter(|&c| c > 0)?;
+        let prompt_tokens = if self.tokens_prompt > 0 {
+            self.tokens_prompt
+        } else {
+            self.prompt_sizes.last().copied().unwrap_or(0) as u64 / 4
+        };
+        Some((prompt_tokens * 100 / u64::from(ctx)).min(100) as u8)
     }
 }
 
@@ -538,5 +546,34 @@ mod tests {
             context_usage.is_some(),
             "ContextUsage fires even when THUNK_TRACE_RUNTIME is not set"
         );
+    }
+
+    #[test]
+    fn context_used_pct_real_tokens_returns_correct_pct() {
+        let mut perf = TurnPerformance::new(Some(100_000));
+        perf.tokens_prompt = 75_000;
+        assert_eq!(perf.context_used_pct(), Some(75));
+    }
+
+    #[test]
+    fn context_used_pct_char_estimate_path_when_no_tokens() {
+        let mut perf = TurnPerformance::new(Some(100_000));
+        // tokens_prompt == 0 → falls back to prompt_sizes.last() / 4
+        // 200_000 chars / 4 = 50_000 tokens → 50% of 100_000
+        perf.prompt_sizes.push(200_000);
+        assert_eq!(perf.context_used_pct(), Some(50));
+    }
+
+    #[test]
+    fn context_used_pct_returns_none_when_no_context_window() {
+        let perf = TurnPerformance::new(None);
+        assert_eq!(perf.context_used_pct(), None);
+    }
+
+    #[test]
+    fn context_used_pct_clamps_at_100() {
+        let mut perf = TurnPerformance::new(Some(100_000));
+        perf.tokens_prompt = 200_000;
+        assert_eq!(perf.context_used_pct(), Some(100));
     }
 }

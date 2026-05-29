@@ -450,7 +450,8 @@ mod tests {
 
         // Turn 1: small tool result (eligible for pruning once old enough)
         c.messages.push(Message::user("turn 1".to_string()));
-        c.messages.push(Message::assistant("[read_file: a.rs]".to_string()));
+        c.messages
+            .push(Message::assistant("[read_file: a.rs]".to_string()));
         c.messages.push(Message::user(
             "=== tool_result: read_file ===\nsmall content\n=== /tool_result ===".to_string(),
         ));
@@ -458,14 +459,16 @@ mod tests {
         // Turn 2: large tool result (must never be pruned even when old)
         let large_body = "x".repeat(AGING_SIZE_THRESHOLD);
         c.messages.push(Message::user("turn 2".to_string()));
-        c.messages.push(Message::assistant("[read_file: b.rs]".to_string()));
+        c.messages
+            .push(Message::assistant("[read_file: b.rs]".to_string()));
         c.messages.push(Message::user(format!(
             "=== tool_result: read_file ===\n{large_body}\n=== /tool_result ==="
         )));
 
         // Turn 3: tool_error (must never be pruned regardless of age or size)
         c.messages.push(Message::user("turn 3".to_string()));
-        c.messages.push(Message::assistant("[read_file: c.rs]".to_string()));
+        c.messages
+            .push(Message::assistant("[read_file: c.rs]".to_string()));
         c.messages.push(Message::user(
             "=== tool_error: read_file ===\nfile not found\n=== /tool_error ===".to_string(),
         ));
@@ -497,12 +500,13 @@ mod tests {
         let c = make_aging_conversation();
         let full = c.snapshot();
         assert!(
-            !full.iter().any(|m| m.content == "[tool result pruned — stale]"),
+            !full
+                .iter()
+                .any(|m| m.content == "[tool result pruned — stale]"),
             "snapshot() must never return stubs — persistence path must be clean"
         );
         assert!(
-            full.iter()
-                .any(|m| m.content.contains("small content")),
+            full.iter().any(|m| m.content.contains("small content")),
             "snapshot() must retain original small tool result"
         );
     }
