@@ -44,6 +44,8 @@ The project is structured to keep model generation, tool execution, persistence,
 - Re-enters model generation after tool results so the assistant can synthesize a grounded same-turn answer.
 - Uses runtime-owned terminal answers when the runtime already knows the outcome, such as rejected mutations or failed file reads.
 - Enforces bounded per-turn `search_code` behavior at runtime instead of relying only on prompt wording.
+- Maintains a persistent SQLite-backed symbol/import index for definition and import lookup support.
+- Estimates context usage, prunes stale tool results, warns at 75%, and auto-prunes at 90% context usage.
 - Persists sessions in `data/sessions.db` and restores the most recent same-root session on startup.
 - Writes best-effort per-session logs under `logs/`.
 
@@ -69,6 +71,7 @@ Current control commands:
 - `/undo` — revert last mutation
 - `/read <path>` — read a file directly
 - `/search <query>` — search code directly
+- `/ls [path]` — list a directory directly
 - `/last` — show last assistant response
 - `/anchors` — show current anchor state
 - `/history` — show conversation history
@@ -76,6 +79,15 @@ Current control commands:
 - `/session clear` — delete current project sessions and start fresh
 - `/providers list` — list available providers
 - `/providers use <name>` — switch active provider (session-only)
+- `/git branch` — show current branch
+- `/git status` — show git status
+- `/git diff` — show git diff
+- `/git log` — show git log
+- `/lsp status` — show LSP status
+- `/index build` — build the symbol/import index
+- `/index status` — show symbol/import index status
+- `/context stats` — show context window statistics
+- `/compact` — prune stale tool results from live context
 
 ---
 
@@ -119,9 +131,9 @@ The codebase is split into seven main layers:
 
 - `src/core/` — shared infrastructure types (AppError, Result, Config) — no dependencies on other layers
 - `src/app/` — startup, config, paths, session orchestration
-- `src/runtime/` — conversation loop, tool parsing, approval state, runtime events
+- `src/runtime/` — conversation loop, tool parsing, approval state, runtime events, symbol extraction, context pruning
 - `src/tools/` — tool contracts, registry, and implementations
-- `src/storage/` — SQLite session storage
+- `src/storage/` — SQLite session storage and symbol/import index storage
 - `src/llm/` — backend abstraction and providers
 - `src/tui/` — terminal input, rendering, and slash commands
 
@@ -139,11 +151,11 @@ Key architectural rules reflected in the code:
 ## Current Limitations
 
 - Shell allowlist is restricted to `cargo` only — broader shell access not yet supported.
-- No LSP integration or advanced memory system.
-- No token-aware live context budgeting before generation.
+- No advanced memory system.
+- Summarization-based compaction is deferred; current context control uses estimation, warnings, and tool-result pruning.
 - Pending approvals are not persisted across restarts.
 - Restored session history is loaded into the runtime, but not replayed into the visible TUI transcript.
-- No prompt caching or context compression yet.
+- No prompt caching or summarization-based context compression yet.
 - Windows support is functional but ongoing — search_code path handling on Windows is an open item.
 
 ---

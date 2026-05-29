@@ -4,8 +4,14 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 844 passing via `cargo test --no-default-features`
+Test baseline: 928 passing via `cargo test --no-default-features`
 Never make commits — user commits manually.
+
+## Current Phase State
+- Phase 29: COMPLETE
+- Phase 30: COMPLETE — persistent symbol/import index backed by SQLite
+- Phase 31: COMPLETE — context window intelligence; Slice 31.5 summarization deferred
+- Phase 32: ACTIVE — TUI overhaul pending scope definition
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model
@@ -65,4 +71,4 @@ THUNK_TRACE_RUNTIME=1 cargo run --release --no-default-features  # debug
 - `.claude/dev/tool-system.md` — tool inventory and wiring. Read when adding or modifying tools.
 - `.claude/skills/debug-investigation/` — investigation, guards, failure modes. Read when modifying investigation or candidate selection.
 - `.claude/skills/debug-runtime/` — debugging entry points. Read when diagnosing runtime failures.
-- `.claude/skills/investigate/SKILL.md` — evidence-first exploration before any implementation. Read before writing any implementation prompt.
+- `.claude/skills/investigation-planner/SKILL.md` — evidence-first exploration before any implementation. Read before writing any implementation prompt.

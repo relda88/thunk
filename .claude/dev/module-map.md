@@ -1,6 +1,6 @@
 # Module Map
 
-Dependency order (bottom → top): `core/` → `tools/` → `runtime/` → `app/` → `tui/`
+Dependency order (bottom → top): `core/` → `storage/` / `tools/` → `runtime/` → `app/` → `tui/`
 
 ## src/core/
 Owns `AppError`, `Result`, `Config` and all sub-configs (`LlmConfig`, `LspConfig`, `GroqConfig`, `OllamaConfig`, `OpenRouterConfig`, `CustomCommandDef`, etc.), and `load()`.
@@ -20,6 +20,11 @@ Owns the LSP server lifecycle, JSON-RPC transport, and definition/hover queries.
 `LspManager` is owned by `Runtime` — not registered in `ToolRegistry`.
 Key files: `src/runtime/lsp/manager.rs`, `src/runtime/lsp/session.rs`, `src/runtime/lsp/transport.rs`, `src/runtime/lsp/protocol.rs`, `src/runtime/lsp/types.rs`
 
+## src/runtime/index/
+Owns project symbol and import extraction for the persistent index.
+The extractor feeds `SymbolStore`; it does not own SQLite access or runtime dispatch policy.
+Key files: `src/runtime/index/extractor.rs`, `src/runtime/index/types.rs`, `src/runtime/index/mod.rs`
+
 ## src/runtime/investigation/
 Owns turn classification, investigation state, evidence gates, candidate selection, anchor state, and `InvestigationGraph`.
 `InvestigationGraph` (petgraph) records import and definition edges; `promoted_candidates()` is advisory.
@@ -38,7 +43,7 @@ Key files:
 - `context_policy.rs` — `ContextPolicy` derived from `BackendCapabilities.context_window_tokens`
 - `context_cap.rs` — `cap_tool_result_blocks()`, `estimate_generation_prompt_chars()`
 - `anchor_resolution.rs` — `run_last_read_file_anchor()`, `run_last_search_anchor()`
-- `telemetry.rs` — `TurnPerformance`, `GenerationRoundLabel/Cause`
+- `telemetry.rs` — `TurnPerformance`, context usage telemetry, `GenerationRoundLabel/Cause`
 
 ## src/runtime/protocol/
 Owns the wire protocol between model text and typed tool inputs/results.
@@ -58,10 +63,10 @@ Interacts with `runtime/` only through `GenerateRequest`, `BackendEvent`, and `B
 Key files: `src/llm/backend.rs`, `src/llm/providers/mod.rs`, `src/llm/providers/*.rs`
 
 ## src/storage/
-Owns SQLite session schema (v3) and CRUD for saved sessions.
-Schema: `sessions` table with `project_root`, `last_read_file`, `last_search_query`, `last_search_scope`; `session_messages` table keyed by `(session_id, seq)`.
+Owns SQLite schema (v5), CRUD for saved sessions, and persistent symbol/import index storage.
+Schema: `sessions` table with `project_root`, `last_read_file`, `last_search_query`, `last_search_scope`; `session_messages` table keyed by `(session_id, seq)`; `index_symbols`, `index_imports`, and `file_metadata` tables for the persistent index.
 Must not know the system prompt, runtime correction policy, or tool semantics.
-Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src/storage/session/types.rs`
+Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src/storage/session/types.rs`, `src/storage/index/store.rs`, `src/storage/index/types.rs`
 
 ## src/app/
 Owns bootstrap, config loading, path discovery, backend construction, tool-registry construction, session restore, autosave, event logging.
