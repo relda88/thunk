@@ -1,10 +1,11 @@
 [package]
 name = "thunk"
-version = "0.16.55"
+version = "0.17.55"
 edition = "2021"
 
 [dependencies]
 crossterm = "0.28"
+unicode-width = "0.1"
 libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 llama-cpp-2 = { version = "=0.1.143", optional = true }

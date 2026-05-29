@@ -1,7 +1,7 @@
 mod app;
 pub mod commands;
 mod input;
-mod render;
+mod renderer;
 mod state;
 
 use std::io::{self, IsTerminal};

@@ -1,5 +1,5 @@
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 
@@ -11,8 +11,59 @@ use crate::runtime::{AnswerSource, RuntimeEvent, RuntimeRequest};
 use crate::storage::session::SessionMeta;
 
 use super::commands;
-use super::render::render;
-use super::state::AppState;
+use super::renderer::Renderer;
+use super::state::{AppState, DirtySections};
+
+const ACTIVE_MS: u64 = 33;
+const SLOW_MS: u64 = 66;
+const IDLE_MS: u64 = 180;
+
+struct RenderScheduler {
+    last_draw: Instant,
+    heavy_streak: u32,
+}
+
+impl RenderScheduler {
+    fn new() -> Self {
+        Self {
+            last_draw: Instant::now() - Duration::from_millis(IDLE_MS),
+            heavy_streak: 0,
+        }
+    }
+
+    fn poll_timeout(&self, state: &AppState) -> Duration {
+        if state.has_dirty_sections() {
+            return Duration::ZERO;
+        }
+        let interval = self.interval(state);
+        interval.saturating_sub(self.last_draw.elapsed())
+    }
+
+    fn should_draw(&self, state: &AppState) -> bool {
+        state.has_dirty_sections() || self.last_draw.elapsed() >= self.interval(state)
+    }
+
+    fn record_draw(&mut self, elapsed_ms: u64) {
+        self.last_draw = Instant::now();
+        if elapsed_ms > 24 {
+            self.heavy_streak = self.heavy_streak.saturating_add(1);
+        } else {
+            self.heavy_streak = 0;
+        }
+    }
+
+    fn interval(&self, state: &AppState) -> Duration {
+        if state.show_activity {
+            if self.heavy_streak > 3 {
+                Duration::from_millis(SLOW_MS)
+            } else {
+                Duration::from_millis(ACTIVE_MS)
+            }
+        } else {
+            Duration::from_millis(IDLE_MS)
+        }
+    }
+}
 
 pub(crate) fn run_app(
     stdout: &mut io::Stdout,
@@ -21,21 +72,32 @@ pub(crate) fn run_app(
     app: &mut AppContext,
 ) -> Result<()> {
     let mut state = AppState::new(config, paths);
+    let (w, h) = crossterm::terminal::size()?;
+    let mut renderer = Renderer::new(w, h);
+    let mut scheduler = RenderScheduler::new();
 
     loop {
-        render(stdout, &mut state)?;
+        if scheduler.should_draw(&state) {
+            let t = Instant::now();
+            renderer.render(&state, stdout, state.dirty_sections)?;
+            state.clear_dirty_sections();
+            scheduler.record_draw(t.elapsed().as_millis() as u64);
+        }
 
         if state.should_quit {
             return Ok(());
         }
 
-        if event::poll(Duration::from_millis(100))? {
+        if event::poll(scheduler.poll_timeout(&state))? {
             match event::read()? {
                 Event::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
-                    handle_key_event(stdout, &mut state, app, config, key)?
+                    handle_key_event(&mut state, app, config, key)?
                 }
                 Event::Paste(text) => state.insert_str(&text),
-                Event::Resize(_, _) => {}
+                Event::Resize(w, h) => {
+                    renderer.resize(w, h);
+                    state.mark_dirty(DirtySections::ALL);
+                }
                 _ => {}
             }
         }
@@ -43,7 +105,6 @@ pub(crate) fn run_app(
 }
 
 fn handle_key_event(
-    stdout: &mut io::Stdout,
     state: &mut AppState,
     app: &mut AppContext,
     config: &Config,
@@ -57,17 +118,15 @@ fn handle_key_event(
         (KeyCode::Enter, _) => {
             if let Some(input) = state.submit_input() {
                 match commands::parse(&input) {
-                    None => submit_to_app(stdout, state, app, input)?,
-                    Some(Ok(cmd)) => handle_command(stdout, state, app, cmd)?,
+                    None => submit_to_app(state, app, input)?,
+                    Some(Ok(cmd)) => handle_command(state, app, cmd)?,
                     Some(Err(commands::ParseError::UnknownCommand)) => {
                         match resolve_custom_command(config, &input) {
                             None => state.add_system_message(
                                 commands::ParseError::UnknownCommand.user_message(),
                             ),
                             Some(Err(msg)) => state.add_system_message(msg),
-                            Some(Ok(req)) => {
-                                dispatch_command_runtime_request(stdout, state, app, req)?
-                            }
+                            Some(Ok(req)) => dispatch_command_runtime_request(state, app, req)?,
                         }
                     }
                     Some(Err(e)) => state.add_system_message(e.user_message()),
@@ -100,23 +159,13 @@ fn handle_key_event(
     Ok(())
 }
 
-// Used by Approve and Reject: applies Failed event before propagating render errors.
-// submit_to_app has a different post-handle ordering and is kept separate.
 fn dispatch_command_runtime_request(
-    stdout: &mut io::Stdout,
     state: &mut AppState,
     app: &mut AppContext,
     req: RuntimeRequest,
 ) -> Result<()> {
-    let mut render_error = None;
     if let Err(e) = app.handle(req, &mut |event| {
-        if render_error.is_some() {
-            return;
-        }
         apply_runtime_event(state, event);
-        if let Err(e) = render(stdout, state) {
-            render_error = Some(e);
-        }
     }) {
         apply_runtime_event(
             state,
@@ -125,36 +174,15 @@ fn dispatch_command_runtime_request(
             },
         );
     }
-    if let Some(e) = render_error {
-        return Err(e);
-    }
     Ok(())
 }
 
-fn submit_to_app(
-    stdout: &mut io::Stdout,
-    state: &mut AppState,
-    app: &mut AppContext,
-    prompt: String,
-) -> Result<()> {
+fn submit_to_app(state: &mut AppState, app: &mut AppContext, prompt: String) -> Result<()> {
     state.add_user_message(prompt.clone());
-    let mut render_error = None;
 
-    let handle_result = app.handle(RuntimeRequest::Submit { text: prompt }, &mut |event| {
-        if render_error.is_some() {
-            return;
-        }
+    if let Err(e) = app.handle(RuntimeRequest::Submit { text: prompt }, &mut |event| {
         apply_runtime_event(state, event);
-        if let Err(e) = render(stdout, state) {
-            render_error = Some(e);
-        }
-    });
-
-    if let Some(e) = render_error {
-        return Err(e);
-    }
-
-    if let Err(e) = handle_result {
+    }) {
         apply_runtime_event(
             state,
             RuntimeEvent::Failed {
@@ -212,7 +240,6 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
 }
 
 fn handle_command(
-    stdout: &mut io::Stdout,
     state: &mut AppState,
     app: &mut AppContext,
     cmd: commands::Command,
@@ -255,7 +282,7 @@ fn handle_command(
             }
         }
         CommandAction::Runtime(req) => {
-            dispatch_command_runtime_request(stdout, state, app, req)?;
+            dispatch_command_runtime_request(state, app, req)?;
         }
     }
     Ok(())
@@ -536,7 +563,7 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             context_window_tokens,
         } => {
             let pct = (prompt_tokens * 100 / u64::from(context_window_tokens)).min(100) as u8;
-            state.context_pct = Some(pct);
+            state.set_context_pct(pct);
         }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
@@ -768,13 +795,7 @@ mod tests {
             )
             .unwrap();
 
-        handle_command(
-            &mut stdout,
-            &mut state,
-            &mut harness.app,
-            Command::SessionClear,
-        )
-        .unwrap();
+        handle_command(&mut state, &mut harness.app, Command::SessionClear).unwrap();
 
         assert_eq!(state.messages.len(), 2);
         assert!(state.messages[0].content.contains("ready. Root:"));
