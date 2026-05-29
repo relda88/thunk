@@ -184,6 +184,23 @@ impl TurnPerformance {
     }
 
     pub(crate) fn emit_summary(&self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        // Always emit context usage for the TUI indicator when context window is known —
+        // this is not guarded by THUNK_TRACE_RUNTIME because the indicator must show in
+        // normal usage, not only during trace sessions.
+        if let Some(ctx) = self.context_window_tokens {
+            if ctx > 0 {
+                let prompt_tokens = if self.tokens_prompt > 0 {
+                    self.tokens_prompt
+                } else {
+                    self.prompt_sizes.last().copied().unwrap_or(0) as u64 / 4
+                };
+                on_event(RuntimeEvent::ContextUsage {
+                    prompt_tokens,
+                    context_window_tokens: ctx,
+                });
+            }
+        }
+
         if !self.enabled {
             return;
         }
@@ -429,6 +446,97 @@ mod tests {
         assert!(
             !summary.contains("context_used_pct"),
             "context_used_pct must not appear when context_window_tokens is None: {summary}"
+        );
+    }
+
+    #[test]
+    fn emit_summary_fires_context_usage_with_real_token_counts() {
+        let mut perf = TurnPerformance::new_enabled(Some(128_000));
+        perf.record_token_counts(64_000, 512);
+
+        let mut context_usage: Option<(u64, u32)> = None;
+        let mut trace_count = 0;
+        perf.emit_summary(&mut |e| match e {
+            RuntimeEvent::ContextUsage {
+                prompt_tokens,
+                context_window_tokens,
+            } => {
+                context_usage = Some((prompt_tokens, context_window_tokens));
+            }
+            RuntimeEvent::RuntimeTrace(_) => trace_count += 1,
+            _ => {}
+        });
+
+        let (pt, ctx) = context_usage.expect("ContextUsage must fire when context window is known");
+        assert_eq!(pt, 64_000, "uses actual token count when available");
+        assert_eq!(ctx, 128_000);
+        assert_eq!(trace_count, 1, "RuntimeTrace still emits once");
+    }
+
+    #[test]
+    fn emit_summary_fires_context_usage_with_char_estimate_when_no_tokens() {
+        let mut perf = TurnPerformance::new_enabled(Some(128_000));
+        // Push 40_000 chars via start_round; tokens_prompt stays 0 so estimate path is taken.
+        perf.start_round(
+            GenerationRoundLabel::Initial,
+            GenerationRoundCause::Initial,
+            40_000,
+            &mut |_| {},
+        );
+
+        let mut context_usage: Option<u64> = None;
+        perf.emit_summary(&mut |e| {
+            if let RuntimeEvent::ContextUsage { prompt_tokens, .. } = e {
+                context_usage = Some(prompt_tokens);
+            }
+        });
+
+        // 40_000 chars / 4 = 10_000 estimated tokens
+        assert_eq!(
+            context_usage,
+            Some(10_000),
+            "falls back to chars/4 estimate when token counts unavailable"
+        );
+    }
+
+    #[test]
+    fn emit_summary_skips_context_usage_when_no_context_window() {
+        let mut perf = TurnPerformance::new_enabled(None);
+        perf.record_token_counts(1000, 200);
+
+        let mut got_context_usage = false;
+        perf.emit_summary(&mut |e| {
+            if matches!(e, RuntimeEvent::ContextUsage { .. }) {
+                got_context_usage = true;
+            }
+        });
+
+        assert!(
+            !got_context_usage,
+            "ContextUsage must not fire when context_window_tokens is None"
+        );
+    }
+
+    #[test]
+    fn emit_summary_fires_context_usage_even_when_trace_disabled() {
+        // new() (not new_enabled) reads env var; here enabled=false since env var is not set.
+        let perf = TurnPerformance::new(Some(128_000));
+
+        let mut context_usage: Option<(u64, u32)> = None;
+        perf.emit_summary(&mut |e| {
+            if let RuntimeEvent::ContextUsage {
+                prompt_tokens,
+                context_window_tokens,
+            } = e
+            {
+                context_usage = Some((prompt_tokens, context_window_tokens));
+            }
+        });
+
+        // tokens_prompt=0 and prompt_sizes empty → estimate = 0 / 4 = 0; still fires.
+        assert!(
+            context_usage.is_some(),
+            "ContextUsage fires even when THUNK_TRACE_RUNTIME is not set"
         );
     }
 }

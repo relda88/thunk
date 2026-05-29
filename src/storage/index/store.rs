@@ -417,7 +417,10 @@ mod tests {
         }];
         store.upsert_imports("root1", &edges).unwrap();
         let all = store.all_imports("root2").unwrap();
-        assert!(all.is_empty(), "must not return edges for a different project root");
+        assert!(
+            all.is_empty(),
+            "must not return edges for a different project root"
+        );
     }
 
     #[test]

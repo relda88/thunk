@@ -39,6 +39,8 @@ pub struct AppState {
     pub max_scroll: usize,
     pub expanded_file_read: bool,
     pub last_file_read_index: Option<usize>,
+    /// Approximate context window usage (0–100). None when context window size is unknown.
+    pub context_pct: Option<u8>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -71,6 +73,7 @@ impl AppState {
             max_scroll: 0,
             expanded_file_read: false,
             last_file_read_index: None,
+            context_pct: None,
             welcome_message: welcome,
         }
     }

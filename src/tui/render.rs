@@ -146,15 +146,39 @@ fn draw_input(stdout: &mut io::Stdout, state: &AppState, width: u16, height: u16
 }
 
 /// Draws the status bar at the bottom of the TUI, showing the current status if activity is enabled
+/// and the context window usage indicator right-aligned (green <50%, yellow 50-75%, red >75%).
 fn draw_status(stdout: &mut io::Stdout, state: &AppState, width: u16, height: u16) -> Result<()> {
     let row = height.saturating_sub(1);
-    let text = if state.show_activity {
+    let status_text = if state.show_activity {
         format!("  {}  ", state.status)
     } else {
         " ".to_string()
     };
 
-    queue!(stdout, MoveTo(0, row), Print(fit_line(&text, width)))?;
+    queue!(stdout, MoveTo(0, row), Print(fit_line(&status_text, width)))?;
+
+    if let Some(pct) = state.context_pct {
+        let indicator = format!(" ctx: {pct}% ");
+        let indicator_len = indicator.chars().count() as u16;
+        if width > indicator_len {
+            let col = width.saturating_sub(indicator_len);
+            let color = if pct < 50 {
+                Color::Green
+            } else if pct <= 75 {
+                Color::Yellow
+            } else {
+                Color::Red
+            };
+            queue!(
+                stdout,
+                MoveTo(col, row),
+                SetForegroundColor(color),
+                Print(&indicator),
+                SetAttribute(Attribute::Reset),
+            )?;
+        }
+    }
+
     Ok(())
 }
 

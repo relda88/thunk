@@ -259,6 +259,8 @@ pub struct OpenAiConfig {
     pub base_url: String,
     pub max_tokens: usize,
     pub temperature: f32,
+    /// Overrides the default context window size (128 000) used for the usage indicator.
+    pub context_window_tokens: Option<u32>,
 }
 
 impl Default for OpenAiConfig {
@@ -268,6 +270,7 @@ impl Default for OpenAiConfig {
             base_url: "https://api.openai.com/v1".to_string(),
             max_tokens: 512,
             temperature: 0.2,
+            context_window_tokens: None,
         }
     }
 }
@@ -301,6 +304,8 @@ pub struct OpenRouterConfig {
     pub base_url: String,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// Overrides the default context window size (128 000) used for the usage indicator.
+    pub context_window_tokens: Option<u32>,
 }
 
 impl Default for OpenRouterConfig {
@@ -310,6 +315,7 @@ impl Default for OpenRouterConfig {
             base_url: "https://openrouter.ai/api/v1".to_string(),
             max_tokens: 512,
             temperature: 0.2,
+            context_window_tokens: None,
         }
     }
 }
@@ -321,6 +327,8 @@ pub struct GroqConfig {
     pub base_url: String,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// Overrides the default context window size (131 072) used for the usage indicator.
+    pub context_window_tokens: Option<u32>,
 }
 
 impl Default for GroqConfig {
@@ -330,6 +338,7 @@ impl Default for GroqConfig {
             base_url: "https://api.groq.com/openai/v1".to_string(),
             max_tokens: 512,
             temperature: 0.2,
+            context_window_tokens: None,
         }
     }
 }

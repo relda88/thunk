@@ -213,4 +213,11 @@ pub enum RuntimeEvent {
     /// Fired after a direct read turn completes and the fallback answer has been
     /// streamed. The TUI uses this to record the assistant message index for Ctrl+O.
     DirectReadCompleted,
+    /// Fired at the end of each turn with approximate context window usage for the TUI indicator.
+    /// `prompt_tokens` is the actual token count if available, otherwise a char-based estimate
+    /// (prompt chars / 4). Only fired when context_window_tokens is known from the backend.
+    ContextUsage {
+        prompt_tokens: u64,
+        context_window_tokens: u32,
+    },
 }

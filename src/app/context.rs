@@ -201,6 +201,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         | RuntimeEvent::RuntimeTrace(_)
         | RuntimeEvent::PromptAssembled(_)
         | RuntimeEvent::FileReadFinished { .. }
-        | RuntimeEvent::DirectReadCompleted => None,
+        | RuntimeEvent::DirectReadCompleted
+        | RuntimeEvent::ContextUsage { .. } => None,
     }
 }

@@ -529,6 +529,13 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             let message_index = state.messages.len() - 1;
             state.store_file_read(message_index);
         }
+        RuntimeEvent::ContextUsage {
+            prompt_tokens,
+            context_window_tokens,
+        } => {
+            let pct = (prompt_tokens * 100 / u64::from(context_window_tokens)).min(100) as u8;
+            state.context_pct = Some(pct);
+        }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
         RuntimeEvent::BackendTokenCounts { .. } => {}
@@ -548,13 +555,13 @@ mod tests {
     use crate::app::session::ActiveSession;
     use crate::app::AppContext;
     use crate::llm::providers::build_backend;
-    use crate::runtime::{ProjectRoot, RuntimeRequest};
+    use crate::runtime::{ProjectRoot, RuntimeEvent, RuntimeRequest};
     use crate::storage::session::{SessionStore, StoredMessage};
     use crate::tools::default_registry;
 
     use super::{
-        format_edit_approval, format_session_updated_at, format_sessions_list, handle_command,
-        parse_read_file_header, summarize_command_output,
+        apply_runtime_event, format_edit_approval, format_session_updated_at, format_sessions_list,
+        handle_command, parse_read_file_header, summarize_command_output,
     };
     use crate::tui::commands::Command;
     use crate::tui::state::AppState;
@@ -856,5 +863,39 @@ mod tests {
                 app,
             }
         }
+    }
+
+    #[test]
+    fn context_usage_event_sets_context_pct() {
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+
+        assert_eq!(state.context_pct, None, "starts with no indicator");
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ContextUsage {
+                prompt_tokens: 64_000,
+                context_window_tokens: 128_000,
+            },
+        );
+
+        assert_eq!(state.context_pct, Some(50));
+    }
+
+    #[test]
+    fn context_usage_event_clamps_at_100_pct() {
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ContextUsage {
+                prompt_tokens: 200_000,
+                context_window_tokens: 128_000,
+            },
+        );
+
+        assert_eq!(state.context_pct, Some(100));
     }
 }

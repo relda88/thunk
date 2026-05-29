@@ -8,6 +8,8 @@ use crate::llm::backend::{
     BackendCapabilities, BackendEvent, BackendStatus, GenerateRequest, ModelBackend,
 };
 
+const DEFAULT_CONTEXT_WINDOW: u32 = 128_000;
+
 pub struct OpenRouterBackend {
     config: OpenRouterConfig,
     display_name: String,
@@ -32,7 +34,11 @@ impl ModelBackend for OpenRouterBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            context_window_tokens: None,
+            context_window_tokens: Some(
+                self.config
+                    .context_window_tokens
+                    .unwrap_or(DEFAULT_CONTEXT_WINDOW),
+            ),
             max_output_tokens: Some(self.config.max_tokens as usize),
         }
     }
@@ -54,6 +60,7 @@ impl ModelBackend for OpenRouterBackend {
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
             "stream": true,
+            "stream_options": {"include_usage": true},
         });
 
         let url = format!("{}/chat/completions", self.config.base_url);
@@ -88,6 +95,16 @@ impl ModelBackend for OpenRouterBackend {
                 if !content.is_empty() {
                     on_event(BackendEvent::TextDelta(content.to_string()));
                 }
+            }
+
+            // Usage chunk arrives as a final SSE event with empty choices before [DONE].
+            // Only present when stream_options.include_usage is accepted by the API.
+            if let Some(prompt) = val["usage"]["prompt_tokens"].as_u64() {
+                let completion = val["usage"]["completion_tokens"].as_u64().unwrap_or(0);
+                on_event(BackendEvent::TokenCounts {
+                    prompt: prompt as u32,
+                    completion: completion as u32,
+                });
             }
         }
 
