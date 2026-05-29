@@ -19,7 +19,7 @@ pub(super) fn run_generate_turn(
     investigation_mode: InvestigationMode,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
-    let mut messages = conversation.snapshot();
+    let mut messages = conversation.pruned_snapshot();
     messages.push(Message::system(prompt::render_tool_surface_hint(
         tool_surface.as_str(),
         tool_surface

@@ -14,7 +14,7 @@ pub(crate) fn estimate_generation_prompt_chars(
             .chain(tool_surface.mutation_tool_names().iter().copied()),
     );
     conversation
-        .snapshot()
+        .pruned_snapshot()
         .into_iter()
         .map(|message| message.content.len())
         .sum::<usize>()
