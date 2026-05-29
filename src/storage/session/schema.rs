@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::core::error::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 3;
+const CURRENT_VERSION: i32 = 4;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
@@ -29,9 +29,36 @@ const SCHEMA: &str = "
 
     CREATE INDEX IF NOT EXISTS idx_session_messages_lookup
         ON session_messages(session_id, seq);
+
+    CREATE TABLE IF NOT EXISTS index_symbols (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_root  TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        kind          TEXT NOT NULL,
+        file_path     TEXT NOT NULL,
+        line          INTEGER NOT NULL,
+        col           INTEGER NOT NULL,
+        signature     TEXT NOT NULL,
+        confidence    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_symbols_project_name
+        ON index_symbols (project_root, name);
+    CREATE INDEX IF NOT EXISTS idx_symbols_project_file
+        ON index_symbols (project_root, file_path);
+
+    CREATE TABLE IF NOT EXISTS index_imports (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_root  TEXT NOT NULL,
+        from_file     TEXT NOT NULL,
+        to_file       TEXT NOT NULL,
+        updated_at    TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_imports_project_source
+        ON index_imports (project_root, from_file);
 ";
 
-pub(super) fn initialize(conn: &Connection) -> Result<()> {
+pub(crate) fn initialize(conn: &Connection) -> Result<()> {
     conn.execute_batch(SCHEMA)
         .map_err(|e| AppError::Storage(e.to_string()))?;
 
@@ -57,6 +84,10 @@ pub(super) fn initialize(conn: &Connection) -> Result<()> {
             conn.execute("ALTER TABLE sessions ADD COLUMN last_search_scope TEXT", [])
                 .map_err(|e| AppError::Storage(e.to_string()))?;
         }
+    }
+
+    if version < 4 {
+        // net-new tables — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
     }
 
     if version < CURRENT_VERSION {
