@@ -1289,6 +1289,88 @@ fn general_mode_load_definition_only_read_dispatches_to_call_site_candidate() {
 }
 
 #[test]
+fn initialization_lookup_single_candidate_already_read_does_not_loop_to_tool_limit() {
+    // Regression: Phase 30.4 introduced a recovery loop when the only initialization
+    // candidate was already read and accepted (useful_reads=1) but useful_candidate_reads_target=2
+    // (high total_matches raised the target). The premature synthesis correction path dispatched
+    // the same file repeatedly via pending_runtime_call; DEDUP blocked each attempt silently,
+    // causing the loop to run until ToolLimitReached.
+    //
+    // The fix: check the return value of issue_premature_synthesis_correction() in the dispatch
+    // path and fall through to the terminal when the correction was already issued.
+    use crate::runtime::types::RuntimeTerminalReason;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+
+    // Six source files each containing "logging" — search_candidate_paths.len() >= 6
+    // raises useful_candidate_reads_target to 2, even though only one file is an init site.
+    // (MAX_LINES_COLLECTED_PER_FILE=3 caps rg output per file, so total_matches alone
+    // would require 4+ files; using the candidate-count path is simpler and more reliable.)
+    for name in &[
+        "handler_a.py",
+        "handler_b.py",
+        "handler_c.py",
+        "handler_d.py",
+        "handler_e.py",
+    ] {
+        fs::write(tmp.path().join(name), "import logging\n").unwrap();
+    }
+    // logging_init.py: the only initialization candidate.
+    fs::write(
+        tmp.path().join("logging_init.py"),
+        "def initialize_logging():\n    pass\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: logging]",
+            "[read_file: logging_init.py]",
+            // Model answers after reading the only init candidate; evidence target is 2
+            // so evidence_ready() is still false. Premature synthesis correction fires once,
+            // dispatches the same file, DEDUP blocks it, model answers again.
+            "Logging is initialized in logging_init.py.",
+            // Second direct answer after the blocked recovery dispatch.
+            // With the fix: correction already issued → terminal (InsufficientEvidence).
+            // Without the fix: correction re-dispatches the same file in an infinite loop.
+            "Logging is initialized in logging_init.py.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is logging initialized?".into(),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        !matches!(answer_source, Some(AnswerSource::ToolLimitReached)),
+        "single-candidate recovery must not loop to ToolLimitReached: {answer_source:?}"
+    );
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "must terminate with InsufficientEvidence after one blocked recovery: {answer_source:?}"
+    );
+}
+
+#[test]
 fn general_mode_no_call_site_candidate_produces_insufficient_evidence() {
     // General mode (query has no load/save/config/etc terms; "handled" triggers investigation
     // without triggering any specific lookup mode).

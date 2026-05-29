@@ -1101,15 +1101,17 @@ impl Runtime {
                         if state.investigation.candidate_reads_count()
                             < MAX_CANDIDATE_READS_PER_INVESTIGATION
                         {
-                            self.conversation.discard_last_if_assistant();
-                            state.investigation.issue_premature_synthesis_correction();
-                            state.pending_runtime_call = Some(PendingRuntimeCall {
-                                input: ToolInput::ReadFile { path: candidate },
-                                seeded_pre_generation: false,
-                            });
-                            state.next_round_label = GenerationRoundLabel::PostTool;
-                            state.next_round_cause = GenerationRoundCause::Recovery;
-                            return TurnSignal::Continue;
+                            if state.investigation.issue_premature_synthesis_correction() {
+                                self.conversation.discard_last_if_assistant();
+                                state.pending_runtime_call = Some(PendingRuntimeCall {
+                                    input: ToolInput::ReadFile { path: candidate },
+                                    seeded_pre_generation: false,
+                                });
+                                state.next_round_label = GenerationRoundLabel::PostTool;
+                                state.next_round_cause = GenerationRoundCause::Recovery;
+                                return TurnSignal::Continue;
+                            }
+                            // correction already issued — fall through to text correction or terminal
                         }
                     }
                     if state.investigation.issue_premature_synthesis_correction() {
