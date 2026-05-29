@@ -1,4 +1,5 @@
 mod conversation;
+mod index;
 mod investigation;
 pub(crate) mod lsp;
 mod orchestration;
@@ -13,6 +14,7 @@ mod trace;
 mod types;
 
 pub use crate::tools::{PendingAction, RiskLevel};
+pub(crate) use index::extract_symbols;
 pub use orchestration::Runtime;
 pub use project::ResolvedToolInput;
 #[allow(unused_imports)]
