@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 
+use super::types::{ExtractedSymbol, ImportEdge};
 use crate::core::error::{AppError, Result};
-use crate::runtime::{ExtractedSymbol, ImportEdge};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SymbolRecord {
@@ -23,8 +23,7 @@ pub(crate) struct SymbolStore {
 
 impl SymbolStore {
     pub(crate) fn open(path: &Path) -> Result<Self> {
-        let conn =
-            Connection::open(path).map_err(|e| AppError::Storage(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| AppError::Storage(e.to_string()))?;
         Ok(Self { conn })
     }
 
@@ -64,11 +63,7 @@ impl SymbolStore {
         Ok(())
     }
 
-    pub(crate) fn upsert_imports(
-        &self,
-        project_root: &str,
-        edges: &[ImportEdge],
-    ) -> Result<()> {
+    pub(crate) fn upsert_imports(&self, project_root: &str, edges: &[ImportEdge]) -> Result<()> {
         let now = now_str();
         self.conn
             .execute(
@@ -123,11 +118,95 @@ impl SymbolStore {
         Ok(out)
     }
 
-    pub(crate) fn lookup_imports(
+    pub(crate) fn is_empty(&self, project_root: &str) -> Result<bool> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM index_symbols WHERE project_root = ?1",
+                params![project_root],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(count == 0)
+    }
+
+    pub(crate) fn symbol_count(&self, project_root: &str) -> Result<i64> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM index_symbols WHERE project_root = ?1",
+                params![project_root],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))
+    }
+
+    pub(crate) fn import_count(&self, project_root: &str) -> Result<i64> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM index_imports WHERE project_root = ?1",
+                params![project_root],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))
+    }
+
+    /// Returns the timestamp (Unix seconds as string) of the most recent build for
+    /// the project, or `None` if no build has been recorded yet.
+    pub(crate) fn last_build_time(&self, project_root: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT last_modified FROM file_metadata \
+                 WHERE project_root = ?1 AND file_path = '' \
+                 LIMIT 1",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut rows = stmt
+            .query(params![project_root])
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        match rows.next().map_err(|e| AppError::Storage(e.to_string()))? {
+            Some(row) => {
+                let ts: i64 = row.get(0).map_err(|e| AppError::Storage(e.to_string()))?;
+                Ok(Some(ts.to_string()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Upserts a single file metadata row. Use `file_path = ""` as a sentinel for
+    /// a project-level build timestamp.
+    pub(crate) fn upsert_file_metadata(
         &self,
         project_root: &str,
-        file: &str,
-    ) -> Result<Vec<ImportEdge>> {
+        file_path: &str,
+        last_modified_secs: i64,
+        content_hash: &str,
+    ) -> Result<()> {
+        let now = now_str();
+        self.conn
+            .execute(
+                "INSERT INTO file_metadata \
+                 (project_root, file_path, last_modified, content_hash, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(project_root, file_path) DO UPDATE SET \
+                     last_modified = excluded.last_modified, \
+                     content_hash  = excluded.content_hash, \
+                     updated_at    = excluded.updated_at",
+                params![
+                    project_root,
+                    file_path,
+                    last_modified_secs,
+                    content_hash,
+                    now
+                ],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn lookup_imports(&self, project_root: &str, file: &str) -> Result<Vec<ImportEdge>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -210,11 +289,12 @@ mod tests {
         store
             .upsert_symbols("root", &[make_symbol("a"), make_symbol("b")])
             .unwrap();
-        store
-            .upsert_symbols("root", &[make_symbol("a")])
-            .unwrap();
+        store.upsert_symbols("root", &[make_symbol("a")]).unwrap();
         let results = store.lookup_symbol("root", "b").unwrap();
-        assert!(results.is_empty(), "stale symbol must be deleted on re-upsert");
+        assert!(
+            results.is_empty(),
+            "stale symbol must be deleted on re-upsert"
+        );
     }
 
     #[test]
@@ -223,6 +303,64 @@ mod tests {
         store.upsert_symbols("root", &[make_symbol("x")]).unwrap();
         let results = store.lookup_symbol("root", "nonexistent").unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn is_empty_true_before_upsert() {
+        let store = in_memory();
+        assert!(store.is_empty("root").unwrap());
+    }
+
+    #[test]
+    fn is_empty_false_after_upsert() {
+        let store = in_memory();
+        store.upsert_symbols("root", &[make_symbol("a")]).unwrap();
+        assert!(!store.is_empty("root").unwrap());
+    }
+
+    #[test]
+    fn symbol_count_returns_correct_count() {
+        let store = in_memory();
+        store
+            .upsert_symbols("root", &[make_symbol("a"), make_symbol("b")])
+            .unwrap();
+        assert_eq!(store.symbol_count("root").unwrap(), 2);
+    }
+
+    #[test]
+    fn import_count_returns_correct_count() {
+        let store = in_memory();
+        let edges = vec![ImportEdge {
+            from_file: "src/a.rs".to_string(),
+            to_file: "src/b.rs".to_string(),
+        }];
+        store.upsert_imports("root", &edges).unwrap();
+        assert_eq!(store.import_count("root").unwrap(), 1);
+    }
+
+    #[test]
+    fn last_build_time_none_before_any_metadata() {
+        let store = in_memory();
+        assert!(store.last_build_time("root").unwrap().is_none());
+    }
+
+    #[test]
+    fn upsert_file_metadata_and_last_build_time_roundtrip() {
+        let store = in_memory();
+        store
+            .upsert_file_metadata("root", "", 1_700_000_000, "")
+            .unwrap();
+        let ts = store.last_build_time("root").unwrap();
+        assert_eq!(ts.as_deref(), Some("1700000000"));
+    }
+
+    #[test]
+    fn upsert_file_metadata_replaces_on_conflict() {
+        let store = in_memory();
+        store.upsert_file_metadata("root", "", 100, "h1").unwrap();
+        store.upsert_file_metadata("root", "", 200, "h2").unwrap();
+        let ts = store.last_build_time("root").unwrap();
+        assert_eq!(ts.as_deref(), Some("200"));
     }
 
     #[test]

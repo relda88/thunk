@@ -269,6 +269,109 @@ impl Runtime {
         on_event(RuntimeEvent::SystemMessage(report));
     }
 
+    pub(super) fn handle_index_build(
+        &mut self,
+        large: bool,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        if self.symbol_store.is_none() {
+            on_event(RuntimeEvent::SystemMessage(
+                "index: not available (no db path)".to_string(),
+            ));
+            return;
+        }
+        let mode = if large { " (large)" } else { "" };
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "index: building{mode}..."
+        )));
+        let symbols = crate::runtime::index::extract_symbols(&self.project_root);
+        let count = symbols.len();
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        if let Some(ref store) = self.symbol_store {
+            if let Err(e) = store.upsert_symbols(&project_root, &symbols) {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "index: build failed: {e}"
+                )));
+                return;
+            }
+            // Record build timestamp via the project-level sentinel row.
+            let _ = store.upsert_file_metadata(&project_root, "", now_secs, "");
+            self.index_triggered = true;
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "index: {count} symbols indexed"
+            )));
+        }
+    }
+
+    pub(super) fn handle_index_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let Some(ref store) = self.symbol_store else {
+            on_event(RuntimeEvent::SystemMessage(
+                "index: not available (no db path)".to_string(),
+            ));
+            return;
+        };
+        let sym_count = store.symbol_count(&project_root).unwrap_or(0);
+        let imp_count = store.import_count(&project_root).unwrap_or(0);
+        let last_build = store
+            .last_build_time(&project_root)
+            .ok()
+            .flatten()
+            .map(|ts| {
+                // ts is Unix seconds — format as a human-readable value.
+                format!("{ts}s since epoch")
+            })
+            .unwrap_or_else(|| "never".to_string());
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "index: {sym_count} symbols, {imp_count} imports, last build: {last_build}"
+        )));
+    }
+
+    /// Fires at most once per session: if the symbol index is empty after the first
+    /// search operation, runs a synchronous index build and emits a status message.
+    pub(super) fn maybe_trigger_index_build(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        if self.index_triggered {
+            return;
+        }
+        self.index_triggered = true;
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let is_empty = match &self.symbol_store {
+            Some(store) => store.is_empty(&project_root).unwrap_or(false),
+            None => return,
+        };
+        if !is_empty {
+            return;
+        }
+        on_event(RuntimeEvent::SystemMessage(
+            "index: empty — building...".to_string(),
+        ));
+        let symbols = crate::runtime::index::extract_symbols(&self.project_root);
+        let count = symbols.len();
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        if let Some(ref store) = self.symbol_store {
+            match store.upsert_symbols(&project_root, &symbols) {
+                Ok(()) => {
+                    let _ = store.upsert_file_metadata(&project_root, "", now_secs, "");
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "index: {count} symbols indexed"
+                    )));
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "index: build failed: {e}"
+                    )));
+                }
+            }
+        }
+    }
+
     pub(super) fn handle_providers_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let current = self.config.llm.provider.as_str();
         let providers = [

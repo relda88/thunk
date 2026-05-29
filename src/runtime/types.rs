@@ -142,6 +142,15 @@ pub enum RuntimeRequest {
     /// Read-only LSP health query. Returns LSP status as a SystemMessage event.
     /// Does not mutate conversation state or trigger session save.
     LspStatus,
+    /// Runs the symbol extractor and writes results to the index store.
+    /// `large` disables the default file-count guard for large projects.
+    /// Does not mutate conversation state or trigger session save.
+    IndexBuild {
+        large: bool,
+    },
+    /// Read-only index status query. Returns symbol count, import count, and last
+    /// build time as a SystemMessage event.
+    IndexStatus,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

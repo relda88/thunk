@@ -132,8 +132,12 @@ impl AppContext {
         history: Vec<crate::llm::backend::Message>,
         anchors: (Option<String>, Option<String>, Option<String>),
         log: Option<SessionLog>,
+        db_path: Option<&std::path::Path>,
     ) -> Result<Self> {
         let mut runtime = Runtime::new(config, project_root, backend, registry);
+        if let Some(path) = db_path {
+            runtime = runtime.with_symbol_store(path);
+        }
         if !history.is_empty() {
             runtime.load_history(history);
         }
@@ -170,6 +174,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::GitLog => "git_log",
         RuntimeRequest::ListDir { .. } => "list_dir",
         RuntimeRequest::LspStatus => "lsp_status",
+        RuntimeRequest::IndexBuild { .. } => "index_build",
+        RuntimeRequest::IndexStatus => "index_status",
     }
 }
 

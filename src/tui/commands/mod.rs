@@ -23,6 +23,8 @@ pub enum Command {
     GitLog,
     Ls(String),
     LspStatus,
+    IndexBuild { large: bool },
+    IndexStatus,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -100,6 +102,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
         },
         "/lsp" => match arg {
             Some("status") => Some(Ok(Command::LspStatus)),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
+        "/index" => match arg {
+            Some("status") => Some(Ok(Command::IndexStatus)),
+            Some("build") => Some(Ok(Command::IndexBuild { large: false })),
+            Some("build --large") => Some(Ok(Command::IndexBuild { large: true })),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
@@ -303,5 +311,31 @@ mod tests {
     fn parses_ls_no_arg_defaults_to_dot() {
         assert_eq!(parse("/ls"), Some(Ok(Command::Ls(".".to_string()))));
         assert_eq!(parse("/ls   "), Some(Ok(Command::Ls(".".to_string()))));
+    }
+
+    #[test]
+    fn parses_index_status() {
+        assert_eq!(parse("/index status"), Some(Ok(Command::IndexStatus)));
+    }
+
+    #[test]
+    fn parses_index_build() {
+        assert_eq!(
+            parse("/index build"),
+            Some(Ok(Command::IndexBuild { large: false }))
+        );
+    }
+
+    #[test]
+    fn parses_index_build_large() {
+        assert_eq!(
+            parse("/index build --large"),
+            Some(Ok(Command::IndexBuild { large: true }))
+        );
+    }
+
+    #[test]
+    fn index_unknown_subcommand_returns_unknown_command() {
+        assert_eq!(parse("/index foo"), Some(Err(ParseError::UnknownCommand)));
     }
 }

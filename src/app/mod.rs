@@ -40,6 +40,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         history,
         anchors,
         log,
+        Some(&paths.session_db),
     )?;
 
     tui::run(&config, &paths, app)

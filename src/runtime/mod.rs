@@ -14,7 +14,9 @@ mod trace;
 mod types;
 
 pub use crate::tools::{PendingAction, RiskLevel};
-pub(crate) use index::{extract_symbols, ExtractedSymbol, ImportEdge, SymbolConfidence, SymbolKind};
+pub(crate) use index::{
+    extract_symbols, ExtractedSymbol, ImportEdge, SymbolConfidence, SymbolKind,
+};
 pub use orchestration::Runtime;
 pub use project::ResolvedToolInput;
 #[allow(unused_imports)]

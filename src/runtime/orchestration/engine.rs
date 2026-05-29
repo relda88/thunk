@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::core::config::Config;
 use crate::llm::backend::ModelBackend;
+use crate::storage::index::SymbolStore;
 use crate::tools::{PendingAction, ToolInput, ToolOutput, ToolRegistry, ToolRunResult};
 
 use super::super::lsp::LspManager;
@@ -91,6 +92,11 @@ pub struct Runtime {
     /// Persistent LSP server session. Starts lazily on first query when lsp.enabled = true.
     /// Shut down in Drop via graceful shutdown → kill.
     lsp: LspManager,
+    /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
+    pub(super) symbol_store: Option<SymbolStore>,
+    /// Set to true after the first on-demand index build attempt this session.
+    /// Ensures the trigger fires at most once per session.
+    pub(super) index_triggered: bool,
 }
 
 impl Runtime {
@@ -119,7 +125,16 @@ impl Runtime {
             pending_runtime_call: None,
             undo_stack: Vec::new(),
             lsp,
+            symbol_store: None,
+            index_triggered: false,
         }
+    }
+
+    /// Attaches a `SymbolStore` backed by `db_path`. Returns `self` for chaining.
+    /// Silently proceeds without a store if the path cannot be opened.
+    pub fn with_symbol_store(mut self, db_path: &std::path::Path) -> Self {
+        self.symbol_store = SymbolStore::open(db_path).ok();
+        self
     }
 
     /// Returns a snapshot of all current conversation messages for persistence.
@@ -180,7 +195,10 @@ impl Runtime {
     /// handler method for clarity.
     pub fn handle(&mut self, request: RuntimeRequest, on_event: &mut dyn FnMut(RuntimeEvent)) {
         match request {
-            RuntimeRequest::Submit { text } => self.handle_submit(text, on_event),
+            RuntimeRequest::Submit { text } => {
+                self.handle_submit(text, on_event);
+                self.maybe_trigger_index_build(on_event);
+            }
             RuntimeRequest::Reset => self.handle_reset(on_event),
             RuntimeRequest::Approve => self.handle_approve(on_event),
             RuntimeRequest::Reject => self.handle_reject(on_event),
@@ -188,7 +206,10 @@ impl Runtime {
             RuntimeRequest::QueryAnchors => self.handle_query_anchors(on_event),
             RuntimeRequest::QueryHistory => self.handle_query_history(on_event),
             RuntimeRequest::ReadFile { path } => self.handle_read_file(path, on_event),
-            RuntimeRequest::SearchCode { query } => self.handle_search_code(query, on_event),
+            RuntimeRequest::SearchCode { query } => {
+                self.handle_search_code(query, on_event);
+                self.maybe_trigger_index_build(on_event);
+            }
             RuntimeRequest::Undo => self.handle_undo(on_event),
             RuntimeRequest::ProvidersList => self.handle_providers_list(on_event),
             RuntimeRequest::ProvidersUse { name } => self.handle_providers_use(name, on_event),
@@ -198,6 +219,8 @@ impl Runtime {
             RuntimeRequest::GitLog => self.handle_git_log(on_event),
             RuntimeRequest::ListDir { path } => self.handle_list_dir(path, on_event),
             RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
+            RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
+            RuntimeRequest::IndexStatus => self.handle_index_status(on_event),
         }
     }
 

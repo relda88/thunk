@@ -202,6 +202,10 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
         commands::Command::GitLog => CommandAction::Runtime(RuntimeRequest::GitLog),
         commands::Command::Ls(path) => CommandAction::Runtime(RuntimeRequest::ListDir { path }),
         commands::Command::LspStatus => CommandAction::Runtime(RuntimeRequest::LspStatus),
+        commands::Command::IndexBuild { large } => {
+            CommandAction::Runtime(RuntimeRequest::IndexBuild { large })
+        }
+        commands::Command::IndexStatus => CommandAction::Runtime(RuntimeRequest::IndexStatus),
     }
 }
 
@@ -214,7 +218,7 @@ fn handle_command(
     match resolve_command(cmd) {
         CommandAction::ShowHelp => {
             state.add_system_message(
-                "Commands:\n\n  Navigation\n    /read <path>          read a file\n    /search <query>       search code\n    /last                 show last response\n    /anchors              show anchor state\n    /history              conversation history\n\n  Git\n    /git status           git status\n    /git diff             git diff\n    /git log              git log\n    /git branch           current branch\n\n  Session\n    /sessions             list project sessions\n    /session clear        delete sessions and start fresh\n    /clear                clear transcript history\n\n  Actions\n    /approve              confirm pending action\n    /reject               cancel pending action\n    /undo                 revert last mutation\n\n  Providers\n    /providers list       list available providers\n    /providers use <name> switch provider (session-only)\n\n  General\n    /help                 show this message\n    /quit                 exit",
+                "Commands:\n\n  Navigation\n    /read <path>          read a file\n    /search <query>       search code\n    /last                 show last response\n    /anchors              show anchor state\n    /history              conversation history\n\n  Git\n    /git status           git status\n    /git diff             git diff\n    /git log              git log\n    /git branch           current branch\n\n  Session\n    /sessions             list project sessions\n    /session clear        delete sessions and start fresh\n    /clear                clear transcript history\n\n  Actions\n    /approve              confirm pending action\n    /reject               cancel pending action\n    /undo                 revert last mutation\n\n  Providers\n    /providers list       list available providers\n    /providers use <name> switch provider (session-only)\n\n  Index\n    /index status         symbol count and last build time\n    /index build          build symbol index\n    /index build --large  build without file-count guard\n\n  General\n    /help                 show this message\n    /quit                 exit",
             );
         }
         CommandAction::Quit => {
@@ -841,6 +845,7 @@ mod tests {
                 history,
                 anchors,
                 None,
+                Some(&paths.session_db),
             )
             .unwrap();
 

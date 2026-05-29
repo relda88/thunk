@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::core::error::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 4;
+const CURRENT_VERSION: i32 = 5;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
@@ -56,6 +56,15 @@ const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_imports_project_source
         ON index_imports (project_root, from_file);
+
+    CREATE TABLE IF NOT EXISTS file_metadata (
+        project_root  TEXT NOT NULL,
+        file_path     TEXT NOT NULL,
+        last_modified INTEGER NOT NULL,
+        content_hash  TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        PRIMARY KEY (project_root, file_path)
+    );
 ";
 
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -88,6 +97,10 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
 
     if version < 4 {
         // net-new tables — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
+    }
+
+    if version < 5 {
+        // file_metadata table — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
     }
 
     if version < CURRENT_VERSION {
