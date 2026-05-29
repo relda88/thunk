@@ -206,6 +206,8 @@ fn resolve_command(cmd: commands::Command) -> CommandAction {
             CommandAction::Runtime(RuntimeRequest::IndexBuild { large })
         }
         commands::Command::IndexStatus => CommandAction::Runtime(RuntimeRequest::IndexStatus),
+        commands::Command::ContextStats => CommandAction::Runtime(RuntimeRequest::ContextStats),
+        commands::Command::Compact => CommandAction::Runtime(RuntimeRequest::Compact),
     }
 }
 

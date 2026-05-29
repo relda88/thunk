@@ -221,6 +221,8 @@ impl Runtime {
             RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
             RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
             RuntimeRequest::IndexStatus => self.handle_index_status(on_event),
+            RuntimeRequest::ContextStats => self.handle_context_stats(on_event),
+            RuntimeRequest::Compact => self.handle_compact(on_event),
         }
     }
 

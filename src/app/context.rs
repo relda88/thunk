@@ -176,6 +176,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::LspStatus => "lsp_status",
         RuntimeRequest::IndexBuild { .. } => "index_build",
         RuntimeRequest::IndexStatus => "index_status",
+        RuntimeRequest::ContextStats => "context_stats",
+        RuntimeRequest::Compact => "compact",
     }
 }
 

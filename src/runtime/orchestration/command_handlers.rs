@@ -333,6 +333,51 @@ impl Runtime {
         )));
     }
 
+    pub(super) fn handle_context_stats(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let token_estimate: usize = self
+            .conversation
+            .pruned_snapshot()
+            .iter()
+            .map(|m| m.content.len())
+            .sum::<usize>()
+            / 4;
+        let msg_count = self.conversation.message_count();
+        let tool_count = self.conversation.tool_result_count();
+        let oldest = self
+            .conversation
+            .oldest_tool_result_turn_age()
+            .map(|n| format!("{n} turns ago"))
+            .unwrap_or_else(|| "none".to_string());
+        let ctx_pct = self
+            .backend
+            .capabilities()
+            .context_window_tokens
+            .filter(|&ctx| ctx > 0)
+            .map(|ctx| token_estimate * 100 / ctx as usize);
+
+        let pct_str = ctx_pct
+            .map(|p| format!(", context {p}%"))
+            .unwrap_or_default();
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "context: ~{token_estimate} tokens (estimated), {msg_count} messages, \
+{tool_count} tool results, oldest {oldest}{pct_str}"
+        )));
+    }
+
+    pub(super) fn handle_compact(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let count = self.conversation.compact_stale_tool_results();
+        if count == 0 {
+            on_event(RuntimeEvent::SystemMessage(
+                "compact: nothing to compact".to_string(),
+            ));
+        } else {
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "compact: {count} stale tool result{} pruned",
+                if count == 1 { "" } else { "s" }
+            )));
+        }
+    }
+
     /// Fires at most once per session: if the symbol index is empty after the first
     /// search operation, runs a synchronous index build and emits a status message.
     pub(super) fn maybe_trigger_index_build(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {

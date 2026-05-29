@@ -165,6 +165,74 @@ impl Conversation {
         self.messages.len()
     }
 
+    /// Returns the number of tool result messages currently in the conversation.
+    pub fn tool_result_count(&self) -> usize {
+        self.messages
+            .iter()
+            .filter(|m| m.content.starts_with("=== tool_result:"))
+            .count()
+    }
+
+    /// Returns the turn age of the oldest tool result still in the conversation,
+    /// using the same turn-counting logic as `pruned_snapshot()`.
+    ///
+    /// "Age" is the number of real user turns that have occurred *after* the tool
+    /// result was added.  Returns `None` if no tool results are present.
+    pub fn oldest_tool_result_turn_age(&self) -> Option<usize> {
+        let total_real_turns = self
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::User && !is_runtime_injected(&m.content))
+            .count();
+
+        let mut turns_seen: usize = 0;
+        let mut max_age: Option<usize> = None;
+
+        for m in &self.messages {
+            if m.role == Role::User && !is_runtime_injected(&m.content) {
+                turns_seen += 1;
+            } else if m.content.starts_with("=== tool_result:") {
+                let turns_after = total_real_turns.saturating_sub(turns_seen);
+                max_age = Some(max_age.map_or(turns_after, |a| a.max(turns_after)));
+            }
+        }
+
+        max_age
+    }
+
+    /// Applies the same stale-pruning heuristic as `pruned_snapshot()` but mutates
+    /// `self.messages` in place.  Returns the number of messages that were stubbed.
+    ///
+    /// Invariants:
+    /// - `self.messages[0]` (system prompt) is never touched.
+    /// - Only small (`< AGING_SIZE_THRESHOLD` bytes) tool results older than
+    ///   `AGING_TURN_THRESHOLD` real turns are replaced.
+    /// - Tool errors and runtime corrections are never stubbed.
+    pub fn compact_stale_tool_results(&mut self) -> usize {
+        let total_real_turns = self
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::User && !is_runtime_injected(&m.content))
+            .count();
+
+        let mut turns_seen: usize = 0;
+        let mut stubbed: usize = 0;
+
+        for m in self.messages.iter_mut().skip(1) {
+            if m.role == Role::User && !is_runtime_injected(&m.content) {
+                turns_seen += 1;
+            } else if m.content.starts_with("=== tool_result:") {
+                let turns_after = total_real_turns.saturating_sub(turns_seen);
+                if turns_after > AGING_TURN_THRESHOLD && m.content.len() < AGING_SIZE_THRESHOLD {
+                    *m = Message::user("[tool result pruned — stale]");
+                    stubbed += 1;
+                }
+            }
+        }
+
+        stubbed
+    }
+
     /// Removes complete tool-exchange pairs (assistant tool-call + user tool-result)
     /// from the oldest part of the eligible window, until the conversation is at or
     /// below LIVE_TRIM_THRESHOLD messages.
@@ -473,6 +541,76 @@ mod tests {
         assert!(
             pruned.iter().any(|m| m.content.contains(&large_body)),
             "result within age threshold must be kept even when it would otherwise qualify by size"
+        );
+    }
+
+    #[test]
+    fn tool_result_count_returns_zero_for_empty_conversation() {
+        let c = Conversation::new("system".to_string());
+        assert_eq!(c.tool_result_count(), 0);
+    }
+
+    #[test]
+    fn tool_result_count_counts_only_tool_results() {
+        let c = make_aging_conversation();
+        // make_aging_conversation has exactly 2 tool_result messages (turn 1 small, turn 2 large).
+        // The turn-3 message is a tool_error, not a tool_result.
+        assert_eq!(c.tool_result_count(), 2);
+    }
+
+    #[test]
+    fn oldest_tool_result_turn_age_none_for_no_results() {
+        let c = Conversation::new("system".to_string());
+        assert_eq!(c.oldest_tool_result_turn_age(), None);
+    }
+
+    #[test]
+    fn oldest_tool_result_turn_age_returns_max_turns_after() {
+        let c = make_aging_conversation();
+        // Turn-1 result: turns_after = 14 - 1 = 13 (oldest)
+        // Turn-2 result: turns_after = 14 - 2 = 12
+        assert_eq!(c.oldest_tool_result_turn_age(), Some(13));
+    }
+
+    #[test]
+    fn compact_stale_tool_results_stubs_eligible_messages() {
+        let mut c = make_aging_conversation();
+        let count = c.compact_stale_tool_results();
+        assert_eq!(count, 1, "only the old small tool result is eligible");
+        assert!(
+            c.messages
+                .iter()
+                .any(|m| m.content == "[tool result pruned — stale]"),
+            "stubbed message must appear in-place"
+        );
+    }
+
+    #[test]
+    fn compact_stale_tool_results_never_touches_system_prompt() {
+        let mut c = make_aging_conversation();
+        let system_before = c.messages[0].content.clone();
+        c.compact_stale_tool_results();
+        assert_eq!(
+            c.messages[0].content, system_before,
+            "system prompt at index 0 must never be modified"
+        );
+    }
+
+    #[test]
+    fn compact_stale_tool_results_returns_zero_when_nothing_eligible() {
+        let mut c = Conversation::new("system".to_string());
+        c.messages.push(crate::llm::backend::Message::user("hello"));
+        assert_eq!(c.compact_stale_tool_results(), 0);
+    }
+
+    #[test]
+    fn compact_stale_tool_results_preserves_large_results() {
+        let mut c = make_aging_conversation();
+        let large_body = "x".repeat(AGING_SIZE_THRESHOLD);
+        c.compact_stale_tool_results();
+        assert!(
+            c.messages.iter().any(|m| m.content.contains(&large_body)),
+            "large tool result must not be stubbed"
         );
     }
 }

@@ -25,6 +25,8 @@ pub enum Command {
     LspStatus,
     IndexBuild { large: bool },
     IndexStatus,
+    ContextStats,
+    Compact,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -110,6 +112,11 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("build --large") => Some(Ok(Command::IndexBuild { large: true })),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/context" => match arg {
+            Some("stats") => Some(Ok(Command::ContextStats)),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
+        "/compact" => Some(Ok(Command::Compact)),
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -337,5 +344,21 @@ mod tests {
     #[test]
     fn index_unknown_subcommand_returns_unknown_command() {
         assert_eq!(parse("/index foo"), Some(Err(ParseError::UnknownCommand)));
+    }
+
+    #[test]
+    fn parses_context_stats() {
+        assert_eq!(parse("/context stats"), Some(Ok(Command::ContextStats)));
+    }
+
+    #[test]
+    fn context_unknown_subcommand_returns_unknown_command() {
+        assert_eq!(parse("/context"), Some(Err(ParseError::UnknownCommand)));
+        assert_eq!(parse("/context foo"), Some(Err(ParseError::UnknownCommand)));
+    }
+
+    #[test]
+    fn parses_compact() {
+        assert_eq!(parse("/compact"), Some(Ok(Command::Compact)));
     }
 }

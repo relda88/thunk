@@ -151,6 +151,14 @@ pub enum RuntimeRequest {
     /// Read-only index status query. Returns symbol count, import count, and last
     /// build time as a SystemMessage event.
     IndexStatus,
+    /// Read-only context stats query. Returns token estimate, message count, tool
+    /// result count, oldest tool result age, and context window percentage as a
+    /// SystemMessage event.  Does not mutate conversation state or trigger session save.
+    ContextStats,
+    /// Prunes stale small tool results from the live conversation in-place using the
+    /// same heuristic as `pruned_snapshot()`.  Emits a SystemMessage with the count
+    /// of pruned results.  Does not trigger session save.
+    Compact,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
