@@ -56,6 +56,7 @@ fn run_round(
         None,
         &mut requested_read_completed,
         None,
+        None,
         &mut |_| {},
     )
 }
@@ -263,6 +264,7 @@ fn lsp_definition_seeded_on_definition_lookup_with_real_search() {
         None,
         &mut requested_read_completed,
         None,
+        None,
         &mut |_| {},
     );
 
@@ -326,6 +328,7 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
         None,
         &mut requested_read_completed,
         None,
+        None,
         &mut |_| {},
     );
 
@@ -355,6 +358,7 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
         InvestigationMode::General,
         None,
         &mut requested_read_completed,
+        None,
         None,
         &mut |_| {},
     );
@@ -454,6 +458,7 @@ fn definition_lookup_truncated_no_declaration_dispatches_refinement() {
         None,
         &mut requested_read_completed,
         None,
+        None,
         &mut |_| {},
     );
 
@@ -501,5 +506,86 @@ fn search_code_with_nonexistent_scope_path_fails_gracefully() {
     assert!(
         results.contains("invalid tool input:"),
         "error must be an invalid-input tool error: {results}"
+    );
+}
+
+// 9. Slice 30.3: index hit on DefinitionLookup promotes candidate into
+// definition_site_candidates so it wins over usage-only rg results.
+#[test]
+fn index_hit_promotes_definition_candidate_on_definition_lookup() {
+    use crate::storage::index::types::{ExtractedSymbol, SymbolConfidence, SymbolKind};
+    use crate::storage::index::SymbolStore;
+    use crate::storage::session::SessionStore;
+
+    let (dir, root, registry) = temp_root();
+
+    // A file that has a usage but not a definition — rg will find it but
+    // it won't become a definition_site_candidate from record_search_results.
+    fs::write(dir.path().join("usage_30_3.rs"), "let _ = my_fn_30_3(x);\n").unwrap();
+
+    // Initialize schema via SessionStore (SymbolStore::open does not init schema).
+    let db_path = dir.path().join("thunk_30_3.db");
+    SessionStore::open(&db_path).unwrap();
+    let store = SymbolStore::open(&db_path).unwrap();
+    let root_str = root.path().to_string_lossy().to_string();
+    store
+        .upsert_symbols(
+            &root_str,
+            &[ExtractedSymbol {
+                name: "my_fn_30_3".to_string(),
+                kind: SymbolKind::Function,
+                file_path: "src/impl_30_3.rs".to_string(),
+                line: 5,
+                col: 1,
+                signature: "pub fn my_fn_30_3()".to_string(),
+                confidence: SymbolConfidence::High,
+            }],
+        )
+        .unwrap();
+
+    let mut last_call_key = None;
+    let mut search_budget = SearchBudget::new();
+    let mut investigation = InvestigationState::new();
+    let mut lsp = LspManager::new(&LspConfig::default(), root.path());
+    let mut reads_this_turn = HashSet::new();
+    let mut anchors = AnchorState::default();
+    let mut requested_read_completed = false;
+    let mut disallowed = 0usize;
+    let mut weak_query = 0usize;
+
+    run_tool_round(
+        &root,
+        &registry,
+        vec![ToolInput::SearchCode {
+            query: "my_fn_30_3".into(),
+            path: None,
+        }],
+        &mut last_call_key,
+        &mut search_budget,
+        &mut investigation,
+        &mut lsp,
+        &mut reads_this_turn,
+        &mut anchors,
+        ToolSurface::RetrievalFirst,
+        &mut disallowed,
+        &mut weak_query,
+        false,
+        true,
+        InvestigationMode::DefinitionLookup,
+        None,
+        &mut requested_read_completed,
+        None,
+        Some(&store),
+        &mut |_| {},
+    );
+
+    assert!(
+        investigation.search_produced_results(),
+        "rg must find usage_30_3.rs"
+    );
+    assert_eq!(
+        investigation.first_definition_candidate(),
+        Some("src/impl_30_3.rs"),
+        "index-promoted path must be the first definition candidate"
     );
 }

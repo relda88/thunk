@@ -697,6 +697,7 @@ impl Runtime {
             ctx.requested_read_path.as_deref(),
             &mut state.requested_read_completed,
             ctx.investigation_path_scope.as_deref(),
+            self.symbol_store.as_ref(),
             on_event,
         ) {
             ToolRoundOutcome::Completed {

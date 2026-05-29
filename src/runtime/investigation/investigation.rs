@@ -1959,6 +1959,17 @@ impl InvestigationState {
         self.definition_refinement_issued = true;
     }
 
+    /// Injects paths returned by the symbol index as definition-site candidates.
+    /// Only called on `DefinitionLookup` turns when the index returns hits.
+    /// Does not bypass read acceptance gates — promoted paths still go through
+    /// `record_read_result()` before evidence is counted.
+    pub(crate) fn inject_index_candidates(&mut self, paths: Vec<String>) {
+        for path in paths {
+            push_unique_path(&mut self.search_candidate_paths, &path);
+            self.definition_site_candidates.insert(path);
+        }
+    }
+
     pub fn evidence_summary(&self) -> Vec<String> {
         let mut items = Vec::new();
         for path in &self.useful_accepted_candidate_paths {

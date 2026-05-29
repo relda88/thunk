@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::storage::index::SymbolStore;
 use crate::tools::types::LspDefinitionOutput;
 use crate::tools::{
     ExecutionKind, PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
@@ -203,6 +204,7 @@ pub(crate) fn run_tool_round(
     requested_read_path: Option<&str>,
     requested_read_completed: &mut bool,
     investigation_path_scope: Option<&str>,
+    symbol_store: Option<&SymbolStore>,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> ToolRoundOutcome {
     let mut accumulated = String::new();
@@ -987,6 +989,39 @@ pub(crate) fn run_tool_round(
                         }
                     }
                     if matches!(investigation_mode, InvestigationMode::DefinitionLookup) {
+                        if let Some(store) = symbol_store {
+                            if let Some((query, _)) = &effective_search_input {
+                                let root_str = project_root.path().to_string_lossy().into_owned();
+                                match store.lookup_symbol(&root_str, query) {
+                                    Ok(records) if !records.is_empty() => {
+                                        let paths: Vec<String> = records
+                                            .into_iter()
+                                            .take(5)
+                                            .map(|r| r.file_path)
+                                            .collect();
+                                        let count = paths.len();
+                                        investigation.inject_index_candidates(paths);
+                                        trace_runtime_decision(
+                                            on_event,
+                                            "index_hit",
+                                            &[
+                                                ("query", query.clone()),
+                                                ("candidate_count", count.to_string()),
+                                            ],
+                                        );
+                                    }
+                                    Ok(_) | Err(_) => {
+                                        trace_runtime_decision(
+                                            on_event,
+                                            "index_miss",
+                                            &[("query", query.clone())],
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if matches!(investigation_mode, InvestigationMode::DefinitionLookup) {
                         if let ToolOutput::SearchResults(ref results) = output {
                             if results.truncated
                                 && investigation.first_definition_candidate().is_none()
@@ -1269,6 +1304,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         )
     }
@@ -1505,6 +1541,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         );
 
@@ -1535,6 +1572,7 @@ mod tests {
             InvestigationMode::General,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -1592,6 +1630,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         );
 
@@ -1616,6 +1655,7 @@ mod tests {
             InvestigationMode::General,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -1647,6 +1687,7 @@ mod tests {
             InvestigationMode::General,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -1708,6 +1749,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         );
 
@@ -1732,6 +1774,7 @@ mod tests {
             InvestigationMode::General,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -1761,6 +1804,7 @@ mod tests {
             InvestigationMode::General,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -1822,6 +1866,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             Some("sandbox/"),
+            None,
             &mut |_| {},
         );
 
@@ -1851,6 +1896,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             Some("sandbox/"),
+            None,
             &mut |_| {},
         );
 
@@ -1907,6 +1953,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         );
 
@@ -1943,6 +1990,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         );
 
@@ -1978,6 +2026,7 @@ mod tests {
             InvestigationMode::UsageLookup,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -2037,6 +2086,7 @@ mod tests {
             InvestigationMode::DefinitionLookup,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -2121,6 +2171,7 @@ mod tests {
             None,
             &mut requested_read_completed,
             None,
+            None,
             &mut |_| {},
         );
 
@@ -2179,6 +2230,7 @@ mod tests {
             InvestigationMode::General,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );
@@ -2241,6 +2293,7 @@ mod tests {
             InvestigationMode::DefinitionLookup,
             None,
             &mut requested_read_completed,
+            None,
             None,
             &mut |_| {},
         );

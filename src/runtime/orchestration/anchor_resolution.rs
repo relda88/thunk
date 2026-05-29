@@ -51,6 +51,7 @@ impl Runtime {
             None,
             &mut requested_read_completed,
             None,
+            self.symbol_store.as_ref(),
             on_event,
         ) {
             ToolRoundOutcome::Completed { results, .. } => {
