@@ -65,6 +65,13 @@ pub struct AppState {
     pub(crate) dirty_sections: DirtySections,
     /// True while a WorkerCmd is in flight and we're waiting for the terminal WorkerReply.
     pub(crate) is_busy: bool,
+    pub(crate) input_history: Vec<String>,
+    pub(crate) history_cursor: Option<usize>,
+    pub(crate) history_draft: Option<String>,
+    pub(crate) reverse_search_active: bool,
+    pub(crate) reverse_search_query: String,
+    pub(crate) reverse_search_selection: usize,
+    pub(crate) reverse_search_draft: Option<String>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -100,6 +107,13 @@ impl AppState {
             context_pct: None,
             dirty_sections: DirtySections::ALL,
             is_busy: false,
+            input_history: Vec::new(),
+            history_cursor: None,
+            history_draft: None,
+            reverse_search_active: false,
+            reverse_search_query: String::new(),
+            reverse_search_selection: 0,
+            reverse_search_draft: None,
             welcome_message: welcome,
         }
     }
@@ -226,6 +240,10 @@ impl AppState {
 
         let submitted = std::mem::take(&mut self.input);
         self.cursor = 0;
+        if !submitted.starts_with('/') {
+            self.input_history.push(submitted.clone());
+        }
+        self.exit_reverse_search();
         self.mark_dirty(DirtySections::INPUT);
         Some(submitted)
     }

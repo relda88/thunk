@@ -228,7 +228,17 @@ fn handle_key_event(
         | (KeyCode::Char('q'), KeyModifiers::CONTROL) => {
             state.should_quit = true;
         }
-        (KeyCode::Enter, KeyModifiers::SHIFT) => state.insert_newline(),
+        (KeyCode::Enter, KeyModifiers::ALT) => state.insert_newline(),
+        (KeyCode::Esc, _) if state.is_reverse_search_active() => state.cancel_reverse_search(),
+        (KeyCode::Enter, _) if state.is_reverse_search_active() => state.accept_reverse_search(),
+        (KeyCode::Backspace, _) if state.is_reverse_search_active() => {
+            state.reverse_search_backspace()
+        }
+        (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT)
+            if state.is_reverse_search_active() =>
+        {
+            state.reverse_search_push_char(c)
+        }
         (KeyCode::Enter, _) => {
             if let Some(input) = state.submit_input() {
                 match commands::parse(&input) {
@@ -262,12 +272,15 @@ fn handle_key_event(
                 state.set_status("no prompt captured yet");
             }
         }
+        (KeyCode::Up, KeyModifiers::ALT) => state.recall_previous_input(),
         (KeyCode::Up, _) => state.scroll_up(1),
+        (KeyCode::Down, KeyModifiers::ALT) => state.recall_next_input(),
         (KeyCode::Down, _) => state.scroll_down(1),
         (KeyCode::PageUp, _) => state.scroll_up(10),
         (KeyCode::PageDown, _) => state.scroll_down(10),
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => state.toggle_file_expand(),
         (KeyCode::Char('w'), KeyModifiers::CONTROL) => state.delete_word_before(),
+        (KeyCode::Char('r'), KeyModifiers::CONTROL) => state.reverse_search_cycle(),
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }

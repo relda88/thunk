@@ -113,10 +113,12 @@ impl Renderer {
             .input_content_rows(w as usize)
             .max(1)
             .min(MAX_INPUT_ROWS) as u16;
+        let overlay_rows: u16 = if state.reverse_search_view().is_some() { 1 } else { 0 };
+        let effective_rows = input_rows + overlay_rows;
 
-        // Rows 2..h-input_rows-2: transcript
-        if h > input_rows + 3 {
-            let transcript_height = h.saturating_sub(input_rows + 3) as usize;
+        // Rows 2..h-effective_rows-2: transcript
+        if h > effective_rows + 3 {
+            let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
             let avail_w = w.saturating_sub(1) as usize;
 
             let mut lines: Vec<(String, MessageKind)> = Vec::new();
@@ -152,7 +154,7 @@ impl Renderer {
             let end = lines.len().saturating_sub(offset);
             let start = end.saturating_sub(transcript_height);
             let visible = &lines[start..end];
-            let cap = h.saturating_sub(input_rows + 1);
+            let cap = h.saturating_sub(effective_rows + 1);
 
             for (idx, (line, kind)) in visible.iter().enumerate() {
                 let row = 2 + idx as u16;
@@ -181,16 +183,16 @@ impl Renderer {
             }
         }
 
-        // Row h-input_rows-2: horizontal rule before input
-        if h > input_rows + 2 {
-            let row = h.saturating_sub(input_rows + 2);
+        // Row h-effective_rows-2: horizontal rule before input
+        if h > effective_rows + 2 {
+            let row = h.saturating_sub(effective_rows + 2);
             let rule = "─".repeat(w as usize);
             self.paint(cur, 0, row, &rule, w, base);
         }
 
-        // Rows h-input_rows-1..h-1: input area
-        if h > input_rows + 1 {
-            let first_row = h.saturating_sub(input_rows + 1);
+        // Rows h-effective_rows-1..h-overlay_rows-2: input area
+        if h > effective_rows + 1 {
+            let first_row = h.saturating_sub(effective_rows + 1);
             let prefix = "> ";
             let prefix_w = prefix.len() as u16;
             let avail = w.saturating_sub(prefix_w) as usize;
@@ -204,6 +206,16 @@ impl Renderer {
                     self.paint(cur, 0, row, "  ", prefix_w, bold);
                 }
                 self.paint(cur, prefix_w, row, line, w.saturating_sub(prefix_w), base);
+            }
+        }
+
+        // Reverse-search overlay row
+        if overlay_rows > 0 {
+            if let Some((query, matched)) = state.reverse_search_view() {
+                let row = h.saturating_sub(overlay_rows + 1);
+                let text = format!("bkwd-search: {}  {}", query, matched);
+                let display: String = text.chars().take(w as usize).collect();
+                self.paint(cur, 0, row, &display, w, base);
             }
         }
 
@@ -242,13 +254,13 @@ impl Renderer {
         }
 
         // Input cursor position
-        let (cx, cy) = if h > input_rows + 1 {
+        let (cx, cy) = if h > effective_rows + 1 {
             let prefix_len = 2usize;
             let avail = w.saturating_sub(prefix_len as u16) as usize;
             let (_, cursor_row, cursor_col) =
                 state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
             let x = (prefix_len + cursor_col).min(w as usize) as u16;
-            let y = h.saturating_sub(input_rows + 1) + cursor_row as u16;
+            let y = h.saturating_sub(effective_rows + 1) + cursor_row as u16;
             (x, y)
         } else {
             (0, 0)
