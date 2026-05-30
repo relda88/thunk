@@ -21,6 +21,8 @@ const FG_GREEN: Rgb = Rgb::new(80, 200, 80);
 const FG_YELLOW: Rgb = Rgb::new(220, 180, 80);
 const FG_RED: Rgb = Rgb::new(220, 80, 80);
 
+const MAX_INPUT_ROWS: usize = 6;
+
 pub(crate) struct RenderStats {
     pub(crate) changed_cells: usize,
 }
@@ -107,9 +109,14 @@ impl Renderer {
             self.paint(cur, 0, 1, &rule, w, base);
         }
 
-        // Rows 2..h-3: transcript
-        if h > 4 {
-            let transcript_height = h.saturating_sub(4) as usize;
+        let input_rows = state
+            .input_content_rows(w as usize)
+            .max(1)
+            .min(MAX_INPUT_ROWS) as u16;
+
+        // Rows 2..h-input_rows-2: transcript
+        if h > input_rows + 3 {
+            let transcript_height = h.saturating_sub(input_rows + 3) as usize;
             let avail_w = w.saturating_sub(1) as usize;
 
             let mut lines: Vec<(String, MessageKind)> = Vec::new();
@@ -145,7 +152,7 @@ impl Renderer {
             let end = lines.len().saturating_sub(offset);
             let start = end.saturating_sub(transcript_height);
             let visible = &lines[start..end];
-            let cap = h.saturating_sub(2);
+            let cap = h.saturating_sub(input_rows + 1);
 
             for (idx, (line, kind)) in visible.iter().enumerate() {
                 let row = 2 + idx as u16;
@@ -174,22 +181,30 @@ impl Renderer {
             }
         }
 
-        // Row h-3: horizontal rule before input
-        if h > 3 {
-            let row = h.saturating_sub(3);
+        // Row h-input_rows-2: horizontal rule before input
+        if h > input_rows + 2 {
+            let row = h.saturating_sub(input_rows + 2);
             let rule = "─".repeat(w as usize);
             self.paint(cur, 0, row, &rule, w, base);
         }
 
-        // Row h-2: input line
-        if h > 2 {
-            let row = h.saturating_sub(2);
+        // Rows h-input_rows-1..h-1: input area
+        if h > input_rows + 1 {
+            let first_row = h.saturating_sub(input_rows + 1);
             let prefix = "> ";
             let prefix_w = prefix.len() as u16;
             let avail = w.saturating_sub(prefix_w) as usize;
-            let vis = visible_input_slice(&state.input, state.cursor, avail.max(1));
-            self.paint(cur, 0, row, prefix, prefix_w, bold);
-            self.paint(cur, prefix_w, row, &vis, w.saturating_sub(prefix_w), base);
+            let (visible_lines, _, _) =
+                state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
+            for (i, line) in visible_lines.iter().enumerate() {
+                let row = first_row + i as u16;
+                if i == 0 {
+                    self.paint(cur, 0, row, prefix, prefix_w, bold);
+                } else {
+                    self.paint(cur, 0, row, "  ", prefix_w, bold);
+                }
+                self.paint(cur, prefix_w, row, line, w.saturating_sub(prefix_w), base);
+            }
         }
 
         // Row h-1: status bar
@@ -227,16 +242,14 @@ impl Renderer {
         }
 
         // Input cursor position
-        let (cx, cy) = if h > 2 {
+        let (cx, cy) = if h > input_rows + 1 {
             let prefix_len = 2usize;
             let avail = w.saturating_sub(prefix_len as u16) as usize;
-            let cursor_chars = state.input[..state.cursor].chars().count();
-            let vis = visible_input_slice(&state.input, state.cursor, avail.max(1));
-            let vis_chars = vis.chars().count();
-            let start = cursor_chars.saturating_sub(avail.saturating_sub(1));
-            let rel = cursor_chars.saturating_sub(start).min(vis_chars);
-            let x = (prefix_len + rel).min(w as usize) as u16;
-            (x, h.saturating_sub(2))
+            let (_, cursor_row, cursor_col) =
+                state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
+            let x = (prefix_len + cursor_col).min(w as usize) as u16;
+            let y = h.saturating_sub(input_rows + 1) + cursor_row as u16;
+            (x, y)
         } else {
             (0, 0)
         };
@@ -298,17 +311,6 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn visible_input_slice(input: &str, cursor: usize, width: usize) -> String {
-    let chars: Vec<char> = input.chars().collect();
-    if chars.len() <= width {
-        return input.to_string();
-    }
-    let cursor_chars = input[..cursor].chars().count();
-    let start = cursor_chars.saturating_sub(width.saturating_sub(1));
-    chars[start..(start + width).min(chars.len())]
-        .iter()
-        .collect()
-}
 
 #[cfg(test)]
 mod tests {

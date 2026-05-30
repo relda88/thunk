@@ -171,7 +171,7 @@ pub(crate) fn run_app(
                 Event::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
                     handle_key_event(&mut state, &cmd_tx, config, key)?
                 }
-                Event::Paste(text) => state.insert_str(&text),
+                Event::Paste(text) => state.insert_str(&AppState::normalized_paste(&text)),
                 Event::Resize(w, h) => {
                     renderer.resize(w, h);
                     state.mark_dirty(DirtySections::ALL);
@@ -228,6 +228,7 @@ fn handle_key_event(
         | (KeyCode::Char('q'), KeyModifiers::CONTROL) => {
             state.should_quit = true;
         }
+        (KeyCode::Enter, KeyModifiers::SHIFT) => state.insert_newline(),
         (KeyCode::Enter, _) => {
             if let Some(input) = state.submit_input() {
                 match commands::parse(&input) {
@@ -246,6 +247,7 @@ fn handle_key_event(
                 }
             }
         }
+        (KeyCode::Backspace, KeyModifiers::ALT) => state.delete_word_before(),
         (KeyCode::Backspace, _) => state.delete_char_before(),
         (KeyCode::Left, _) => state.cursor_left(),
         (KeyCode::Right, _) => state.cursor_right(),
@@ -265,6 +267,7 @@ fn handle_key_event(
         (KeyCode::PageUp, _) => state.scroll_up(10),
         (KeyCode::PageDown, _) => state.scroll_down(10),
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => state.toggle_file_expand(),
+        (KeyCode::Char('w'), KeyModifiers::CONTROL) => state.delete_word_before(),
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }
