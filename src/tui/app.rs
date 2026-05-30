@@ -263,7 +263,7 @@ fn handle_key_event(
         (KeyCode::Right, _) => state.cursor_right(),
         (KeyCode::Home, _) => state.cursor_home(),
         (KeyCode::End, _) => state.cursor_end(),
-        (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+        (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             if let Some(prompt) = &state.last_prompt {
                 let path = std::env::temp_dir().join("thunk_last_prompt.txt");
                 dump_prompt_to_file(&path, prompt);
@@ -272,15 +272,18 @@ fn handle_key_event(
                 state.set_status("no prompt captured yet");
             }
         }
-        (KeyCode::Up, KeyModifiers::ALT) => state.recall_previous_input(),
+        (KeyCode::Char('p'), KeyModifiers::CONTROL) => state.recall_previous_input(),
+        (KeyCode::Char('n'), KeyModifiers::CONTROL) => state.recall_next_input(),
         (KeyCode::Up, _) => state.scroll_up(1),
-        (KeyCode::Down, KeyModifiers::ALT) => state.recall_next_input(),
         (KeyCode::Down, _) => state.scroll_down(1),
         (KeyCode::PageUp, _) => state.scroll_up(10),
         (KeyCode::PageDown, _) => state.scroll_down(10),
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => state.toggle_file_expand(),
         (KeyCode::Char('w'), KeyModifiers::CONTROL) => state.delete_word_before(),
         (KeyCode::Char('r'), KeyModifiers::CONTROL) => state.reverse_search_cycle(),
+        (KeyCode::Char('['), KeyModifiers::ALT) => state.focus_prev_collapsible(),
+        (KeyCode::Char(']'), KeyModifiers::ALT) => state.focus_next_collapsible(),
+        (KeyCode::Char('o'), KeyModifiers::ALT) => state.toggle_collapse_focused(),
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }
@@ -609,14 +612,14 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         RuntimeEvent::AssistantMessageChunk(chunk) => state.append_assistant_chunk(&chunk),
         RuntimeEvent::AssistantMessageFinished => {}
         RuntimeEvent::ToolCallStarted { name } => {
-            state.add_tool_message(format!("tool: {name}"));
+            state.add_collapsible_tool_message(format!("tool: {name}"));
         }
         RuntimeEvent::ToolCallFinished { name, summary } => match summary {
             // FileReadFinished fires for every successful read_file and adds the
             // canonical "read {path} ({n} lines) — Ctrl+O to expand" message.
             // Suppress the compact ToolCallFinished duplicate to keep a single summary.
             Some(_) if name == "read_file" => {}
-            Some(s) => state.add_tool_message(s),
+            Some(s) => state.add_collapsible_tool_message(s),
             None => state.add_tool_message(format!("tool failed: {name}")),
         },
         RuntimeEvent::AnswerReady(source) => {
@@ -657,7 +660,7 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             state.set_status("awaiting approval");
         }
         RuntimeEvent::InfoMessage(text) => {
-            state.add_system_message(summarize_command_output(&text))
+            state.add_collapsible_tool_message(summarize_command_output(&text))
         }
         RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
         RuntimeEvent::SystemMessage(text) => state.add_system_message(text),

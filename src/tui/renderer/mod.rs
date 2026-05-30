@@ -113,7 +113,11 @@ impl Renderer {
             .input_content_rows(w as usize)
             .max(1)
             .min(MAX_INPUT_ROWS) as u16;
-        let overlay_rows: u16 = if state.reverse_search_view().is_some() { 1 } else { 0 };
+        let overlay_rows: u16 = if state.reverse_search_view().is_some() {
+            1
+        } else {
+            0
+        };
         let effective_rows = input_rows + overlay_rows;
 
         // Rows 2..h-effective_rows-2: transcript
@@ -121,7 +125,8 @@ impl Renderer {
             let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
             let avail_w = w.saturating_sub(1) as usize;
 
-            let mut lines: Vec<(String, MessageKind)> = Vec::new();
+            // Each entry: (display_text, kind, source_message_index).
+            let mut lines: Vec<(String, MessageKind, Option<usize>)> = Vec::new();
             for (i, msg) in state.messages.iter().enumerate() {
                 if !state.expanded_file_read {
                     if let Some(idx) = state.last_file_read_index {
@@ -133,6 +138,25 @@ impl Renderer {
                 let is_expanded = state.expanded_file_read
                     && state.last_file_read_index.map_or(false, |idx| i == idx)
                     && msg.role == Role::Assistant;
+
+                if msg.is_collapsible && state.collapsed_message_indices.contains(&i) {
+                    // Collapsed: emit one summary line with a toggle affordance.
+                    let summary: String = msg.content.chars().take(60).collect();
+                    let ellipsis = if msg.content.chars().count() > 60 {
+                        "…"
+                    } else {
+                        ""
+                    };
+                    let focused = state
+                        .focused_collapsible_idx
+                        .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
+                        == Some(i);
+                    let indicator = if focused { "▶[+] " } else { " [+] " };
+                    lines.push((format!("{indicator}{summary}{ellipsis}"), msg.kind, Some(i)));
+                    lines.push((String::new(), msg.kind, Some(i)));
+                    continue;
+                }
+
                 let prefix = if is_expanded {
                     ""
                 } else {
@@ -142,11 +166,27 @@ impl Renderer {
                         Role::Assistant => "assistant: ",
                     }
                 };
-                let text = format!("{prefix}{}", msg.content);
+
+                // Focus indicator for collapsible messages that are expanded.
+                let focus_prefix = if msg.is_collapsible {
+                    let focused = state
+                        .focused_collapsible_idx
+                        .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
+                        == Some(i);
+                    if focused {
+                        "▶ "
+                    } else {
+                        "  "
+                    }
+                } else {
+                    ""
+                };
+
+                let text = format!("{focus_prefix}{prefix}{}", msg.content);
                 for line in wrap_text(&text, avail_w.max(8)) {
-                    lines.push((line, msg.kind));
+                    lines.push((line, msg.kind, Some(i)));
                 }
-                lines.push((String::new(), msg.kind));
+                lines.push((String::new(), msg.kind, Some(i)));
             }
 
             let max_scroll = lines.len().saturating_sub(transcript_height);
@@ -156,7 +196,7 @@ impl Renderer {
             let visible = &lines[start..end];
             let cap = h.saturating_sub(effective_rows + 1);
 
-            for (idx, (line, kind)) in visible.iter().enumerate() {
+            for (idx, (line, kind, _msg_idx)) in visible.iter().enumerate() {
                 let row = 2 + idx as u16;
                 if row >= cap {
                     break;
@@ -196,8 +236,7 @@ impl Renderer {
             let prefix = "> ";
             let prefix_w = prefix.len() as u16;
             let avail = w.saturating_sub(prefix_w) as usize;
-            let (visible_lines, _, _) =
-                state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
+            let (visible_lines, _, _) = state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
             for (i, line) in visible_lines.iter().enumerate() {
                 let row = first_row + i as u16;
                 if i == 0 {
@@ -322,7 +361,6 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     }
     lines
 }
-
 
 #[cfg(test)]
 mod tests {

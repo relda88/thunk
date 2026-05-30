@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::app::config::Config;
 use crate::app::paths::AppPaths;
 
@@ -44,6 +46,7 @@ pub struct ChatMessage {
     pub role: Role,
     pub content: String,
     pub kind: MessageKind,
+    pub is_collapsible: bool,
 }
 
 /// Main application state struct, holding the app name, input buffer, cursor position, message history, status, and quit flag
@@ -72,6 +75,9 @@ pub struct AppState {
     pub(crate) reverse_search_query: String,
     pub(crate) reverse_search_selection: usize,
     pub(crate) reverse_search_draft: Option<String>,
+    pub(crate) collapsed_message_indices: HashSet<usize>,
+    pub(crate) collapsible_message_indices: Vec<usize>,
+    pub(crate) focused_collapsible_idx: Option<usize>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -89,6 +95,7 @@ impl AppState {
             role: Role::System,
             content: welcome.clone(),
             kind: MessageKind::Normal,
+            is_collapsible: false,
         }];
 
         Self {
@@ -114,6 +121,9 @@ impl AppState {
             reverse_search_query: String::new(),
             reverse_search_selection: 0,
             reverse_search_draft: None,
+            collapsed_message_indices: HashSet::new(),
+            collapsible_message_indices: Vec::new(),
+            focused_collapsible_idx: None,
             welcome_message: welcome,
         }
     }
@@ -124,6 +134,7 @@ impl AppState {
             role: Role::System,
             content: content.into(),
             kind: MessageKind::Dimmed,
+            is_collapsible: false,
         });
         self.reset_scroll();
     }
@@ -134,6 +145,7 @@ impl AppState {
             role: Role::User,
             content: content.into(),
             kind: MessageKind::Normal,
+            is_collapsible: false,
         });
         self.reset_scroll();
     }
@@ -144,6 +156,7 @@ impl AppState {
             role: Role::Assistant,
             content: content.into(),
             kind: MessageKind::Normal,
+            is_collapsible: false,
         });
         self.reset_scroll();
     }
@@ -172,8 +185,21 @@ impl AppState {
             role: Role::System,
             content: content.into(),
             kind: MessageKind::Dimmed,
+            is_collapsible: false,
         });
         self.reset_scroll();
+    }
+
+    /// Adds a collapsible tool-related notification to the transcript.
+    pub fn add_collapsible_tool_message(&mut self, content: impl Into<String>) {
+        self.messages.push(ChatMessage {
+            role: Role::System,
+            content: content.into(),
+            kind: MessageKind::Dimmed,
+            is_collapsible: true,
+        });
+        self.reset_scroll();
+        self.tag_last_message_collapsible();
     }
 
     pub fn add_alert_message(&mut self, content: impl Into<String>) {
@@ -181,6 +207,7 @@ impl AppState {
             role: Role::System,
             content: content.into(),
             kind: MessageKind::Alert,
+            is_collapsible: false,
         });
         self.reset_scroll();
     }
@@ -190,6 +217,7 @@ impl AppState {
             role: Role::System,
             content: content.into(),
             kind: MessageKind::Error,
+            is_collapsible: false,
         });
         self.reset_scroll();
     }
@@ -202,7 +230,11 @@ impl AppState {
             role: Role::System,
             content: self.welcome_message.clone(),
             kind: MessageKind::Normal,
+            is_collapsible: false,
         });
+        self.collapsed_message_indices.clear();
+        self.collapsible_message_indices.clear();
+        self.focused_collapsible_idx = None;
         self.reset_scroll();
     }
 
@@ -259,6 +291,55 @@ impl AppState {
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 
+    /// If the last message is collapsible, records its index in collapsible_message_indices.
+    pub(crate) fn tag_last_message_collapsible(&mut self) {
+        let idx = self.messages.len().saturating_sub(1);
+        if self.messages.get(idx).map_or(false, |m| m.is_collapsible) {
+            self.collapsible_message_indices.push(idx);
+        }
+    }
+
+    /// Toggles collapsed state on the focused collapsible message.
+    pub(crate) fn toggle_collapse_focused(&mut self) {
+        let Some(list_pos) = self.focused_collapsible_idx else {
+            return;
+        };
+        let Some(&msg_idx) = self.collapsible_message_indices.get(list_pos) else {
+            return;
+        };
+        if self.collapsed_message_indices.contains(&msg_idx) {
+            self.collapsed_message_indices.remove(&msg_idx);
+        } else {
+            self.collapsed_message_indices.insert(msg_idx);
+        }
+        self.mark_dirty(DirtySections::TRANSCRIPT);
+    }
+
+    /// Advances focus to the next collapsible message (wraps around).
+    pub(crate) fn focus_next_collapsible(&mut self) {
+        if self.collapsible_message_indices.is_empty() {
+            return;
+        }
+        self.focused_collapsible_idx = Some(match self.focused_collapsible_idx {
+            None => 0,
+            Some(i) => (i + 1) % self.collapsible_message_indices.len(),
+        });
+        self.mark_dirty(DirtySections::TRANSCRIPT);
+    }
+
+    /// Retreats focus to the previous collapsible message (wraps around).
+    pub(crate) fn focus_prev_collapsible(&mut self) {
+        if self.collapsible_message_indices.is_empty() {
+            return;
+        }
+        self.focused_collapsible_idx = Some(match self.focused_collapsible_idx {
+            None => self.collapsible_message_indices.len() - 1,
+            Some(0) => self.collapsible_message_indices.len() - 1,
+            Some(i) => i - 1,
+        });
+        self.mark_dirty(DirtySections::TRANSCRIPT);
+    }
+
     pub(crate) fn mark_dirty(&mut self, s: DirtySections) {
         self.dirty_sections |= s;
     }
@@ -274,5 +355,136 @@ impl AppState {
     pub(crate) fn set_context_pct(&mut self, pct: u8) {
         self.context_pct = Some(pct);
         self.mark_dirty(DirtySections::STATUS);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::app::paths::AppPaths;
+    use crate::core::config::Config;
+
+    use super::AppState;
+
+    fn make_state() -> AppState {
+        let config = Config::default();
+        let paths = AppPaths {
+            root_dir: PathBuf::from("/tmp"),
+            project_root: PathBuf::from("/tmp"),
+            config_file: PathBuf::from("/tmp/config.toml"),
+            data_dir: PathBuf::from("/tmp/data"),
+            logs_dir: PathBuf::from("/tmp/logs"),
+            session_db: PathBuf::from("/tmp/data/sessions.db"),
+        };
+        AppState::new(&config, &paths)
+    }
+
+    #[test]
+    fn toggle_collapse_focused_with_no_focus_does_nothing() {
+        let mut state = make_state();
+        state.add_collapsible_tool_message("tool output");
+        assert!(state.focused_collapsible_idx.is_none());
+        state.toggle_collapse_focused();
+        assert!(
+            state.collapsed_message_indices.is_empty(),
+            "no collapse when no focus"
+        );
+    }
+
+    #[test]
+    fn focus_next_collapsible_cycles_correctly() {
+        let mut state = make_state();
+        state.add_collapsible_tool_message("a");
+        state.add_collapsible_tool_message("b");
+        state.add_collapsible_tool_message("c");
+        assert_eq!(state.collapsible_message_indices.len(), 3);
+
+        state.focus_next_collapsible();
+        assert_eq!(state.focused_collapsible_idx, Some(0));
+
+        state.focus_next_collapsible();
+        assert_eq!(state.focused_collapsible_idx, Some(1));
+
+        state.focus_next_collapsible();
+        assert_eq!(state.focused_collapsible_idx, Some(2));
+
+        // Wraps back to 0.
+        state.focus_next_collapsible();
+        assert_eq!(state.focused_collapsible_idx, Some(0));
+    }
+
+    #[test]
+    fn focus_prev_collapsible_cycles_correctly() {
+        let mut state = make_state();
+        state.add_collapsible_tool_message("a");
+        state.add_collapsible_tool_message("b");
+        assert_eq!(state.collapsible_message_indices.len(), 2);
+
+        state.focus_prev_collapsible();
+        // Starting from None, wraps to last index.
+        assert_eq!(state.focused_collapsible_idx, Some(1));
+
+        state.focus_prev_collapsible();
+        assert_eq!(state.focused_collapsible_idx, Some(0));
+
+        // Wraps back to last.
+        state.focus_prev_collapsible();
+        assert_eq!(state.focused_collapsible_idx, Some(1));
+    }
+
+    #[test]
+    fn clear_messages_resets_collapse_state() {
+        let mut state = make_state();
+        state.add_collapsible_tool_message("tool output");
+        state.focus_next_collapsible();
+        state.toggle_collapse_focused();
+        assert!(!state.collapsed_message_indices.is_empty());
+        assert!(!state.collapsible_message_indices.is_empty());
+        assert!(state.focused_collapsible_idx.is_some());
+
+        state.clear_messages();
+
+        assert!(
+            state.collapsed_message_indices.is_empty(),
+            "collapse set must reset"
+        );
+        assert!(
+            state.collapsible_message_indices.is_empty(),
+            "collapsible list must reset"
+        );
+        assert!(state.focused_collapsible_idx.is_none(), "focus must reset");
+    }
+
+    #[test]
+    fn tag_last_message_collapsible_does_not_tag_non_collapsible() {
+        let mut state = make_state();
+        state.add_system_message("system info");
+        state.add_user_message("user prompt");
+        // These calls do NOT go through add_collapsible_tool_message, so tag is never called.
+        assert!(
+            state.collapsible_message_indices.is_empty(),
+            "non-collapsible messages must not be tagged"
+        );
+    }
+
+    #[test]
+    fn toggle_collapse_focused_collapses_then_expands() {
+        let mut state = make_state();
+        state.add_collapsible_tool_message("tool output");
+        state.focus_next_collapsible();
+        let msg_idx = state.collapsible_message_indices[0];
+
+        state.toggle_collapse_focused();
+        assert!(
+            state.collapsed_message_indices.contains(&msg_idx),
+            "should be collapsed"
+        );
+
+        state.toggle_collapse_focused();
+        assert!(
+            !state.collapsed_message_indices.contains(&msg_idx),
+            "should be expanded again"
+        );
     }
 }

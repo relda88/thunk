@@ -342,7 +342,11 @@ mod tests {
         state.input = "/reject".into();
         state.cursor = state.input.len();
         let _ = state.submit_input();
-        assert_eq!(state.input_history, vec!["hello world"], "/reject must not push to history");
+        assert_eq!(
+            state.input_history,
+            vec!["hello world"],
+            "/reject must not push to history"
+        );
     }
 
     #[test]
@@ -383,7 +387,10 @@ mod tests {
 
         state.cancel_reverse_search();
         assert!(!state.reverse_search_active);
-        assert_eq!(state.input, "my draft", "original draft must be restored exactly");
+        assert_eq!(
+            state.input, "my draft",
+            "original draft must be restored exactly"
+        );
     }
 }
 
