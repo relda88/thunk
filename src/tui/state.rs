@@ -63,6 +63,8 @@ pub struct AppState {
     /// Approximate context window usage (0–100). None when context window size is unknown.
     pub context_pct: Option<u8>,
     pub(crate) dirty_sections: DirtySections,
+    /// True while a WorkerCmd is in flight and we're waiting for the terminal WorkerReply.
+    pub(crate) is_busy: bool,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -97,6 +99,7 @@ impl AppState {
             last_file_read_index: None,
             context_pct: None,
             dirty_sections: DirtySections::ALL,
+            is_busy: false,
             welcome_message: welcome,
         }
     }
