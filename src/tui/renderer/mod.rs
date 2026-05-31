@@ -77,7 +77,7 @@ impl Renderer {
 
     pub(crate) fn render<W: Write>(
         &mut self,
-        state: &AppState,
+        state: &mut AppState,
         out: &mut W,
         _dirty: DirtySections,
     ) -> io::Result<RenderStats> {
@@ -167,7 +167,8 @@ impl Renderer {
                     }
                 };
 
-                // Focus indicator for collapsible messages that are expanded.
+                // Two-char prefix reserved for all collapsible messages so wrap
+                // geometry is stable when focus moves. Focused = "▶ ", unfocused = "  ".
                 let focus_prefix = if msg.is_collapsible {
                     let focused = state
                         .focused_collapsible_idx
@@ -190,6 +191,21 @@ impl Renderer {
             }
 
             let max_scroll = lines.len().saturating_sub(transcript_height);
+
+            // Scroll the newly focused collapsible into the upper third of the
+            // viewport. Consumed once per focus-cycle key press.
+            if let Some(msg_idx) = state.scroll_to_message_idx.take() {
+                if let Some(target_line) =
+                    lines.iter().position(|(_, _, src)| *src == Some(msg_idx))
+                {
+                    let upper_third = transcript_height / 3;
+                    // desired_start is where we want the viewport to begin.
+                    let desired_start = target_line.saturating_sub(upper_third);
+                    // offset counts lines from the bottom; invert desired_start.
+                    state.scroll_offset = max_scroll.saturating_sub(desired_start).min(max_scroll);
+                }
+            }
+
             let offset = state.scroll_offset.min(max_scroll);
             let end = lines.len().saturating_sub(offset);
             let start = end.saturating_sub(transcript_height);
@@ -392,15 +408,15 @@ mod tests {
 
     #[test]
     fn second_render_of_unchanged_state_writes_zero_cells() {
-        let (_dir, state) = make_state();
+        let (_dir, mut state) = make_state();
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
         renderer
-            .render(&state, &mut out, DirtySections::ALL)
+            .render(&mut state, &mut out, DirtySections::ALL)
             .unwrap();
         out.clear();
         let stats = renderer
-            .render(&state, &mut out, DirtySections::ALL)
+            .render(&mut state, &mut out, DirtySections::ALL)
             .unwrap();
         assert_eq!(
             stats.changed_cells, 0,

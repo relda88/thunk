@@ -78,6 +78,9 @@ pub struct AppState {
     pub(crate) collapsed_message_indices: HashSet<usize>,
     pub(crate) collapsible_message_indices: Vec<usize>,
     pub(crate) focused_collapsible_idx: Option<usize>,
+    /// Set by focus_next/prev_collapsible; consumed by the renderer to scroll
+    /// the newly focused message into the upper third of the viewport.
+    pub(crate) scroll_to_message_idx: Option<usize>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -124,6 +127,7 @@ impl AppState {
             collapsed_message_indices: HashSet::new(),
             collapsible_message_indices: Vec::new(),
             focused_collapsible_idx: None,
+            scroll_to_message_idx: None,
             welcome_message: welcome,
         }
     }
@@ -235,6 +239,7 @@ impl AppState {
         self.collapsed_message_indices.clear();
         self.collapsible_message_indices.clear();
         self.focused_collapsible_idx = None;
+        self.scroll_to_message_idx = None;
         self.reset_scroll();
     }
 
@@ -320,10 +325,12 @@ impl AppState {
         if self.collapsible_message_indices.is_empty() {
             return;
         }
-        self.focused_collapsible_idx = Some(match self.focused_collapsible_idx {
+        let new_pos = match self.focused_collapsible_idx {
             None => 0,
             Some(i) => (i + 1) % self.collapsible_message_indices.len(),
-        });
+        };
+        self.focused_collapsible_idx = Some(new_pos);
+        self.scroll_to_message_idx = Some(self.collapsible_message_indices[new_pos]);
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 
@@ -332,11 +339,13 @@ impl AppState {
         if self.collapsible_message_indices.is_empty() {
             return;
         }
-        self.focused_collapsible_idx = Some(match self.focused_collapsible_idx {
+        let new_pos = match self.focused_collapsible_idx {
             None => self.collapsible_message_indices.len() - 1,
             Some(0) => self.collapsible_message_indices.len() - 1,
             Some(i) => i - 1,
-        });
+        };
+        self.focused_collapsible_idx = Some(new_pos);
+        self.scroll_to_message_idx = Some(self.collapsible_message_indices[new_pos]);
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 

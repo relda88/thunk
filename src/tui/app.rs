@@ -157,7 +157,8 @@ pub(crate) fn run_app(
 
         if scheduler.should_draw(&state) {
             let t = Instant::now();
-            renderer.render(&state, stdout, state.dirty_sections)?;
+            let dirty = state.dirty_sections;
+            renderer.render(&mut state, stdout, dirty)?;
             state.clear_dirty_sections();
             scheduler.record_draw(t.elapsed().as_millis() as u64);
         }
