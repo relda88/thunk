@@ -52,6 +52,7 @@ pub(crate) struct PendingApprovalState {
     pub(crate) summary: String,
     pub(crate) risk: ApprovalRisk,
     pub(crate) evidence: Vec<String>,
+    pub(crate) preview: Vec<String>,
 }
 
 /// Represents a chat message with a role (system, user, assistant) and content
@@ -524,6 +525,7 @@ mod tests {
             summary: "run tests".into(),
             risk: super::ApprovalRisk::High,
             evidence: vec![],
+            preview: vec![],
         });
         assert!(state.pending_approval.is_some());
 

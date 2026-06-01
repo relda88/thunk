@@ -639,6 +639,35 @@ fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
     let _ = std::fs::write(path, prompt);
 }
 
+fn decode_approval_preview(tool_name: &str, payload: &str) -> Vec<String> {
+    match tool_name {
+        "edit_file" => {
+            let parts: Vec<&str> = payload.splitn(5, '\x00').collect();
+            if parts.len() < 5 {
+                return vec![];
+            }
+            let search_lines = parts[3].lines().map(|l| format!("- {l}"));
+            let replace_lines = parts[4].lines().map(|l| format!("+ {l}"));
+            search_lines.chain(replace_lines).take(4).collect()
+        }
+        "shell" => {
+            if payload.is_empty() {
+                vec![]
+            } else {
+                vec![payload.to_string()]
+            }
+        }
+        "write_file" => {
+            let parts: Vec<&str> = payload.splitn(4, '\x00').collect();
+            if parts.len() < 4 {
+                return vec![];
+            }
+            parts[3].lines().take(3).map(|l| format!("  {l}")).collect()
+        }
+        _ => vec![],
+    }
+}
+
 fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ActivityChanged(activity) => state.set_status(&activity.label()),
@@ -676,11 +705,13 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
                 RiskLevel::Medium => ApprovalRisk::Medium,
                 RiskLevel::Low => ApprovalRisk::Low,
             };
+            let preview = decode_approval_preview(&pending.tool_name, &pending.payload);
             state.pending_approval = Some(PendingApprovalState {
                 tool_name: pending.tool_name,
                 summary: pending.summary,
                 risk,
                 evidence,
+                preview,
             });
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("awaiting approval");
@@ -733,8 +764,9 @@ mod tests {
     use crate::tools::default_registry;
 
     use super::{
-        apply_runtime_event, format_session_updated_at, format_sessions_list, handle_key_event,
-        parse_read_file_header, summarize_command_output, WorkerCmd,
+        apply_runtime_event, decode_approval_preview, format_session_updated_at,
+        format_sessions_list, handle_key_event, parse_read_file_header, summarize_command_output,
+        WorkerCmd,
     };
     use crate::tui::state::{AppState, ApprovalRisk, PendingApprovalState};
 
@@ -1171,6 +1203,7 @@ mod tests {
             summary: "run tests".into(),
             risk: ApprovalRisk::High,
             evidence: vec![],
+            preview: vec![],
         });
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
@@ -1209,6 +1242,7 @@ mod tests {
             summary: "patch".into(),
             risk: ApprovalRisk::Medium,
             evidence: vec![],
+            preview: vec![],
         });
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
@@ -1241,5 +1275,54 @@ mod tests {
             state.pending_approval.is_none(),
             "clear_messages must reset pending_approval"
         );
+    }
+
+    #[test]
+    fn decode_edit_file_produces_diff_lines() {
+        let payload = "v2\x00/abs/src/lib.rs\x00src/lib.rs\x00old line\x00new line";
+        let preview = decode_approval_preview("edit_file", payload);
+        assert_eq!(preview, vec!["- old line", "+ new line"]);
+    }
+
+    #[test]
+    fn decode_edit_file_caps_at_four_lines() {
+        let search = "a\nb\nc";
+        let replace = "x\ny\nz";
+        let payload = format!("v2\x00/abs/f.rs\x00f.rs\x00{search}\x00{replace}");
+        let preview = decode_approval_preview("edit_file", &payload);
+        assert_eq!(preview.len(), 4, "must cap at 4 total lines");
+        assert!(preview[0].starts_with("- "));
+        assert!(preview[1].starts_with("- "));
+        assert!(preview[2].starts_with("- "));
+        assert!(preview[3].starts_with("+ "));
+    }
+
+    #[test]
+    fn decode_shell_produces_command_line() {
+        let preview = decode_approval_preview("shell", "cargo test --no-default-features");
+        assert_eq!(preview, vec!["cargo test --no-default-features"]);
+    }
+
+    #[test]
+    fn decode_write_file_produces_indented_content_lines() {
+        let payload = "v2\x00/abs/out.rs\x00out.rs\x00fn main() {}\nfn foo() {}\nfn bar() {}";
+        let preview = decode_approval_preview("write_file", payload);
+        assert_eq!(
+            preview,
+            vec!["  fn main() {}", "  fn foo() {}", "  fn bar() {}"]
+        );
+    }
+
+    #[test]
+    fn decode_unknown_tool_produces_empty_preview() {
+        let preview = decode_approval_preview("read_file", "some payload");
+        assert!(preview.is_empty());
+    }
+
+    #[test]
+    fn decode_empty_payload_does_not_panic() {
+        assert!(decode_approval_preview("edit_file", "").is_empty());
+        assert!(decode_approval_preview("shell", "").is_empty());
+        assert!(decode_approval_preview("write_file", "").is_empty());
     }
 }

@@ -118,11 +118,10 @@ impl Renderer {
         } else {
             0
         };
-        let approval_rows: u16 = if state.pending_approval.is_some() {
-            3
-        } else {
-            0
-        };
+        let approval_rows: u16 = state
+            .pending_approval
+            .as_ref()
+            .map_or(0, |a| 2 + a.preview.len().min(4) as u16);
         let input_base_rows = input_rows + overlay_rows;
         let effective_rows = input_base_rows + approval_rows;
 
@@ -252,7 +251,7 @@ impl Renderer {
             self.paint(cur, 0, row, &rule, w, base);
         }
 
-        // Approval widget: 3 rows above the input area (between separator and input)
+        // Approval widget: rows above the input area (between separator and input)
         if approval_rows > 0 {
             if let Some(ref approval) = state.pending_approval {
                 let first_row = h.saturating_sub(effective_rows + 1);
@@ -265,14 +264,14 @@ impl Renderer {
                 let label = format!("! {}  {}", approval.tool_name, approval.summary);
                 self.paint(cur, 0, first_row, &label, w, label_style);
 
-                let evidence_line: String = approval
-                    .evidence
-                    .first()
-                    .map(|s| s.chars().take(w as usize).collect())
-                    .unwrap_or_default();
-                self.paint(cur, 0, first_row + 1, &evidence_line, w, dim);
+                let preview_count = approval.preview.len().min(4);
+                for (i, line) in approval.preview.iter().take(4).enumerate() {
+                    let display: String = line.chars().take(w as usize).collect();
+                    self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
+                }
 
-                self.paint(cur, 0, first_row + 2, "  ^Y approve   ^N reject", w, dim);
+                let hint_row = first_row + 1 + preview_count as u16;
+                self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
             }
         }
 
