@@ -92,6 +92,9 @@ pub struct AppState {
     pub(crate) launcher_index: usize,
     pub(crate) collapsed_message_indices: HashSet<usize>,
     pub(crate) focused_collapsible_idx: Option<usize>,
+    /// Collapsible message indices currently visible in the viewport.
+    /// Populated by paint_transcript() each render; used by focus navigation.
+    pub(crate) visible_collapsible_ids: Vec<usize>,
     /// Set by focus_next/prev_collapsible; consumed by the renderer to scroll
     /// the newly focused message into the upper third of the viewport.
     pub(crate) scroll_to_message_idx: Option<usize>,
@@ -148,6 +151,7 @@ impl AppState {
             launcher_index: 0,
             collapsed_message_indices: HashSet::new(),
             focused_collapsible_idx: None,
+            visible_collapsible_ids: Vec::new(),
             scroll_to_message_idx: None,
             pending_approval: None,
             autocomplete_matches: Vec::new(),
@@ -252,6 +256,7 @@ impl AppState {
         });
         self.collapsed_message_indices.clear();
         self.focused_collapsible_idx = None;
+        self.visible_collapsible_ids.clear();
         self.scroll_to_message_idx = None;
         self.pending_approval = None;
         self.reset_scroll();
@@ -342,7 +347,11 @@ impl AppState {
 
     /// Advances focus to the next collapsible message (wraps around).
     pub(crate) fn focus_next_collapsible(&mut self) {
-        let indices = self.collapsible_indices();
+        let indices = if self.visible_collapsible_ids.is_empty() {
+            self.collapsible_indices()
+        } else {
+            self.visible_collapsible_ids.clone()
+        };
         if indices.is_empty() {
             return;
         }
@@ -357,7 +366,11 @@ impl AppState {
 
     /// Retreats focus to the previous collapsible message (wraps around).
     pub(crate) fn focus_prev_collapsible(&mut self) {
-        let indices = self.collapsible_indices();
+        let indices = if self.visible_collapsible_ids.is_empty() {
+            self.collapsible_indices()
+        } else {
+            self.visible_collapsible_ids.clone()
+        };
         if indices.is_empty() {
             return;
         }

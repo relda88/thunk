@@ -12,6 +12,7 @@ use self::diff::PatchWriter;
 use self::style::{PackedStyle, Rgb, Theme};
 use self::symbols::SymbolPool;
 
+use super::collapsible::classify_collapsible;
 use super::state::{AppState, ApprovalRisk, DirtySections, MessageKind, Role};
 
 type StyledSpan = (String, PackedStyle);
@@ -375,26 +376,34 @@ impl Renderer {
                     == Some(i);
 
             if msg.is_collapsible && state.collapsed_message_indices.contains(&i) {
-                let summary: String = msg.content.chars().take(60).collect();
-                let ellipsis = if msg.content.chars().count() > 60 {
-                    "…"
-                } else {
-                    ""
-                };
+                let classified = classify_collapsible(&msg.content);
                 let indicator = if is_focused_collapsible { "▶ " } else { "  " };
                 let indicator_style = if is_focused_collapsible {
                     self.theme.border_active()
                 } else {
                     dim
                 };
+                let hint = if is_focused_collapsible {
+                    "  alt+o"
+                } else {
+                    ""
+                };
                 lines.push((
                     vec![
                         (indicator.to_string(), indicator_style),
-                        ("[+] ".to_string(), dim),
-                        (format!("{summary}{ellipsis}"), dim),
+                        ("›".to_string(), self.theme.border()),
+                        (" ".to_string(), dim),
+                        (classified.summary, dim),
+                        (hint.to_string(), dim),
                     ],
                     Some(i),
                 ));
+                for preview_line in classified.preview_lines.iter().take(2) {
+                    lines.push((
+                        vec![("  ".to_string(), dim), (preview_line.clone(), dim)],
+                        Some(i),
+                    ));
+                }
                 lines.push((vec![], Some(i)));
                 continue;
             }
@@ -523,6 +532,25 @@ impl Renderer {
         let end = lines.len().saturating_sub(offset);
         let start = end.saturating_sub(transcript_height);
         let visible = &lines[start..end];
+
+        {
+            let mut seen = std::collections::HashSet::new();
+            let mut ids: Vec<usize> = visible
+                .iter()
+                .filter_map(|(_, idx)| *idx)
+                .filter(|&idx| {
+                    state
+                        .messages
+                        .get(idx)
+                        .map(|m| m.is_collapsible)
+                        .unwrap_or(false)
+                        && seen.insert(idx)
+                })
+                .collect();
+            ids.sort_unstable();
+            state.visible_collapsible_ids = ids;
+        }
+
         let cap = h.saturating_sub(effective_rows + 1);
 
         for (idx, (spans, _msg_idx)) in visible.iter().enumerate() {
@@ -815,7 +843,7 @@ mod tests {
         let renderer = Renderer::new(80, 24);
         let lines = renderer.build_transcript_lines(&state, 80);
         let summary = lines.iter().find(|(spans, _)| !spans.is_empty()).unwrap();
-        assert!(summary.0.iter().any(|(text, _)| text.contains("[+]")));
+        assert!(summary.0.iter().any(|(text, _)| text.contains('›')));
     }
 
     #[test]

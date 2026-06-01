@@ -1,4 +1,5 @@
 mod app;
+pub(crate) mod collapsible;
 pub mod commands;
 mod cursor;
 mod events;
