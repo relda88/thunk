@@ -57,7 +57,7 @@ impl RenderScheduler {
     }
 
     fn interval(&self, state: &AppState) -> Duration {
-        if state.show_activity {
+        if state.is_busy {
             if self.heavy_streak > 3 {
                 Duration::from_millis(SLOW_MS)
             } else {

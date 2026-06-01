@@ -91,7 +91,6 @@ pub struct AppState {
     pub(crate) launcher_filtered: Vec<&'static crate::tui::commands::LauncherCommand>,
     pub(crate) launcher_index: usize,
     pub(crate) collapsed_message_indices: HashSet<usize>,
-    pub(crate) collapsible_message_indices: Vec<usize>,
     pub(crate) focused_collapsible_idx: Option<usize>,
     /// Set by focus_next/prev_collapsible; consumed by the renderer to scroll
     /// the newly focused message into the upper third of the viewport.
@@ -148,7 +147,6 @@ impl AppState {
             launcher_filtered: Vec::new(),
             launcher_index: 0,
             collapsed_message_indices: HashSet::new(),
-            collapsible_message_indices: Vec::new(),
             focused_collapsible_idx: None,
             scroll_to_message_idx: None,
             pending_approval: None,
@@ -230,7 +228,6 @@ impl AppState {
             is_collapsible: true,
         });
         self.reset_scroll();
-        self.tag_last_message_collapsible();
     }
 
     pub fn add_error_message(&mut self, content: impl Into<String>) {
@@ -254,7 +251,6 @@ impl AppState {
             is_collapsible: false,
         });
         self.collapsed_message_indices.clear();
-        self.collapsible_message_indices.clear();
         self.focused_collapsible_idx = None;
         self.scroll_to_message_idx = None;
         self.pending_approval = None;
@@ -318,12 +314,13 @@ impl AppState {
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 
-    /// If the last message is collapsible, records its index in collapsible_message_indices.
-    pub(crate) fn tag_last_message_collapsible(&mut self) {
-        let idx = self.messages.len().saturating_sub(1);
-        if self.messages.get(idx).map_or(false, |m| m.is_collapsible) {
-            self.collapsible_message_indices.push(idx);
-        }
+    pub(crate) fn collapsible_indices(&self) -> Vec<usize> {
+        self.messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_collapsible)
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Toggles collapsed state on the focused collapsible message.
@@ -331,7 +328,8 @@ impl AppState {
         let Some(list_pos) = self.focused_collapsible_idx else {
             return;
         };
-        let Some(&msg_idx) = self.collapsible_message_indices.get(list_pos) else {
+        let indices = self.collapsible_indices();
+        let Some(&msg_idx) = indices.get(list_pos) else {
             return;
         };
         if self.collapsed_message_indices.contains(&msg_idx) {
@@ -344,30 +342,32 @@ impl AppState {
 
     /// Advances focus to the next collapsible message (wraps around).
     pub(crate) fn focus_next_collapsible(&mut self) {
-        if self.collapsible_message_indices.is_empty() {
+        let indices = self.collapsible_indices();
+        if indices.is_empty() {
             return;
         }
         let new_pos = match self.focused_collapsible_idx {
             None => 0,
-            Some(i) => (i + 1) % self.collapsible_message_indices.len(),
+            Some(i) => (i + 1) % indices.len(),
         };
         self.focused_collapsible_idx = Some(new_pos);
-        self.scroll_to_message_idx = Some(self.collapsible_message_indices[new_pos]);
+        self.scroll_to_message_idx = Some(indices[new_pos]);
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 
     /// Retreats focus to the previous collapsible message (wraps around).
     pub(crate) fn focus_prev_collapsible(&mut self) {
-        if self.collapsible_message_indices.is_empty() {
+        let indices = self.collapsible_indices();
+        if indices.is_empty() {
             return;
         }
         let new_pos = match self.focused_collapsible_idx {
-            None => self.collapsible_message_indices.len() - 1,
-            Some(0) => self.collapsible_message_indices.len() - 1,
+            None => indices.len() - 1,
+            Some(0) => indices.len() - 1,
             Some(i) => i - 1,
         };
         self.focused_collapsible_idx = Some(new_pos);
-        self.scroll_to_message_idx = Some(self.collapsible_message_indices[new_pos]);
+        self.scroll_to_message_idx = Some(indices[new_pos]);
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 
@@ -429,7 +429,7 @@ mod tests {
         state.add_collapsible_tool_message("a");
         state.add_collapsible_tool_message("b");
         state.add_collapsible_tool_message("c");
-        assert_eq!(state.collapsible_message_indices.len(), 3);
+        assert_eq!(state.collapsible_indices().len(), 3);
 
         state.focus_next_collapsible();
         assert_eq!(state.focused_collapsible_idx, Some(0));
@@ -450,7 +450,7 @@ mod tests {
         let mut state = make_state();
         state.add_collapsible_tool_message("a");
         state.add_collapsible_tool_message("b");
-        assert_eq!(state.collapsible_message_indices.len(), 2);
+        assert_eq!(state.collapsible_indices().len(), 2);
 
         state.focus_prev_collapsible();
         // Starting from None, wraps to last index.
@@ -471,7 +471,7 @@ mod tests {
         state.focus_next_collapsible();
         state.toggle_collapse_focused();
         assert!(!state.collapsed_message_indices.is_empty());
-        assert!(!state.collapsible_message_indices.is_empty());
+        assert!(!state.collapsible_indices().is_empty());
         assert!(state.focused_collapsible_idx.is_some());
 
         state.clear_messages();
@@ -481,21 +481,20 @@ mod tests {
             "collapse set must reset"
         );
         assert!(
-            state.collapsible_message_indices.is_empty(),
+            state.collapsible_indices().is_empty(),
             "collapsible list must reset"
         );
         assert!(state.focused_collapsible_idx.is_none(), "focus must reset");
     }
 
     #[test]
-    fn tag_last_message_collapsible_does_not_tag_non_collapsible() {
+    fn non_collapsible_messages_not_in_collapsible_indices() {
         let mut state = make_state();
         state.add_system_message("system info");
         state.add_user_message("user prompt");
-        // These calls do NOT go through add_collapsible_tool_message, so tag is never called.
         assert!(
-            state.collapsible_message_indices.is_empty(),
-            "non-collapsible messages must not be tagged"
+            state.collapsible_indices().is_empty(),
+            "non-collapsible messages must not appear in collapsible_indices"
         );
     }
 
@@ -504,7 +503,7 @@ mod tests {
         let mut state = make_state();
         state.add_collapsible_tool_message("tool output");
         state.focus_next_collapsible();
-        let msg_idx = state.collapsible_message_indices[0];
+        let msg_idx = state.collapsible_indices()[0];
 
         state.toggle_collapse_focused();
         assert!(

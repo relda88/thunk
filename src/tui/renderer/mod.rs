@@ -5,6 +5,8 @@ mod symbols;
 
 use std::io::{self, Write};
 
+use unicode_width::UnicodeWidthChar;
+
 use self::buffer::{Cell, CellBuffer};
 use self::diff::PatchWriter;
 use self::style::{PackedStyle, Rgb, Theme};
@@ -122,10 +124,10 @@ impl Renderer {
         } else {
             0
         };
-        let approval_rows: u16 = state
-            .pending_approval
-            .as_ref()
-            .map_or(0, |a| 2 + a.preview.len().min(4) as u16);
+        let approval_rows: u16 = state.pending_approval.as_ref().map_or(0, |a| {
+            let evidence_row = if a.evidence.is_empty() { 0u16 } else { 1u16 };
+            2 + a.preview.len().min(4) as u16 + evidence_row
+        });
         let input_base_rows = input_rows + overlay_rows;
         let effective_rows = input_base_rows + approval_rows;
 
@@ -144,8 +146,7 @@ impl Renderer {
         // Approval widget: rows above the input area (between separator and input)
         if approval_rows > 0 {
             let first_row = h.saturating_sub(effective_rows + 1);
-            let preview_count = approval_rows.saturating_sub(2) as usize;
-            self.paint_approval_widget(state, first_row, w, preview_count);
+            self.paint_approval_widget(state, first_row, w);
         }
 
         // Rows above overlay: input area
@@ -329,6 +330,13 @@ impl Renderer {
         let alert = self.theme.chip_warning();
         let error_style = self.theme.chip_danger();
 
+        if state.messages.is_empty() {
+            self.paint(cur, 0, 2, "  type a message, or / for commands.", w, dim);
+            return;
+        }
+
+        let collapsible_ids = state.collapsible_indices();
+
         // Each entry: (display_text, kind, source_message_index).
         let mut lines: Vec<(String, MessageKind, Option<usize>)> = Vec::new();
         for (i, msg) in state.messages.iter().enumerate() {
@@ -353,7 +361,7 @@ impl Renderer {
                 };
                 let focused = state
                     .focused_collapsible_idx
-                    .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
+                    .and_then(|fi| collapsible_ids.get(fi).copied())
                     == Some(i);
                 let indicator = if focused { "▶[+] " } else { " [+] " };
                 lines.push((format!("{indicator}{summary}{ellipsis}"), msg.kind, Some(i)));
@@ -376,7 +384,7 @@ impl Renderer {
             let focus_prefix = if msg.is_collapsible {
                 let focused = state
                     .focused_collapsible_idx
-                    .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
+                    .and_then(|fi| collapsible_ids.get(fi).copied())
                     == Some(i);
                 if focused {
                     "▶ "
@@ -504,13 +512,7 @@ impl Renderer {
         }
     }
 
-    fn paint_approval_widget(
-        &mut self,
-        state: &AppState,
-        first_row: u16,
-        w: u16,
-        preview_count: usize,
-    ) {
+    fn paint_approval_widget(&mut self, state: &AppState, first_row: u16, w: u16) {
         let Some(ref approval) = state.pending_approval else {
             return;
         };
@@ -521,15 +523,32 @@ impl Renderer {
             ApprovalRisk::Medium => self.theme.chip_warning(),
             ApprovalRisk::Low => self.theme.chip_accent(),
         };
-        let label = format!("! {}  {}", approval.tool_name, approval.summary);
+        let display_name = match approval.tool_name.as_str() {
+            "edit_file" => "edit",
+            "write_file" => "write",
+            "shell" => "shell",
+            other => other,
+        };
+        let label = format!("! {}  {}", display_name, approval.summary);
         self.paint(cur, 0, first_row, &label, w, label_style);
 
+        let actual_preview = approval.preview.len().min(4);
         for (i, line) in approval.preview.iter().take(4).enumerate() {
             let display: String = line.chars().take(w as usize).collect();
             self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
         }
 
-        let hint_row = first_row + 1 + preview_count as u16;
+        let evidence_offset = if !approval.evidence.is_empty() {
+            let ev_row = first_row + 1 + actual_preview as u16;
+            let ev_text = format!("  \u{00b7} {}", approval.evidence[0]);
+            let display: String = ev_text.chars().take(w as usize).collect();
+            self.paint(cur, 0, ev_row, &display, w, dim);
+            1u16
+        } else {
+            0u16
+        };
+
+        let hint_row = first_row + 1 + actual_preview as u16 + evidence_offset;
         self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
     }
 
@@ -561,16 +580,21 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     }
     let mut lines = Vec::new();
     let mut current = String::new();
+    let mut col = 0usize;
     for ch in text.chars() {
         if ch == '\n' {
             lines.push(current);
             current = String::new();
+            col = 0;
             continue;
         }
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(1);
         current.push(ch);
-        if current.chars().count() >= width {
+        col += cw;
+        if col >= width {
             lines.push(current);
             current = String::new();
+            col = 0;
         }
     }
     if current.is_empty() {
