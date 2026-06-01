@@ -129,8 +129,7 @@ impl Renderer {
             0
         };
         let approval_rows: u16 = state.pending_approval.as_ref().map_or(0, |a| {
-            let evidence_row = if a.evidence.is_empty() { 0u16 } else { 1u16 };
-            2 + a.preview.len().min(4) as u16 + evidence_row
+            1 + a.evidence.len().min(2) as u16 + a.preview.len().min(4) as u16 + 1
         });
         let input_base_rows = input_rows + overlay_rows;
         let effective_rows = input_base_rows + approval_rows;
@@ -225,6 +224,13 @@ impl Renderer {
     fn rendered_cell_style(&self, x: u16, y: u16) -> PackedStyle {
         let rendered = 1 - self.current;
         self.frames[rendered].get(x, y).style
+    }
+
+    #[cfg(test)]
+    fn rendered_cell_text(&self, x: u16, y: u16) -> &str {
+        let rendered = 1 - self.current;
+        let cell = self.frames[rendered].get(x, y);
+        self.symbols.get(cell.symbol_id)
     }
 
     fn paint_header(&mut self, state: &AppState, cur: usize, w: u16) {
@@ -650,6 +656,15 @@ impl Renderer {
         }
     }
 
+    fn approval_kind_label(tool_name: &str) -> &'static str {
+        match tool_name {
+            "edit_file" => "Edit File",
+            "write_file" => "Write File",
+            "shell" => "Shell Command",
+            _ => "Tool Action",
+        }
+    }
+
     fn paint_approval_widget(&mut self, state: &AppState, first_row: u16, w: u16) {
         let Some(ref approval) = state.pending_approval else {
             return;
@@ -661,32 +676,25 @@ impl Renderer {
             ApprovalRisk::Medium => self.theme.chip_warning(),
             ApprovalRisk::Low => self.theme.chip_accent(),
         };
-        let display_name = match approval.tool_name.as_str() {
-            "edit_file" => "edit",
-            "write_file" => "write",
-            "shell" => "shell",
-            other => other,
-        };
-        let label = format!("! {}  {}", display_name, approval.summary);
+        let kind_label = Self::approval_kind_label(approval.tool_name.as_str());
+        let label = format!("! {}  {}", kind_label, approval.summary);
         self.paint(cur, 0, first_row, &label, w, label_style);
 
         let actual_preview = approval.preview.len().min(4);
         for (i, line) in approval.preview.iter().take(4).enumerate() {
-            let display: String = line.chars().take(w as usize).collect();
+            let display: String = format!("  › {}", line).chars().take(w as usize).collect();
             self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
         }
 
-        let evidence_offset = if !approval.evidence.is_empty() {
-            let ev_row = first_row + 1 + actual_preview as u16;
-            let ev_text = format!("  \u{00b7} {}", approval.evidence[0]);
+        let evidence_count = approval.evidence.len().min(2);
+        for (i, ev) in approval.evidence.iter().take(2).enumerate() {
+            let ev_row = first_row + 1 + actual_preview as u16 + i as u16;
+            let ev_text = format!("  › {}", ev);
             let display: String = ev_text.chars().take(w as usize).collect();
             self.paint(cur, 0, ev_row, &display, w, dim);
-            1u16
-        } else {
-            0u16
-        };
+        }
 
-        let hint_row = first_row + 1 + actual_preview as u16 + evidence_offset;
+        let hint_row = first_row + 1 + actual_preview as u16 + evidence_count as u16;
         self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
     }
 
@@ -938,6 +946,118 @@ mod tests {
             cell_style,
             renderer.theme.muted(),
             "prefix must be muted while awaiting approval"
+        );
+    }
+
+    #[test]
+    fn approval_kind_label_maps_all_variants() {
+        assert_eq!(Renderer::approval_kind_label("edit_file"), "Edit File");
+        assert_eq!(Renderer::approval_kind_label("write_file"), "Write File");
+        assert_eq!(Renderer::approval_kind_label("shell"), "Shell Command");
+        assert_eq!(Renderer::approval_kind_label("unknown_tool"), "Tool Action");
+    }
+
+    #[test]
+    fn approval_widget_evidence_has_chevron_gutter() {
+        // 80×24: approval_rows = 1 + 1 + 0 + 1 = 3; effective_rows = 4
+        // first_row = 24 - 4 - 1 = 19; evidence row = 19 + 1 + 0 + 0 = 20
+        use crate::tui::state::{ApprovalRisk, PendingApprovalState};
+        let (_dir, mut state) = make_state();
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "shell".to_string(),
+            summary: "run".to_string(),
+            risk: ApprovalRisk::Low,
+            evidence: vec!["some evidence".to_string()],
+            preview: vec![],
+        });
+        let mut renderer = Renderer::new(80, 24);
+        let mut out = Vec::<u8>::new();
+        renderer
+            .render(&mut state, &mut out, DirtySections::ALL)
+            .unwrap();
+        // col 2 = the › character in "  › some evidence"
+        assert_eq!(
+            renderer.rendered_cell_text(2, 20),
+            "›",
+            "evidence row must start with › gutter at col 2"
+        );
+        assert_eq!(
+            renderer.rendered_cell_style(2, 20),
+            renderer.theme.dim(),
+            "evidence row must be dim"
+        );
+    }
+
+    #[test]
+    fn approval_widget_empty_evidence_skips_evidence_rows() {
+        // 80×24 with no evidence: approval_rows = 2; first_row = 24 - 3 - 1 = 20
+        // With 1 evidence entry:  approval_rows = 3; first_row = 24 - 4 - 1 = 19
+        // Row 19 must be label-style when evidence present, plain when absent.
+        use crate::tui::state::{ApprovalRisk, PendingApprovalState};
+        let (_dir, mut state) = make_state();
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "shell".to_string(),
+            summary: "run".to_string(),
+            risk: ApprovalRisk::Low,
+            evidence: vec![],
+            preview: vec![],
+        });
+        let mut renderer = Renderer::new(80, 24);
+        let mut out = Vec::<u8>::new();
+        renderer
+            .render(&mut state, &mut out, DirtySections::ALL)
+            .unwrap();
+        // Row 19 must NOT be the label (chip_accent): label is at row 20
+        assert_ne!(
+            renderer.rendered_cell_style(0, 19),
+            renderer.theme.chip_accent(),
+            "row 19 must not be the label row when evidence is empty"
+        );
+        // Row 20 must be the label (chip_accent for Low risk)
+        assert_eq!(
+            renderer.rendered_cell_style(0, 20),
+            renderer.theme.chip_accent(),
+            "label must be at row 20 when evidence is empty"
+        );
+    }
+
+    #[test]
+    fn approval_rows_accounts_for_evidence_count() {
+        // 2 evidence entries → approval_rows = 4 → separator at row 17
+        // 0 evidence entries → approval_rows = 2 → separator at row 19
+        use crate::tui::state::{ApprovalRisk, PendingApprovalState};
+
+        let render_with_evidence = |count: usize| {
+            let (_dir, mut state) = make_state();
+            state.pending_approval = Some(PendingApprovalState {
+                tool_name: "shell".to_string(),
+                summary: "run".to_string(),
+                risk: ApprovalRisk::Low,
+                evidence: (0..count).map(|i| format!("ev{}", i)).collect(),
+                preview: vec![],
+            });
+            let mut renderer = Renderer::new(80, 24);
+            let mut out = Vec::<u8>::new();
+            renderer
+                .render(&mut state, &mut out, DirtySections::ALL)
+                .unwrap();
+            renderer
+        };
+
+        let r2 = render_with_evidence(2);
+        // separator (border style) at row 17 when 2 evidence entries
+        assert_eq!(
+            r2.rendered_cell_style(0, 17),
+            r2.theme.border(),
+            "separator must be at row 17 with 2 evidence entries"
+        );
+
+        let r0 = render_with_evidence(0);
+        // separator at row 19 when no evidence entries
+        assert_eq!(
+            r0.rendered_cell_style(0, 19),
+            r0.theme.border(),
+            "separator must be at row 19 with no evidence"
         );
     }
 }
