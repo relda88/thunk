@@ -38,7 +38,7 @@ pub(super) fn sync_terminal_affordances(
         CursorShape::SteadyBar
     };
     if *last_shape != Some(shape) {
-        crossterm::queue!(out, shape.to_crossterm())?;
+        crossterm::queue!(out, shape.to_crossterm(), crossterm::cursor::Show)?;
         *last_shape = Some(shape);
     }
     Ok(())
