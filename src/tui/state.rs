@@ -287,6 +287,8 @@ impl AppState {
 
     pub fn toggle_file_expand(&mut self) {
         self.expanded_file_read = !self.expanded_file_read;
+        self.scroll_offset = 0;
+        self.scroll_to_message_idx = None;
         self.mark_dirty(DirtySections::TRANSCRIPT);
     }
 

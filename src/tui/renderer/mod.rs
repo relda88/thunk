@@ -177,7 +177,7 @@ impl Renderer {
                     if focused {
                         "▶ "
                     } else {
-                        "  "
+                        ""
                     }
                 } else {
                     ""
