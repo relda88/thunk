@@ -7,19 +7,16 @@ use std::io::{self, Write};
 
 use self::buffer::{Cell, CellBuffer};
 use self::diff::PatchWriter;
-use self::style::{PackedStyle, Rgb};
+use self::style::{PackedStyle, Rgb, Theme};
 use self::symbols::SymbolPool;
 
 use super::state::{AppState, ApprovalRisk, DirtySections, MessageKind, Role};
 
-const BG: Rgb = Rgb::new(0, 0, 0);
-const FG: Rgb = Rgb::new(220, 220, 220);
-const FG_DIM: Rgb = Rgb::new(120, 120, 120);
-const FG_ALERT: Rgb = Rgb::new(242, 179, 86);
-const FG_ERROR: Rgb = Rgb::new(220, 80, 80);
-const FG_GREEN: Rgb = Rgb::new(80, 200, 80);
-const FG_YELLOW: Rgb = Rgb::new(220, 180, 80);
-const FG_RED: Rgb = Rgb::new(220, 80, 80);
+const CTX_LOW: Rgb = Rgb::new(80, 200, 80);
+const CTX_MID: Rgb = Rgb::new(242, 179, 86);
+const CTX_HIGH: Rgb = Rgb::new(237, 104, 109);
+
+const SPINNER: [char; 4] = ['-', '\\', '|', '/'];
 
 const MAX_INPUT_ROWS: usize = 6;
 
@@ -33,15 +30,18 @@ pub(crate) struct Renderer {
     current: usize,
     width: u16,
     height: u16,
+    theme: Theme,
+    spin_tick: u32,
 }
 
 impl Renderer {
     pub(crate) fn new(width: u16, height: u16) -> Self {
+        let theme = Theme::default();
         let mut symbols = SymbolPool::new();
         let blank_id = symbols.blank_id();
         let blank = Cell {
             symbol_id: blank_id,
-            style: PackedStyle::new(FG, BG),
+            style: theme.base(),
         };
         let mut this = Self {
             symbols,
@@ -52,6 +52,8 @@ impl Renderer {
             current: 0,
             width,
             height,
+            theme,
+            spin_tick: 0,
         };
         this.invalidate();
         this
@@ -85,8 +87,7 @@ impl Renderer {
         let h = self.height;
         let cur = self.current;
 
-        let base = PackedStyle::new(FG, BG);
-        let bold = base.with_bold();
+        let base = self.theme.base();
 
         let blank_id = self.symbols.blank_id();
         self.frames[cur].fill(Cell {
@@ -96,14 +97,13 @@ impl Renderer {
 
         // Row 0: header
         if h > 0 {
-            let title = format!(" {}  |  Ctrl+Q quit  |  Enter send ", state.app_name);
-            self.paint(cur, 0, 0, &title, w, bold);
+            self.paint_header(state, cur, w);
         }
 
         // Row 1: horizontal rule
         if h > 1 {
             let rule = "─".repeat(w as usize);
-            self.paint(cur, 0, 1, &rule, w, base);
+            self.paint(cur, 0, 1, &rule, w, self.theme.border());
         }
 
         let input_rows = state
@@ -138,7 +138,7 @@ impl Renderer {
         if h > effective_rows + 2 {
             let row = h.saturating_sub(effective_rows + 2);
             let rule = "─".repeat(w as usize);
-            self.paint(cur, 0, row, &rule, w, base);
+            self.paint(cur, 0, row, &rule, w, self.theme.border());
         }
 
         // Approval widget: rows above the input area (between separator and input)
@@ -168,37 +168,11 @@ impl Renderer {
         }
 
         // Row h-1: status bar
+        if state.is_busy {
+            self.spin_tick = self.spin_tick.wrapping_add(1);
+        }
         if h > 1 {
-            let row = h.saturating_sub(1);
-            let text = if state.show_activity {
-                format!("  {}  ", state.status)
-            } else {
-                " ".to_string()
-            };
-            self.paint(cur, 0, row, &text, w, base);
-
-            if let Some(pct) = state.context_pct {
-                let indicator = format!(" ctx: {pct}% ");
-                let ind_len = indicator.chars().count() as u16;
-                if w > ind_len {
-                    let col = w.saturating_sub(ind_len);
-                    let color = if pct < 50 {
-                        FG_GREEN
-                    } else if pct <= 75 {
-                        FG_YELLOW
-                    } else {
-                        FG_RED
-                    };
-                    self.paint(
-                        cur,
-                        col,
-                        row,
-                        &indicator,
-                        ind_len,
-                        PackedStyle::new(color, BG),
-                    );
-                }
-            }
+            self.paint_status_bar(state, cur, w, h);
         }
 
         // Input cursor position
@@ -242,6 +216,103 @@ impl Renderer {
         self.frames[cur].write_text_clipped(x, y, text, max_width, style, &mut self.symbols);
     }
 
+    fn paint_header(&mut self, state: &AppState, cur: usize, w: u16) {
+        let name = format!(" {} ", state.app_name);
+        let sep = " | ";
+        let hints = "Ctrl+Q quit | Enter send ";
+
+        let name_len = name.chars().count() as u16;
+        let sep1_len = sep.chars().count() as u16;
+        let hints_len = hints.chars().count() as u16;
+
+        self.paint(cur, 0, 0, &name, name_len.min(w), self.theme.chip_accent());
+        if w > name_len {
+            self.paint(
+                cur,
+                name_len,
+                0,
+                sep,
+                sep1_len.min(w - name_len),
+                self.theme.border(),
+            );
+        }
+        let hints_col = name_len + sep1_len;
+        if w > hints_col {
+            self.paint(
+                cur,
+                hints_col,
+                0,
+                hints,
+                hints_len.min(w - hints_col),
+                self.theme.dim(),
+            );
+        }
+    }
+
+    fn paint_status_bar(&mut self, state: &AppState, cur: usize, w: u16, h: u16) {
+        let row = h.saturating_sub(1);
+
+        if state.show_activity {
+            let (prefix, prefix_style, text_style) = if state.pending_approval.is_some() {
+                ("! ", self.theme.chip_warning(), self.theme.muted())
+            } else if state.is_busy {
+                let frame = SPINNER[self.spin_tick as usize % SPINNER.len()];
+                let s: &'static str = match frame {
+                    '-' => "- ",
+                    '\\' => "\\ ",
+                    '|' => "| ",
+                    '/' => "/ ",
+                    _ => "  ",
+                };
+                (s, self.theme.chip_accent(), self.theme.muted())
+            } else {
+                ("", self.theme.dim(), self.theme.dim())
+            };
+
+            let prefix_len = prefix.chars().count() as u16;
+            let status_text = format!(" {}", state.status);
+            let text_len = status_text.chars().count() as u16;
+
+            if prefix_len > 0 && w > 1 {
+                self.paint(cur, 1, row, prefix, prefix_len.min(w - 1), prefix_style);
+            }
+            let text_col = 1 + prefix_len;
+            if w > text_col {
+                self.paint(
+                    cur,
+                    text_col,
+                    row,
+                    &status_text,
+                    text_len.min(w - text_col),
+                    text_style,
+                );
+            }
+        }
+
+        if let Some(pct) = state.context_pct {
+            let indicator = format!(" ctx: {pct}% ");
+            let ind_len = indicator.chars().count() as u16;
+            if w > ind_len {
+                let col = w.saturating_sub(ind_len);
+                let color = if pct < 50 {
+                    CTX_LOW
+                } else if pct <= 75 {
+                    CTX_MID
+                } else {
+                    CTX_HIGH
+                };
+                self.paint(
+                    cur,
+                    col,
+                    row,
+                    &indicator,
+                    ind_len,
+                    PackedStyle::new(color, self.theme.background),
+                );
+            }
+        }
+    }
+
     fn paint_transcript(
         &mut self,
         state: &mut AppState,
@@ -253,10 +324,10 @@ impl Renderer {
         let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
         let avail_w = w.saturating_sub(1) as usize;
 
-        let base = PackedStyle::new(FG, BG);
-        let dim = PackedStyle::new(FG_DIM, BG);
-        let alert = PackedStyle::new(FG_ALERT, BG).with_bold();
-        let error_style = PackedStyle::new(FG_ERROR, BG);
+        let base = self.theme.base();
+        let dim = self.theme.dim();
+        let alert = self.theme.chip_warning();
+        let error_style = self.theme.chip_danger();
 
         // Each entry: (display_text, kind, source_message_index).
         let mut lines: Vec<(String, MessageKind, Option<usize>)> = Vec::new();
@@ -380,8 +451,8 @@ impl Renderer {
         query: &str,
         entries: &[(&crate::tui::commands::LauncherCommand, bool)],
     ) {
-        let accent = PackedStyle::new(Rgb::new(102, 214, 255), BG).with_bold();
-        let dim = PackedStyle::new(FG_DIM, BG);
+        let accent = self.theme.chip_accent();
+        let dim = self.theme.dim();
         let mut row_offset: u16 = 0;
         if !query.is_empty() {
             let row = h.saturating_sub(overlay_rows - row_offset + 1);
@@ -408,8 +479,12 @@ impl Renderer {
 
     fn paint_input(&mut self, state: &AppState, cur: usize, w: u16, h: u16, input_base_rows: u16) {
         let first_row = h.saturating_sub(input_base_rows + 1);
-        let base = PackedStyle::new(FG, BG);
-        let bold = base.with_bold();
+        let base = self.theme.base();
+        let prefix_style = if state.is_busy {
+            self.theme.chip_accent()
+        } else {
+            self.theme.muted()
+        };
         let prefix = if state.is_launcher_active() {
             ": "
         } else {
@@ -421,9 +496,9 @@ impl Renderer {
         for (i, line) in visible_lines.iter().enumerate() {
             let row = first_row + i as u16;
             if i == 0 {
-                self.paint(cur, 0, row, prefix, prefix_w, bold);
+                self.paint(cur, 0, row, prefix, prefix_w, prefix_style);
             } else {
-                self.paint(cur, 0, row, "  ", prefix_w, bold);
+                self.paint(cur, 0, row, "  ", prefix_w, prefix_style);
             }
             self.paint(cur, prefix_w, row, line, w.saturating_sub(prefix_w), base);
         }
@@ -440,13 +515,12 @@ impl Renderer {
             return;
         };
         let cur = self.current;
-        let dim = PackedStyle::new(FG_DIM, BG);
-        let risk_color = match approval.risk {
-            ApprovalRisk::High => Rgb::new(237, 104, 109),
-            ApprovalRisk::Medium => Rgb::new(242, 179, 86),
-            ApprovalRisk::Low => Rgb::new(102, 214, 255),
+        let dim = self.theme.dim();
+        let label_style = match approval.risk {
+            ApprovalRisk::High => self.theme.chip_danger(),
+            ApprovalRisk::Medium => self.theme.chip_warning(),
+            ApprovalRisk::Low => self.theme.chip_accent(),
         };
-        let label_style = PackedStyle::new(risk_color, BG).with_bold();
         let label = format!("! {}  {}", approval.tool_name, approval.summary);
         self.paint(cur, 0, first_row, &label, w, label_style);
 
@@ -467,8 +541,8 @@ impl Renderer {
         h: u16,
         overlay_rows: u16,
     ) {
-        let accent = PackedStyle::new(Rgb::new(102, 214, 255), BG).with_bold();
-        let dim = PackedStyle::new(FG_DIM, BG);
+        let accent = self.theme.chip_accent();
+        let dim = self.theme.dim();
         let items = state.autocomplete_preview_items(4);
         for (i, (item, selected)) in items.iter().enumerate() {
             let row = h.saturating_sub(overlay_rows - i as u16 + 1);
