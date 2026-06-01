@@ -442,16 +442,23 @@ impl Renderer {
                 .find(|(_, m)| m.role == Role::Assistant)
                 .map(|(i, _)| i)
             {
-                let cursor_style = if self.spin_tick % 12 < 6 {
-                    self.theme.badge_assistant()
-                } else {
-                    self.theme.chip_accent()
-                };
-                if let Some(target) = lines
-                    .iter()
-                    .rposition(|(spans, src)| *src == Some(ast_idx) && !spans.is_empty())
-                {
-                    lines[target].0.push(("▍".to_string(), cursor_style));
+                // Only cursor the message that is actively streaming: the last
+                // assistant message must also be the last message in the vec.
+                // Before AssistantMessageStarted fires the last message is the
+                // user prompt, so ast_idx + 1 < messages.len() and no cursor
+                // appears on the previous completed response.
+                if ast_idx + 1 == state.messages.len() {
+                    let cursor_style = if self.spin_tick % 12 < 6 {
+                        self.theme.badge_assistant()
+                    } else {
+                        self.theme.chip_accent()
+                    };
+                    if let Some(target) = lines
+                        .iter()
+                        .rposition(|(spans, src)| *src == Some(ast_idx) && !spans.is_empty())
+                    {
+                        lines[target].0.push(("▍".to_string(), cursor_style));
+                    }
                 }
             }
         }
@@ -802,5 +809,23 @@ mod tests {
             .unwrap();
         let last_span = last_content.0.last().unwrap();
         assert_eq!(last_span.0, "▍");
+    }
+
+    #[test]
+    fn generation_cursor_not_shown_on_completed_response_before_stream_starts() {
+        // Simulates the pre-stream phase: is_busy=true but AssistantMessageStarted
+        // has not fired yet — last message is the user prompt, not an assistant.
+        let (_dir, mut state) = make_state();
+        state.messages.clear();
+        state.add_assistant_message("previous response");
+        state.add_user_message("new question");
+        state.is_busy = true;
+        let renderer = Renderer::new(80, 24);
+        let lines = renderer.build_transcript_lines(&state, 80);
+        for (spans, _) in &lines {
+            if let Some(last) = spans.last() {
+                assert_ne!(last.0, "▍", "cursor must not appear on completed message");
+            }
+        }
     }
 }

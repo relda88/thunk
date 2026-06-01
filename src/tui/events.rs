@@ -51,6 +51,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             None => state.add_tool_message(format!("tool failed: {name}")),
         },
         RuntimeEvent::AnswerReady(source) => {
+            state.is_busy = false;
             state.pending_approval = None;
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("ready");
@@ -59,6 +60,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             }
         }
         RuntimeEvent::Failed { message } => {
+            state.is_busy = false;
             state.pending_approval = None;
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("error");
@@ -218,6 +220,27 @@ mod tests {
 
         let approval = state.pending_approval.as_ref().unwrap();
         assert_eq!(approval.risk, ApprovalRisk::Medium);
+    }
+
+    #[test]
+    fn answer_ready_clears_is_busy() {
+        let mut state = make_state();
+        state.is_busy = true;
+        apply_runtime_event(&mut state, RuntimeEvent::AnswerReady(AnswerSource::Direct));
+        assert!(!state.is_busy, "AnswerReady must clear is_busy");
+    }
+
+    #[test]
+    fn failed_clears_is_busy() {
+        let mut state = make_state();
+        state.is_busy = true;
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::Failed {
+                message: "err".into(),
+            },
+        );
+        assert!(!state.is_busy, "Failed must clear is_busy");
     }
 
     #[test]
