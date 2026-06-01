@@ -1,3 +1,4 @@
+use super::commands::{launcher_commands, LauncherCommand};
 use super::state::{AppState, DirtySections};
 
 /// Defines methods for modifying the input buffer and cursor position in the app state
@@ -202,6 +203,7 @@ impl AppState {
             return;
         }
         self.clear_autocomplete();
+        self.exit_launcher();
         if !self.reverse_search_active {
             self.reverse_search_active = true;
             self.reverse_search_query.clear();
@@ -278,6 +280,112 @@ impl AppState {
         self.reverse_search_query.clear();
         self.reverse_search_selection = 0;
         self.reverse_search_draft = None;
+    }
+
+    pub(crate) fn is_launcher_active(&self) -> bool {
+        self.launcher_active
+    }
+
+    pub(crate) fn activate_launcher(&mut self) {
+        self.exit_reverse_search();
+        self.clear_autocomplete();
+        self.launcher_active = true;
+        self.launcher_query.clear();
+        self.launcher_index = 0;
+        self.apply_launcher_filter();
+        self.mark_dirty(DirtySections::INPUT);
+    }
+
+    pub(crate) fn cancel_launcher(&mut self) {
+        self.exit_launcher();
+        self.mark_dirty(DirtySections::INPUT);
+    }
+
+    pub(crate) fn accept_launcher(&mut self) {
+        if self.launcher_filtered.is_empty() || self.launcher_index >= self.launcher_filtered.len()
+        {
+            self.cancel_launcher();
+            return;
+        }
+        let name = self.launcher_filtered[self.launcher_index].name;
+        let text = format!("{} ", name);
+        self.input = text;
+        self.cursor = self.input.len();
+        self.exit_launcher();
+        self.mark_dirty(DirtySections::INPUT);
+    }
+
+    pub(crate) fn launcher_push_char(&mut self, c: char) {
+        self.launcher_query.push(c);
+        self.launcher_index = 0;
+        self.apply_launcher_filter();
+        self.mark_dirty(DirtySections::INPUT);
+    }
+
+    pub(crate) fn launcher_backspace(&mut self) {
+        self.launcher_query.pop();
+        self.launcher_index = 0;
+        self.apply_launcher_filter();
+        self.mark_dirty(DirtySections::INPUT);
+    }
+
+    pub(crate) fn launcher_cycle(&mut self, reverse: bool) {
+        if self.launcher_filtered.is_empty() {
+            return;
+        }
+        let len = self.launcher_filtered.len();
+        if reverse {
+            self.launcher_index = if self.launcher_index == 0 {
+                len - 1
+            } else {
+                self.launcher_index - 1
+            };
+        } else {
+            self.launcher_index = (self.launcher_index + 1) % len;
+        }
+        self.mark_dirty(DirtySections::INPUT);
+    }
+
+    pub(crate) fn launcher_view(
+        &self,
+        max: usize,
+    ) -> Option<(String, Vec<(&'static LauncherCommand, bool)>)> {
+        if !self.launcher_active {
+            return None;
+        }
+        let items = self
+            .launcher_filtered
+            .iter()
+            .take(max)
+            .enumerate()
+            .map(|(idx, cmd)| (*cmd, idx == self.launcher_index))
+            .collect();
+        Some((self.launcher_query.clone(), items))
+    }
+
+    fn apply_launcher_filter(&mut self) {
+        let query = self.launcher_query.to_lowercase();
+        self.launcher_filtered = if query.is_empty() {
+            launcher_commands().iter().collect()
+        } else {
+            launcher_commands()
+                .iter()
+                .filter(|cmd| {
+                    cmd.name.to_lowercase().contains(&query)
+                        || cmd.description.to_lowercase().contains(&query)
+                })
+                .collect()
+        };
+        if self.launcher_index >= self.launcher_filtered.len() {
+            self.launcher_index = self.launcher_filtered.len().saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn exit_launcher(&mut self) {
+        self.launcher_active = false;
+        self.launcher_query.clear();
+        self.launcher_filtered.clear();
+        self.launcher_index = 0;
     }
 
     // Returns (start=0, end=command_end, prefix=&input[..command_end]).
@@ -582,6 +690,115 @@ mod tests {
         state.input = "hello".to_string();
         state.cursor = 3;
         assert!(state.slash_prefix_range().is_none());
+    }
+
+    #[test]
+    fn activate_launcher_populates_all_commands() {
+        let mut state = make_state();
+        state.activate_launcher();
+        assert!(state.is_launcher_active());
+        let (query, entries) = state.launcher_view(100).unwrap();
+        assert!(query.is_empty());
+        assert!(!entries.is_empty());
+        // All 21 static commands should be present with empty query.
+        assert_eq!(
+            entries.len(),
+            crate::tui::commands::launcher_commands().len()
+        );
+    }
+
+    #[test]
+    fn launcher_push_char_filters_by_name() {
+        let mut state = make_state();
+        state.activate_launcher();
+        state.launcher_push_char('h');
+        state.launcher_push_char('e');
+        state.launcher_push_char('l');
+        let (_, entries) = state.launcher_view(100).unwrap();
+        // "hel" should match /help and /history (contains) at minimum.
+        assert!(entries.iter().any(|(c, _)| c.name == "/help"));
+        for (cmd, _) in &entries {
+            assert!(
+                cmd.name.contains("hel") || cmd.description.to_lowercase().contains("hel"),
+                "unexpected match: {}",
+                cmd.name
+            );
+        }
+    }
+
+    #[test]
+    fn launcher_backspace_restores_filter() {
+        let mut state = make_state();
+        state.activate_launcher();
+        let total = state.launcher_view(100).unwrap().1.len();
+        state.launcher_push_char('z'); // no match
+        state.launcher_push_char('z');
+        let (_, filtered) = state.launcher_view(100).unwrap();
+        assert!(filtered.is_empty());
+        state.launcher_backspace();
+        state.launcher_backspace();
+        let (_, restored) = state.launcher_view(100).unwrap();
+        assert_eq!(restored.len(), total);
+    }
+
+    #[test]
+    fn launcher_cycle_wraps_forward_and_backward() {
+        let mut state = make_state();
+        state.activate_launcher();
+        let len = state.launcher_filtered.len();
+        // Cycling backward from index 0 wraps to the last entry.
+        state.launcher_cycle(true);
+        assert_eq!(state.launcher_index, len - 1);
+        // Cycling forward from last wraps to 0.
+        state.launcher_cycle(false);
+        assert_eq!(state.launcher_index, 0);
+    }
+
+    #[test]
+    fn accept_launcher_writes_command_to_input_and_clears_launcher() {
+        let mut state = make_state();
+        state.activate_launcher();
+        // Select the first entry.
+        let expected_name = state.launcher_filtered[0].name;
+        state.accept_launcher();
+        assert!(!state.is_launcher_active());
+        assert_eq!(state.input, format!("{} ", expected_name));
+        assert_eq!(state.cursor, state.input.len());
+    }
+
+    #[test]
+    fn cancel_launcher_clears_all_fields() {
+        let mut state = make_state();
+        state.activate_launcher();
+        state.launcher_push_char('h');
+        assert!(state.is_launcher_active());
+        state.cancel_launcher();
+        assert!(!state.is_launcher_active());
+        assert!(state.launcher_query.is_empty());
+        assert!(state.launcher_filtered.is_empty());
+        assert_eq!(state.launcher_index, 0);
+    }
+
+    #[test]
+    fn activate_launcher_dismisses_reverse_search() {
+        let mut state = make_state();
+        state.input_history.push("previous".to_string());
+        state.activate_reverse_search();
+        assert!(state.is_reverse_search_active());
+        state.activate_launcher();
+        assert!(!state.is_reverse_search_active());
+        assert!(state.is_launcher_active());
+    }
+
+    #[test]
+    fn activate_reverse_search_dismisses_launcher() {
+        let mut state = make_state();
+        state.input_history.push("previous".to_string());
+        state.activate_launcher();
+        assert!(state.is_launcher_active());
+        state.activate_reverse_search();
+        assert!(!state.is_launcher_active());
+        assert!(state.is_reverse_search_active());
     }
 }
 

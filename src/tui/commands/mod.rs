@@ -160,6 +160,102 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
     ]
 }
 
+pub(crate) struct LauncherCommand {
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+}
+
+/// Returns the full command list for the Ctrl+K launcher.
+/// Must stay adjacent to autocomplete_names() so additions to one are reflected in the other.
+pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
+    &[
+        LauncherCommand {
+            name: "/anchors",
+            description: "show last-read file and search anchors",
+        },
+        LauncherCommand {
+            name: "/approve",
+            description: "approve a pending tool action",
+        },
+        LauncherCommand {
+            name: "/clear",
+            description: "clear the transcript",
+        },
+        LauncherCommand {
+            name: "/compact",
+            description: "summarize and compress conversation context",
+        },
+        LauncherCommand {
+            name: "/context",
+            description: "show context window usage stats",
+        },
+        LauncherCommand {
+            name: "/exit",
+            description: "quit the application",
+        },
+        LauncherCommand {
+            name: "/git",
+            description: "run a git command (branch, status, diff, log)",
+        },
+        LauncherCommand {
+            name: "/help",
+            description: "list available commands",
+        },
+        LauncherCommand {
+            name: "/history",
+            description: "show recent input history",
+        },
+        LauncherCommand {
+            name: "/index",
+            description: "manage the symbol index (status, build)",
+        },
+        LauncherCommand {
+            name: "/last",
+            description: "re-run the previous prompt",
+        },
+        LauncherCommand {
+            name: "/ls",
+            description: "list directory contents",
+        },
+        LauncherCommand {
+            name: "/lsp",
+            description: "show LSP server status",
+        },
+        LauncherCommand {
+            name: "/providers",
+            description: "list or switch AI providers",
+        },
+        LauncherCommand {
+            name: "/quit",
+            description: "quit the application",
+        },
+        LauncherCommand {
+            name: "/read",
+            description: "load a file into context",
+        },
+        LauncherCommand {
+            name: "/reject",
+            description: "reject a pending tool action",
+        },
+        LauncherCommand {
+            name: "/search",
+            description: "search code for a pattern",
+        },
+        LauncherCommand {
+            name: "/session",
+            description: "manage current session (clear)",
+        },
+        LauncherCommand {
+            name: "/sessions",
+            description: "list saved sessions",
+        },
+        LauncherCommand {
+            name: "/undo",
+            description: "undo the last assistant action",
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -24,6 +24,16 @@ pub(super) fn handle_key_event(
             state.should_quit = true;
         }
         (KeyCode::Enter, KeyModifiers::ALT) => state.insert_newline(),
+        (KeyCode::Esc, _) if state.is_launcher_active() => state.cancel_launcher(),
+        (KeyCode::Enter, _) if state.is_launcher_active() => state.accept_launcher(),
+        (KeyCode::Backspace, _) if state.is_launcher_active() => state.launcher_backspace(),
+        (KeyCode::Up, _) if state.is_launcher_active() => state.launcher_cycle(true),
+        (KeyCode::Down, _) if state.is_launcher_active() => state.launcher_cycle(false),
+        (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT)
+            if state.is_launcher_active() =>
+        {
+            state.launcher_push_char(c)
+        }
         (KeyCode::Esc, _) if state.is_autocomplete_active() => state.clear_autocomplete(),
         (KeyCode::Esc, _) if state.is_reverse_search_active() => state.cancel_reverse_search(),
         (KeyCode::Enter, _) if state.is_reverse_search_active() => state.accept_reverse_search(),
@@ -89,6 +99,11 @@ pub(super) fn handle_key_event(
         (KeyCode::PageDown, _) => state.scroll_down(10),
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => state.toggle_file_expand(),
         (KeyCode::Char('w'), KeyModifiers::CONTROL) => state.delete_word_before(),
+        (KeyCode::Char('k'), KeyModifiers::CONTROL) => {
+            if !state.is_busy {
+                state.activate_launcher();
+            }
+        }
         (KeyCode::Char('r'), KeyModifiers::CONTROL) => state.reverse_search_cycle(),
         (KeyCode::Char('['), KeyModifiers::ALT) => state.focus_prev_collapsible(),
         (KeyCode::Char(']'), KeyModifiers::ALT) => state.focus_next_collapsible(),

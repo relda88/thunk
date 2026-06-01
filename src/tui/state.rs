@@ -86,6 +86,10 @@ pub struct AppState {
     pub(crate) reverse_search_query: String,
     pub(crate) reverse_search_selection: usize,
     pub(crate) reverse_search_draft: Option<String>,
+    pub(crate) launcher_active: bool,
+    pub(crate) launcher_query: String,
+    pub(crate) launcher_filtered: Vec<&'static crate::tui::commands::LauncherCommand>,
+    pub(crate) launcher_index: usize,
     pub(crate) collapsed_message_indices: HashSet<usize>,
     pub(crate) collapsible_message_indices: Vec<usize>,
     pub(crate) focused_collapsible_idx: Option<usize>,
@@ -139,6 +143,10 @@ impl AppState {
             reverse_search_query: String::new(),
             reverse_search_selection: 0,
             reverse_search_draft: None,
+            launcher_active: false,
+            launcher_query: String::new(),
+            launcher_filtered: Vec::new(),
+            launcher_index: 0,
             collapsed_message_indices: HashSet::new(),
             collapsible_message_indices: Vec::new(),
             focused_collapsible_idx: None,
@@ -291,6 +299,7 @@ impl AppState {
             self.input_history.push(submitted.clone());
         }
         self.exit_reverse_search();
+        self.exit_launcher();
         self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
         Some(submitted)

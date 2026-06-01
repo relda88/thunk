@@ -114,6 +114,11 @@ impl Renderer {
             state.autocomplete_preview_items(4).len() as u16
         } else if state.reverse_search_view().is_some() {
             1
+        } else if state.is_launcher_active() {
+            state
+                .launcher_view(5)
+                .map(|(q, e)| e.len() + if !q.is_empty() { 1 } else { 0 })
+                .unwrap_or(0) as u16
         } else {
             0
         };
@@ -148,7 +153,7 @@ impl Renderer {
             self.paint_input(state, cur, w, h, input_base_rows);
         }
 
-        // Overlay rows: autocomplete dropdown or reverse-search bar (mutually exclusive).
+        // Overlay rows: autocomplete dropdown, reverse-search bar, or launcher (mutually exclusive).
         if overlay_rows > 0 {
             if state.is_autocomplete_active() {
                 self.paint_autocomplete_overlay(state, cur, w, h, overlay_rows);
@@ -157,6 +162,8 @@ impl Renderer {
                 let text = format!("bkwd-search: {}  {}", query, matched);
                 let display: String = text.chars().take(w as usize).collect();
                 self.paint(cur, 0, row, &display, w, base);
+            } else if let Some((query, entries)) = state.launcher_view(5) {
+                self.paint_launcher_overlay(cur, w, h, overlay_rows, &query, &entries);
             }
         }
 
@@ -364,11 +371,50 @@ impl Renderer {
         }
     }
 
+    fn paint_launcher_overlay(
+        &mut self,
+        cur: usize,
+        w: u16,
+        h: u16,
+        overlay_rows: u16,
+        query: &str,
+        entries: &[(&crate::tui::commands::LauncherCommand, bool)],
+    ) {
+        let accent = PackedStyle::new(Rgb::new(102, 214, 255), BG).with_bold();
+        let dim = PackedStyle::new(FG_DIM, BG);
+        let mut row_offset: u16 = 0;
+        if !query.is_empty() {
+            let row = h.saturating_sub(overlay_rows - row_offset + 1);
+            let text = format!("/ {}", query);
+            let display: String = text.chars().take(w as usize).collect();
+            self.paint(cur, 0, row, &display, w, dim);
+            row_offset += 1;
+        }
+        let name_col: usize = 14;
+        for (cmd, selected) in entries {
+            let row = h.saturating_sub(overlay_rows - row_offset + 1);
+            let marker = if *selected { "→ " } else { "  " };
+            let style = if *selected { accent } else { dim };
+            let name: String = cmd.name.chars().take(name_col).collect();
+            let pad = name_col.saturating_sub(name.chars().count());
+            let desc_w = (w as usize).saturating_sub(name_col + 4);
+            let desc: String = cmd.description.chars().take(desc_w).collect();
+            let text = format!("{}{}{}  {}", marker, name, " ".repeat(pad), desc);
+            let display: String = text.chars().take(w as usize).collect();
+            self.paint(cur, 0, row, &display, w, style);
+            row_offset += 1;
+        }
+    }
+
     fn paint_input(&mut self, state: &AppState, cur: usize, w: u16, h: u16, input_base_rows: u16) {
         let first_row = h.saturating_sub(input_base_rows + 1);
         let base = PackedStyle::new(FG, BG);
         let bold = base.with_bold();
-        let prefix = "> ";
+        let prefix = if state.is_launcher_active() {
+            ": "
+        } else {
+            "> "
+        };
         let prefix_w = prefix.len() as u16;
         let avail = w.saturating_sub(prefix_w) as usize;
         let (visible_lines, _, _) = state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
