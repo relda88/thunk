@@ -353,7 +353,10 @@ impl AppState {
         if !self.launcher_active {
             return None;
         }
-        let view_start = self.launcher_index.saturating_sub(max.saturating_sub(1));
+        let view_start = self
+            .launcher_index
+            .saturating_sub(max / 2)
+            .min(self.launcher_filtered.len().saturating_sub(max));
         let items = self
             .launcher_filtered
             .iter()

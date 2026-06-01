@@ -256,7 +256,7 @@ impl Renderer {
             let (prefix, prefix_style, text_style) = if state.pending_approval.is_some() {
                 ("! ", self.theme.chip_warning(), self.theme.muted())
             } else if state.is_busy {
-                let frame = SPINNER[self.spin_tick as usize % SPINNER.len()];
+                let frame = SPINNER[self.spin_tick as usize / 8 % SPINNER.len()];
                 let s: &'static str = match frame {
                     '-' => "- ",
                     '\\' => "\\ ",
