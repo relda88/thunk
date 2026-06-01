@@ -14,6 +14,9 @@ use self::symbols::SymbolPool;
 
 use super::state::{AppState, ApprovalRisk, DirtySections, MessageKind, Role};
 
+type StyledSpan = (String, PackedStyle);
+type StyledLine = (Vec<StyledSpan>, Option<usize>);
+
 const CTX_LOW: Rgb = Rgb::new(80, 200, 80);
 const CTX_MID: Rgb = Rgb::new(242, 179, 86);
 const CTX_HIGH: Rgb = Rgb::new(237, 104, 109);
@@ -314,31 +317,16 @@ impl Renderer {
         }
     }
 
-    fn paint_transcript(
-        &mut self,
-        state: &mut AppState,
-        cur: usize,
-        w: u16,
-        h: u16,
-        effective_rows: u16,
-    ) {
-        let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
-        let avail_w = w.saturating_sub(1) as usize;
-
+    fn build_transcript_lines(&self, state: &AppState, w: u16) -> Vec<StyledLine> {
         let base = self.theme.base();
         let dim = self.theme.dim();
         let alert = self.theme.chip_warning();
         let error_style = self.theme.chip_danger();
-
-        if state.messages.is_empty() {
-            self.paint(cur, 0, 2, "  type a message, or / for commands.", w, dim);
-            return;
-        }
+        let border = self.theme.border();
 
         let collapsible_ids = state.collapsible_indices();
+        let mut lines: Vec<StyledLine> = Vec::new();
 
-        // Each entry: (display_text, kind, source_message_index).
-        let mut lines: Vec<(String, MessageKind, Option<usize>)> = Vec::new();
         for (i, msg) in state.messages.iter().enumerate() {
             if !state.expanded_file_read {
                 if let Some(idx) = state.last_file_read_index {
@@ -351,68 +339,153 @@ impl Renderer {
                 && state.last_file_read_index.map_or(false, |idx| i == idx)
                 && msg.role == Role::Assistant;
 
+            let body_style = match msg.kind {
+                MessageKind::Normal => base,
+                MessageKind::Dimmed => dim,
+                MessageKind::Alert => alert,
+                MessageKind::Error => error_style,
+            };
+
+            let is_focused_collapsible = msg.is_collapsible
+                && state
+                    .focused_collapsible_idx
+                    .and_then(|fi| collapsible_ids.get(fi).copied())
+                    == Some(i);
+
             if msg.is_collapsible && state.collapsed_message_indices.contains(&i) {
-                // Collapsed: emit one summary line with a toggle affordance.
                 let summary: String = msg.content.chars().take(60).collect();
                 let ellipsis = if msg.content.chars().count() > 60 {
                     "…"
                 } else {
                     ""
                 };
-                let focused = state
-                    .focused_collapsible_idx
-                    .and_then(|fi| collapsible_ids.get(fi).copied())
-                    == Some(i);
-                let indicator = if focused { "▶[+] " } else { " [+] " };
-                lines.push((format!("{indicator}{summary}{ellipsis}"), msg.kind, Some(i)));
-                lines.push((String::new(), msg.kind, Some(i)));
+                let indicator = if is_focused_collapsible { "▶ " } else { "  " };
+                let indicator_style = if is_focused_collapsible {
+                    self.theme.border_active()
+                } else {
+                    dim
+                };
+                lines.push((
+                    vec![
+                        (indicator.to_string(), indicator_style),
+                        ("[+] ".to_string(), dim),
+                        (format!("{summary}{ellipsis}"), dim),
+                    ],
+                    Some(i),
+                ));
+                lines.push((vec![], Some(i)));
                 continue;
             }
 
-            let prefix = if is_expanded {
-                ""
-            } else {
-                match msg.role {
-                    Role::System => "system: ",
-                    Role::User => "you: ",
-                    Role::Assistant => "assistant: ",
+            if is_expanded {
+                let body_w = (w as usize).saturating_sub(2).max(8);
+                let body_lines = wrap_text(&msg.content, body_w);
+                for (li, body_line) in body_lines.into_iter().enumerate() {
+                    let border_span = if li == 0 && is_focused_collapsible {
+                        ("▶ ".to_string(), self.theme.border_active())
+                    } else {
+                        ("│ ".to_string(), border)
+                    };
+                    lines.push((vec![border_span, (body_line, body_style)], Some(i)));
                 }
-            };
-
-            // Two-char prefix reserved for all collapsible messages so wrap
-            // geometry is stable when focus moves. Focused = "▶ ", unfocused = "  ".
-            let focus_prefix = if msg.is_collapsible {
-                let focused = state
-                    .focused_collapsible_idx
-                    .and_then(|fi| collapsible_ids.get(fi).copied())
-                    == Some(i);
-                if focused {
-                    "▶ "
-                } else {
-                    ""
-                }
-            } else {
-                ""
-            };
-
-            let text = format!("{focus_prefix}{prefix}{}", msg.content);
-            for line in wrap_text(&text, avail_w.max(8)) {
-                lines.push((line, msg.kind, Some(i)));
+                lines.push((vec![], Some(i)));
+                continue;
             }
-            lines.push((String::new(), msg.kind, Some(i)));
+
+            let (badge_text, badge_style) = match msg.role {
+                Role::User => ("you", self.theme.badge_user()),
+                Role::Assistant => ("assistant", self.theme.badge_assistant()),
+                Role::System => ("system", self.theme.dim()),
+            };
+            let badge_len = badge_text.chars().count();
+            let prefix_w = 2 + badge_len + 2;
+            let body_w = (w as usize).saturating_sub(prefix_w).max(8);
+            let body_lines = wrap_text(&msg.content, body_w);
+
+            for (li, body_line) in body_lines.into_iter().enumerate() {
+                if li == 0 {
+                    let border_span = if is_focused_collapsible {
+                        ("▶ ".to_string(), self.theme.border_active())
+                    } else {
+                        ("│ ".to_string(), border)
+                    };
+                    lines.push((
+                        vec![
+                            border_span,
+                            (badge_text.to_string(), badge_style),
+                            ("  ".to_string(), base),
+                            (body_line, body_style),
+                        ],
+                        Some(i),
+                    ));
+                } else {
+                    let indent = " ".repeat(badge_len + 2);
+                    lines.push((
+                        vec![
+                            ("│ ".to_string(), border),
+                            (indent, base),
+                            (body_line, body_style),
+                        ],
+                        Some(i),
+                    ));
+                }
+            }
+            lines.push((vec![], Some(i)));
         }
+
+        if state.is_busy && state.pending_approval.is_none() && !state.messages.is_empty() {
+            if let Some(ast_idx) = state
+                .messages
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, m)| m.role == Role::Assistant)
+                .map(|(i, _)| i)
+            {
+                let cursor_style = if self.spin_tick % 12 < 6 {
+                    self.theme.badge_assistant()
+                } else {
+                    self.theme.chip_accent()
+                };
+                if let Some(target) = lines
+                    .iter()
+                    .rposition(|(spans, src)| *src == Some(ast_idx) && !spans.is_empty())
+                {
+                    lines[target].0.push(("▍".to_string(), cursor_style));
+                }
+            }
+        }
+
+        lines
+    }
+
+    fn paint_transcript(
+        &mut self,
+        state: &mut AppState,
+        cur: usize,
+        w: u16,
+        h: u16,
+        effective_rows: u16,
+    ) {
+        let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
+
+        let dim = self.theme.dim();
+        let base = self.theme.base();
+
+        if state.messages.is_empty() {
+            self.paint(cur, 0, 2, "  type a message, or / for commands.", w, dim);
+            return;
+        }
+
+        let lines = self.build_transcript_lines(state, w);
 
         let max_scroll = lines.len().saturating_sub(transcript_height);
         state.max_scroll = max_scroll;
 
-        // Scroll the newly focused collapsible into the upper third of the
-        // viewport. Consumed once per focus-cycle key press.
         if let Some(msg_idx) = state.scroll_to_message_idx.take() {
-            if let Some(target_line) = lines.iter().position(|(_, _, src)| *src == Some(msg_idx)) {
+            if let Some(target_line) = lines.iter().position(|(_, src)| *src == Some(msg_idx)) {
                 let upper_third = transcript_height / 3;
-                // desired_start is where we want the viewport to begin.
                 let desired_start = target_line.saturating_sub(upper_third);
-                // offset counts lines from the bottom; invert desired_start.
                 state.scroll_offset = max_scroll.saturating_sub(desired_start).min(max_scroll);
             }
         }
@@ -423,18 +496,24 @@ impl Renderer {
         let visible = &lines[start..end];
         let cap = h.saturating_sub(effective_rows + 1);
 
-        for (idx, (line, kind, _msg_idx)) in visible.iter().enumerate() {
+        for (idx, (spans, _msg_idx)) in visible.iter().enumerate() {
             let row = 2 + idx as u16;
             if row >= cap {
                 break;
             }
-            let style = match kind {
-                MessageKind::Dimmed => dim,
-                MessageKind::Alert => alert,
-                MessageKind::Error => error_style,
-                MessageKind::Normal => base,
-            };
-            self.paint(cur, 0, row, line, w, style);
+            let mut col: u16 = 0;
+            for (text, style) in spans {
+                if col >= w {
+                    break;
+                }
+                let avail = w.saturating_sub(col);
+                self.paint(cur, col, row, text, avail, *style);
+                let text_w = text
+                    .chars()
+                    .map(|c| UnicodeWidthChar::width(c).unwrap_or(1))
+                    .sum::<usize>() as u16;
+                col = col.saturating_add(text_w.min(avail));
+            }
         }
 
         if offset > 0 && !visible.is_empty() {
@@ -651,5 +730,77 @@ mod tests {
             stats.changed_cells, 0,
             "unchanged state must produce zero changed cells"
         );
+    }
+
+    #[test]
+    fn user_message_first_line_has_badge() {
+        let (_dir, mut state) = make_state();
+        state.messages.clear();
+        state.add_user_message("hello world");
+        let renderer = Renderer::new(80, 24);
+        let lines = renderer.build_transcript_lines(&state, 80);
+        let first = lines.iter().find(|(spans, _)| !spans.is_empty()).unwrap();
+        assert_eq!(first.0[0].0, "│ ");
+        assert_eq!(first.0[1].0, "you");
+    }
+
+    #[test]
+    fn assistant_message_first_line_has_badge() {
+        let (_dir, mut state) = make_state();
+        state.messages.clear();
+        state.add_assistant_message("hello world");
+        let renderer = Renderer::new(80, 24);
+        let lines = renderer.build_transcript_lines(&state, 80);
+        let first = lines.iter().find(|(spans, _)| !spans.is_empty()).unwrap();
+        assert_eq!(first.0[0].0, "│ ");
+        assert_eq!(first.0[1].0, "assistant");
+    }
+
+    #[test]
+    fn continuation_lines_have_badge_indent() {
+        let (_dir, mut state) = make_state();
+        state.messages.clear();
+        // With w=30: body_w = max(30 - (2+9+2), 8) = 17; 35 chars wraps into 3 lines.
+        state.add_assistant_message("a".repeat(35));
+        let renderer = Renderer::new(30, 24);
+        let lines = renderer.build_transcript_lines(&state, 30);
+        let content: Vec<_> = lines
+            .iter()
+            .filter(|(spans, _)| !spans.is_empty())
+            .collect();
+        assert!(content.len() > 1, "message should produce multiple lines");
+        let second = &content[1].0;
+        assert_eq!(second[0].0, "│ ");
+        assert_eq!(second[1].0, " ".repeat(11)); // "assistant"(9) + "  "(2)
+    }
+
+    #[test]
+    fn collapsed_message_renders_as_summary() {
+        let (_dir, mut state) = make_state();
+        state.messages.clear();
+        state.add_collapsible_tool_message("this is a tool result");
+        let msg_idx = state.messages.len() - 1;
+        state.collapsed_message_indices.insert(msg_idx);
+        let renderer = Renderer::new(80, 24);
+        let lines = renderer.build_transcript_lines(&state, 80);
+        let summary = lines.iter().find(|(spans, _)| !spans.is_empty()).unwrap();
+        assert!(summary.0.iter().any(|(text, _)| text.contains("[+]")));
+    }
+
+    #[test]
+    fn generation_cursor_appended_when_busy() {
+        let (_dir, mut state) = make_state();
+        state.messages.clear();
+        state.add_assistant_message("hello");
+        state.is_busy = true;
+        let renderer = Renderer::new(80, 24);
+        let lines = renderer.build_transcript_lines(&state, 80);
+        let last_content = lines
+            .iter()
+            .filter(|(spans, _)| !spans.is_empty())
+            .last()
+            .unwrap();
+        let last_span = last_content.0.last().unwrap();
+        assert_eq!(last_span.0, "▍");
     }
 }
