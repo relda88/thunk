@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use crate::app::config::Config;
 use crate::app::paths::AppPaths;
+use crate::core::config::Config;
 
 /// Defines the application state, including the current input, cursor position, message history, and status
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,10 +28,6 @@ impl DirtySections {
     pub(crate) const INPUT: Self = Self(0b0100);
     pub(crate) const STATUS: Self = Self(0b1000);
     pub(crate) const ALL: Self = Self(0b1111);
-
-    pub(crate) fn contains(self, other: Self) -> bool {
-        self.0 & other.0 != 0
-    }
 }
 
 impl std::ops::BitOrAssign for DirtySections {
@@ -221,16 +217,6 @@ impl AppState {
         });
         self.reset_scroll();
         self.tag_last_message_collapsible();
-    }
-
-    pub fn add_alert_message(&mut self, content: impl Into<String>) {
-        self.messages.push(ChatMessage {
-            role: Role::System,
-            content: content.into(),
-            kind: MessageKind::Alert,
-            is_collapsible: false,
-        });
-        self.reset_scroll();
     }
 
     pub fn add_error_message(&mut self, content: impl Into<String>) {

@@ -10,13 +10,12 @@ use crate::app::config::{AllowedCommandTool, Config};
 use crate::app::paths::AppPaths;
 use crate::app::AppContext;
 use crate::app::Result;
-use crate::runtime::{AnswerSource, RuntimeEvent, RuntimeRequest};
+use crate::runtime::{RuntimeEvent, RuntimeRequest};
 use crate::storage::session::SessionMeta;
-use crate::tools::RiskLevel;
 
-use super::commands;
 use super::renderer::Renderer;
-use super::state::{AppState, ApprovalRisk, DirtySections, PendingApprovalState};
+use super::state::{AppState, DirtySections};
+use super::{commands, events, format};
 
 const ACTIVE_MS: u64 = 33;
 const SLOW_MS: u64 = 66;
@@ -230,10 +229,10 @@ pub(crate) fn run_app(
 
 fn handle_worker_reply(state: &mut AppState, reply: WorkerReply) {
     match reply {
-        WorkerReply::Event(ev) => apply_runtime_event(state, ev),
+        WorkerReply::Event(ev) => events::apply_runtime_event(state, ev),
         WorkerReply::HandleOk => state.is_busy = false,
         WorkerReply::HandleErr(msg) => {
-            apply_runtime_event(state, RuntimeEvent::Failed { message: msg });
+            events::apply_runtime_event(state, RuntimeEvent::Failed { message: msg });
             state.is_busy = false;
         }
         WorkerReply::ResetOk => state.is_busy = false,
@@ -242,7 +241,7 @@ fn handle_worker_reply(state: &mut AppState, reply: WorkerReply) {
             state.is_busy = false;
         }
         WorkerReply::SessionsOk(sessions) => {
-            state.add_system_message(format_sessions_list(&sessions));
+            state.add_system_message(format::format_sessions_list(&sessions));
             state.is_busy = false;
         }
         WorkerReply::SessionsErr(e) => {
@@ -312,7 +311,7 @@ fn handle_key_event(
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             if let Some(prompt) = &state.last_prompt {
                 let path = std::env::temp_dir().join("thunk_last_prompt.txt");
-                dump_prompt_to_file(&path, prompt);
+                format::dump_prompt_to_file(&path, prompt);
                 state.set_status(&format!("prompt dumped to {}", path.display()));
             } else {
                 state.set_status("no prompt captured yet");
@@ -494,260 +493,6 @@ fn resolve_custom_command(
     Some(Ok(req))
 }
 
-/// Converts a raw tool_result InfoMessage into a compact human-readable summary.
-/// Non-tool-result InfoMessages (query output, error text, etc.) pass through unchanged.
-fn summarize_command_output(text: &str) -> String {
-    let Some(after_prefix) = text.strip_prefix("=== tool_result: ") else {
-        return text.to_string();
-    };
-    let Some(name_end) = after_prefix.find(" ===\n") else {
-        return text.to_string();
-    };
-    let tool_name = &after_prefix[..name_end];
-    let header_len = "=== tool_result: ".len() + name_end + " ===\n".len();
-    let raw_body = text.get(header_len..).unwrap_or("").trim_end();
-    let body = raw_body
-        .strip_suffix("=== /tool_result ===")
-        .unwrap_or(raw_body)
-        .trim_end();
-
-    match tool_name {
-        "read_file" => {
-            let first = body.lines().next().unwrap_or("");
-            match parse_read_file_header(first) {
-                Some((n, false)) => format!("read: {n} lines"),
-                Some((n, true)) => format!("read: {n} lines (truncated)"),
-                None => "read: done".to_string(),
-            }
-        }
-        "search_code" => {
-            if body.starts_with("No matches found.") {
-                return "search: no matches".to_string();
-            }
-            let first = body.lines().next().unwrap_or("");
-            // Truncated header: "[showing first M of N matches — ...]"
-            if let Some(inner) = first.strip_prefix("[showing first ") {
-                if let Some(of_pos) = inner.find(" of ") {
-                    let m = &inner[..of_pos];
-                    let after_of = &inner[of_pos + " of ".len()..];
-                    let n = after_of.split_whitespace().next().unwrap_or("?");
-                    return format!("search: {n} matches (showing {m})");
-                }
-            }
-            // Untruncated: match lines are indented "  <line_num>: <content>"
-            let count = body
-                .lines()
-                .filter(|l| {
-                    l.starts_with("  ")
-                        && l.trim_start()
-                            .chars()
-                            .next()
-                            .map(|c| c.is_ascii_digit())
-                            .unwrap_or(false)
-                })
-                .count();
-            if count > 0 {
-                format!("search: {count} matches")
-            } else {
-                "search: done".to_string()
-            }
-        }
-        "git_status" | "git_diff" | "git_log" => body.to_string(),
-        "git_branch" => {
-            if body == "No branches found." {
-                return "git branch: no branches".to_string();
-            }
-            let current = body
-                .lines()
-                .find(|l| l.starts_with("current: "))
-                .and_then(|l| l.strip_prefix("current: "))
-                .unwrap_or("unknown");
-            format!("git branch: {current}")
-        }
-        "list_dir" => {
-            let dir_count = body.lines().filter(|l| l.starts_with("dir")).count();
-            let file_count = body.lines().filter(|l| l.starts_with("file")).count();
-            format!("ls: {dir_count} dirs, {file_count} files")
-        }
-        _ => text.to_string(),
-    }
-}
-
-/// Parses the first line of a read_file body: "[N lines]" or "[N lines — showing first M]".
-/// Returns `(total_lines, is_truncated)` or `None` if the format is not recognised.
-fn parse_read_file_header(line: &str) -> Option<(usize, bool)> {
-    let inner = line.strip_prefix('[')?.strip_suffix(']')?;
-    let truncated = inner.contains(" — ");
-    let count_str = inner.split(" — ").next()?.split_whitespace().next()?;
-    let n: usize = count_str.parse().ok()?;
-    Some((n, truncated))
-}
-
-fn format_sessions_list(sessions: &[SessionMeta]) -> String {
-    if sessions.is_empty() {
-        return "current project sessions: none".to_string();
-    }
-
-    let mut lines = vec!["current project sessions:".to_string()];
-    for session in sessions {
-        lines.push(format!(
-            "{}  |  {}  |  {} messages",
-            session.id,
-            format_session_updated_at(session.updated_at),
-            session.message_count
-        ));
-    }
-    lines.join("\n")
-}
-
-fn format_session_updated_at(updated_at: u64) -> String {
-    let seconds = normalize_session_timestamp_seconds(updated_at);
-    let days = seconds.div_euclid(86_400);
-    let secs_of_day = seconds.rem_euclid(86_400);
-    let hour = secs_of_day / 3_600;
-    let minute = (secs_of_day % 3_600) / 60;
-    let second = secs_of_day % 60;
-    let (year, month, day) = civil_from_unix_days(days);
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
-}
-
-fn normalize_session_timestamp_seconds(timestamp: u64) -> i64 {
-    if timestamp >= 1_000_000_000_000_000 {
-        (timestamp / 1_000_000_000) as i64
-    } else if timestamp >= 10_000_000_000 {
-        (timestamp / 1_000) as i64
-    } else {
-        timestamp as i64
-    }
-}
-
-fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + if month <= 2 { 1 } else { 0 };
-    (year as i32, month as u32, day as u32)
-}
-
-fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
-    let _ = std::fs::write(path, prompt);
-}
-
-fn decode_approval_preview(tool_name: &str, payload: &str) -> Vec<String> {
-    match tool_name {
-        "edit_file" => {
-            let parts: Vec<&str> = payload.splitn(5, '\x00').collect();
-            if parts.len() < 5 {
-                return vec![];
-            }
-            let search_lines = parts[3].lines().map(|l| format!("- {l}"));
-            let replace_lines = parts[4].lines().map(|l| format!("+ {l}"));
-            search_lines.chain(replace_lines).take(4).collect()
-        }
-        "shell" => {
-            if payload.is_empty() {
-                vec![]
-            } else {
-                vec![payload.to_string()]
-            }
-        }
-        "write_file" => {
-            let parts: Vec<&str> = payload.splitn(4, '\x00').collect();
-            if parts.len() < 4 {
-                return vec![];
-            }
-            parts[3].lines().take(3).map(|l| format!("  {l}")).collect()
-        }
-        _ => vec![],
-    }
-}
-
-fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
-    match event {
-        RuntimeEvent::ActivityChanged(activity) => state.set_status(&activity.label()),
-        RuntimeEvent::AssistantMessageStarted => state.begin_assistant_message(),
-        RuntimeEvent::AssistantMessageChunk(chunk) => state.append_assistant_chunk(&chunk),
-        RuntimeEvent::AssistantMessageFinished => {}
-        RuntimeEvent::ToolCallStarted { name } => {
-            state.add_collapsible_tool_message(format!("tool: {name}"));
-        }
-        RuntimeEvent::ToolCallFinished { name, summary } => match summary {
-            // FileReadFinished fires for every successful read_file and adds the
-            // canonical "read {path} ({n} lines) — Ctrl+O to expand" message.
-            // Suppress the compact ToolCallFinished duplicate to keep a single summary.
-            Some(_) if name == "read_file" => {}
-            Some(s) => state.add_collapsible_tool_message(s),
-            None => state.add_tool_message(format!("tool failed: {name}")),
-        },
-        RuntimeEvent::AnswerReady(source) => {
-            state.pending_approval = None;
-            state.mark_dirty(DirtySections::INPUT);
-            state.set_status("ready");
-            if let AnswerSource::ToolLimitReached = source {
-                state.add_system_message("Tool limit reached. Response may be incomplete.");
-            }
-        }
-        RuntimeEvent::Failed { message } => {
-            state.pending_approval = None;
-            state.mark_dirty(DirtySections::INPUT);
-            state.set_status("error");
-            state.add_error_message(message);
-        }
-        RuntimeEvent::ApprovalRequired { pending, evidence } => {
-            let risk = match pending.risk {
-                RiskLevel::High => ApprovalRisk::High,
-                RiskLevel::Medium => ApprovalRisk::Medium,
-                RiskLevel::Low => ApprovalRisk::Low,
-            };
-            let preview = decode_approval_preview(&pending.tool_name, &pending.payload);
-            state.pending_approval = Some(PendingApprovalState {
-                tool_name: pending.tool_name,
-                summary: pending.summary,
-                risk,
-                evidence,
-                preview,
-            });
-            state.mark_dirty(DirtySections::INPUT);
-            state.set_status("awaiting approval");
-        }
-        RuntimeEvent::InfoMessage(text) => {
-            state.add_collapsible_tool_message(summarize_command_output(&text))
-        }
-        RuntimeEvent::PromptAssembled(prompt) => state.set_last_prompt(prompt),
-        RuntimeEvent::SystemMessage(text) => state.add_system_message(text),
-        RuntimeEvent::FileReadFinished {
-            path,
-            line_count,
-            content: _,
-        } => {
-            state.add_system_message(format!(
-                "read {path} ({line_count} lines) — Ctrl+O to expand"
-            ));
-        }
-        RuntimeEvent::DirectReadCompleted => {
-            let message_index = state.messages.len() - 1;
-            state.store_file_read(message_index);
-        }
-        RuntimeEvent::ContextUsage {
-            prompt_tokens,
-            context_window_tokens,
-        } => {
-            let pct = (prompt_tokens * 100 / u64::from(context_window_tokens)).min(100) as u8;
-            state.set_context_pct(pct);
-        }
-        // Advisory only — absorbed by the logging layer before reaching here.
-        RuntimeEvent::BackendTiming { .. } => {}
-        RuntimeEvent::BackendTokenCounts { .. } => {}
-        RuntimeEvent::RuntimeTrace(_) => {}
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -759,142 +504,12 @@ mod tests {
     use crate::app::session::ActiveSession;
     use crate::app::AppContext;
     use crate::llm::providers::build_backend;
-    use crate::runtime::{AnswerSource, ProjectRoot, RuntimeEvent, RuntimeRequest};
+    use crate::runtime::{ProjectRoot, RuntimeRequest};
     use crate::storage::session::{SessionStore, StoredMessage};
     use crate::tools::default_registry;
 
-    use super::{
-        apply_runtime_event, decode_approval_preview, format_session_updated_at,
-        format_sessions_list, handle_key_event, parse_read_file_header, summarize_command_output,
-        WorkerCmd,
-    };
+    use super::{handle_key_event, WorkerCmd};
     use crate::tui::state::{AppState, ApprovalRisk, PendingApprovalState};
-
-    fn tool_result(name: &str, body: &str) -> String {
-        format!("=== tool_result: {name} ===\n{body}\n=== /tool_result ===\n\n")
-    }
-
-    // parse_read_file_header
-
-    #[test]
-    fn parses_untruncated_header() {
-        assert_eq!(parse_read_file_header("[42 lines]"), Some((42, false)));
-    }
-
-    #[test]
-    fn parses_truncated_header() {
-        assert_eq!(
-            parse_read_file_header("[300 lines — showing first 200]"),
-            Some((300, true))
-        );
-    }
-
-    #[test]
-    fn rejects_malformed_header() {
-        assert_eq!(parse_read_file_header("no brackets here"), None);
-        assert_eq!(parse_read_file_header("[not a number lines]"), None);
-    }
-
-    // summarize_command_output — pass-through cases
-
-    #[test]
-    fn non_tool_result_passes_through_unchanged() {
-        let msg = "no conversation history";
-        assert_eq!(summarize_command_output(msg), msg);
-    }
-
-    #[test]
-    fn query_output_passes_through_unchanged() {
-        let msg = "last search: fn handle";
-        assert_eq!(summarize_command_output(msg), msg);
-    }
-
-    // summarize_command_output — read_file
-
-    #[test]
-    fn read_file_untruncated_shows_line_count() {
-        let body = "[42 lines]\nfn main() {}\n";
-        let summary = summarize_command_output(&tool_result("read_file", body));
-        assert_eq!(summary, "read: 42 lines");
-    }
-
-    #[test]
-    fn read_file_truncated_shows_line_count_and_truncated() {
-        let body =
-            "[300 lines — showing first 200]\nfn main() {}\n[truncated: 100 lines not shown]";
-        let summary = summarize_command_output(&tool_result("read_file", body));
-        assert_eq!(summary, "read: 300 lines (truncated)");
-    }
-
-    // summarize_command_output — search_code
-
-    #[test]
-    fn search_no_matches_shows_no_matches() {
-        let body = "No matches found.";
-        let summary = summarize_command_output(&tool_result("search_code", body));
-        assert_eq!(summary, "search: no matches");
-    }
-
-    #[test]
-    fn search_truncated_shows_total_and_shown() {
-        let body = "[showing first 15 of 42 matches — read a specific matched file with read_file]\nsrc/main.rs (3 matches)\n  12: fn handle()";
-        let summary = summarize_command_output(&tool_result("search_code", body));
-        assert_eq!(summary, "search: 42 matches (showing 15)");
-    }
-
-    #[test]
-    fn search_untruncated_counts_match_lines() {
-        let body =
-            "src/main.rs (2 matches)\n  12: fn handle_request() {}\n  45: fn handle_response() {}";
-        let summary = summarize_command_output(&tool_result("search_code", body));
-        assert_eq!(summary, "search: 2 matches");
-    }
-
-    #[test]
-    fn unknown_tool_passes_through_raw() {
-        let raw = tool_result("unknown_tool", "some output");
-        assert_eq!(summarize_command_output(&raw), raw);
-    }
-
-    #[test]
-    fn summarize_git_branch_shows_current_branch() {
-        let body = "current: dev\nbranches: dev, main";
-        let raw = tool_result("git_branch", body);
-        assert_eq!(summarize_command_output(&raw), "git branch: dev");
-    }
-
-    #[test]
-    fn summarize_list_dir_shows_counts() {
-        let body = "dir   src\ndir   docs\nfile  README.md\nfile  Cargo.toml\nfile  main.rs";
-        let raw = tool_result("list_dir", body);
-        assert_eq!(summarize_command_output(&raw), "ls: 2 dirs, 3 files");
-    }
-
-    #[test]
-    fn session_timestamp_formats_as_utc_datetime() {
-        let ts = 1_778_198_400_000_000_000_u64;
-        assert_eq!(format_session_updated_at(ts), "2026-05-08 00:00:00 UTC");
-    }
-
-    #[test]
-    fn sessions_list_includes_id_timestamp_and_message_count() {
-        let sessions = vec![crate::storage::session::SessionMeta {
-            id: "abc123".into(),
-            project_root: Some("/tmp/project".into()),
-            created_at: 0,
-            updated_at: 1_778_198_400_000_000_000,
-            message_count: 3,
-            last_read_file: None,
-            last_search_query: None,
-            last_search_scope: None,
-        }];
-
-        let text = format_sessions_list(&sessions);
-        assert!(text.contains("current project sessions:"));
-        assert!(text.contains("abc123"));
-        assert!(text.contains("2026-05-08 00:00:00 UTC"));
-        assert!(text.contains("3 messages"));
-    }
 
     #[test]
     fn session_clear_removes_old_project_sessions_and_leaves_fresh_active_session() {
@@ -1045,49 +660,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn context_usage_event_sets_context_pct() {
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-
-        assert_eq!(state.context_pct, None, "starts with no indicator");
-
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ContextUsage {
-                prompt_tokens: 64_000,
-                context_window_tokens: 128_000,
-            },
-        );
-
-        assert_eq!(state.context_pct, Some(50));
-    }
-
-    #[test]
-    fn context_usage_event_clamps_at_100_pct() {
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ContextUsage {
-                prompt_tokens: 200_000,
-                context_window_tokens: 128_000,
-            },
-        );
-
-        assert_eq!(state.context_pct, Some(100));
-    }
-
-    fn make_pending(tool_name: &str, risk: crate::tools::RiskLevel) -> crate::tools::PendingAction {
-        crate::tools::PendingAction {
-            tool_name: tool_name.to_string(),
-            summary: format!("{tool_name} summary"),
-            risk,
-            payload: String::new(),
-        }
-    }
-
     fn make_key(
         code: crossterm::event::KeyCode,
         mods: crossterm::event::KeyModifiers,
@@ -1098,99 +670,6 @@ mod tests {
             kind: crossterm::event::KeyEventKind::Press,
             state: crossterm::event::KeyEventState::NONE,
         }
-    }
-
-    #[test]
-    fn approval_required_sets_pending_approval() {
-        use crate::tools::RiskLevel;
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-        let messages_before = state.messages.len();
-
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ApprovalRequired {
-                pending: make_pending("shell", RiskLevel::High),
-                evidence: vec!["src/main.rs:10".to_string()],
-            },
-        );
-
-        let approval = state.pending_approval.as_ref().expect("should be Some");
-        assert_eq!(approval.tool_name, "shell");
-        assert_eq!(approval.summary, "shell summary");
-        assert_eq!(approval.risk, ApprovalRisk::High);
-        assert_eq!(approval.evidence, vec!["src/main.rs:10"]);
-        assert_eq!(state.status, "awaiting approval");
-        assert_eq!(
-            state.messages.len(),
-            messages_before,
-            "no transcript entry added"
-        );
-    }
-
-    #[test]
-    fn approval_required_maps_medium_risk() {
-        use crate::tools::RiskLevel;
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ApprovalRequired {
-                pending: make_pending("edit_file", RiskLevel::Medium),
-                evidence: vec![],
-            },
-        );
-
-        let approval = state.pending_approval.as_ref().unwrap();
-        assert_eq!(approval.risk, ApprovalRisk::Medium);
-    }
-
-    #[test]
-    fn answer_ready_clears_pending_approval() {
-        use crate::tools::RiskLevel;
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ApprovalRequired {
-                pending: make_pending("shell", RiskLevel::High),
-                evidence: vec![],
-            },
-        );
-        assert!(state.pending_approval.is_some());
-
-        apply_runtime_event(&mut state, RuntimeEvent::AnswerReady(AnswerSource::Direct));
-        assert!(
-            state.pending_approval.is_none(),
-            "AnswerReady must clear pending_approval"
-        );
-    }
-
-    #[test]
-    fn failed_clears_pending_approval() {
-        use crate::tools::RiskLevel;
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ApprovalRequired {
-                pending: make_pending("edit_file", RiskLevel::Medium),
-                evidence: vec![],
-            },
-        );
-        assert!(state.pending_approval.is_some());
-
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::Failed {
-                message: "err".into(),
-            },
-        );
-        assert!(
-            state.pending_approval.is_none(),
-            "Failed must clear pending_approval"
-        );
     }
 
     #[test]
@@ -1215,6 +694,25 @@ mod tests {
             WorkerCmd::Handle(RuntimeRequest::Reject) => {}
             other => panic!("expected Reject, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn clear_messages_resets_pending_approval() {
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "shell".into(),
+            summary: "run tests".into(),
+            risk: ApprovalRisk::High,
+            evidence: vec![],
+            preview: vec![],
+        });
+        assert!(state.pending_approval.is_some());
+        state.clear_messages();
+        assert!(
+            state.pending_approval.is_none(),
+            "clear_messages must reset pending_approval"
+        );
     }
 
     #[test]
@@ -1254,75 +752,5 @@ mod tests {
             WorkerCmd::Handle(RuntimeRequest::Approve) => {}
             other => panic!("expected Approve, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn clear_messages_resets_pending_approval() {
-        use crate::tools::RiskLevel;
-        let harness = TestHarness::new();
-        let mut state = AppState::new(&harness.config, &harness.paths);
-        apply_runtime_event(
-            &mut state,
-            RuntimeEvent::ApprovalRequired {
-                pending: make_pending("shell", RiskLevel::High),
-                evidence: vec![],
-            },
-        );
-        assert!(state.pending_approval.is_some());
-
-        state.clear_messages();
-        assert!(
-            state.pending_approval.is_none(),
-            "clear_messages must reset pending_approval"
-        );
-    }
-
-    #[test]
-    fn decode_edit_file_produces_diff_lines() {
-        let payload = "v2\x00/abs/src/lib.rs\x00src/lib.rs\x00old line\x00new line";
-        let preview = decode_approval_preview("edit_file", payload);
-        assert_eq!(preview, vec!["- old line", "+ new line"]);
-    }
-
-    #[test]
-    fn decode_edit_file_caps_at_four_lines() {
-        let search = "a\nb\nc";
-        let replace = "x\ny\nz";
-        let payload = format!("v2\x00/abs/f.rs\x00f.rs\x00{search}\x00{replace}");
-        let preview = decode_approval_preview("edit_file", &payload);
-        assert_eq!(preview.len(), 4, "must cap at 4 total lines");
-        assert!(preview[0].starts_with("- "));
-        assert!(preview[1].starts_with("- "));
-        assert!(preview[2].starts_with("- "));
-        assert!(preview[3].starts_with("+ "));
-    }
-
-    #[test]
-    fn decode_shell_produces_command_line() {
-        let preview = decode_approval_preview("shell", "cargo test --no-default-features");
-        assert_eq!(preview, vec!["cargo test --no-default-features"]);
-    }
-
-    #[test]
-    fn decode_write_file_produces_indented_content_lines() {
-        let payload = "v2\x00/abs/out.rs\x00out.rs\x00fn main() {}\nfn foo() {}\nfn bar() {}";
-        let preview = decode_approval_preview("write_file", payload);
-        assert_eq!(
-            preview,
-            vec!["  fn main() {}", "  fn foo() {}", "  fn bar() {}"]
-        );
-    }
-
-    #[test]
-    fn decode_unknown_tool_produces_empty_preview() {
-        let preview = decode_approval_preview("read_file", "some payload");
-        assert!(preview.is_empty());
-    }
-
-    #[test]
-    fn decode_empty_payload_does_not_panic() {
-        assert!(decode_approval_preview("edit_file", "").is_empty());
-        assert!(decode_approval_preview("shell", "").is_empty());
-        assert!(decode_approval_preview("write_file", "").is_empty());
     }
 }

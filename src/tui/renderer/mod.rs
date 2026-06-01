@@ -196,6 +196,7 @@ impl Renderer {
             }
 
             let max_scroll = lines.len().saturating_sub(transcript_height);
+            state.max_scroll = max_scroll;
 
             // Scroll the newly focused collapsible into the upper third of the
             // viewport. Consumed once per focus-cycle key press.
@@ -253,26 +254,9 @@ impl Renderer {
 
         // Approval widget: rows above the input area (between separator and input)
         if approval_rows > 0 {
-            if let Some(ref approval) = state.pending_approval {
-                let first_row = h.saturating_sub(effective_rows + 1);
-                let risk_color = match approval.risk {
-                    ApprovalRisk::High => Rgb::new(237, 104, 109),
-                    ApprovalRisk::Medium => Rgb::new(242, 179, 86),
-                    ApprovalRisk::Low => Rgb::new(102, 214, 255),
-                };
-                let label_style = PackedStyle::new(risk_color, BG).with_bold();
-                let label = format!("! {}  {}", approval.tool_name, approval.summary);
-                self.paint(cur, 0, first_row, &label, w, label_style);
-
-                let preview_count = approval.preview.len().min(4);
-                for (i, line) in approval.preview.iter().take(4).enumerate() {
-                    let display: String = line.chars().take(w as usize).collect();
-                    self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
-                }
-
-                let hint_row = first_row + 1 + preview_count as u16;
-                self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
-            }
+            let first_row = h.saturating_sub(effective_rows + 1);
+            let preview_count = approval_rows.saturating_sub(2) as usize;
+            self.paint_approval_widget(state, first_row, w, preview_count);
         }
 
         // Rows above overlay: input area
@@ -376,6 +360,36 @@ impl Renderer {
         style: PackedStyle,
     ) {
         self.frames[cur].write_text_clipped(x, y, text, max_width, style, &mut self.symbols);
+    }
+
+    fn paint_approval_widget(
+        &mut self,
+        state: &AppState,
+        first_row: u16,
+        w: u16,
+        preview_count: usize,
+    ) {
+        let Some(ref approval) = state.pending_approval else {
+            return;
+        };
+        let cur = self.current;
+        let dim = PackedStyle::new(FG_DIM, BG);
+        let risk_color = match approval.risk {
+            ApprovalRisk::High => Rgb::new(237, 104, 109),
+            ApprovalRisk::Medium => Rgb::new(242, 179, 86),
+            ApprovalRisk::Low => Rgb::new(102, 214, 255),
+        };
+        let label_style = PackedStyle::new(risk_color, BG).with_bold();
+        let label = format!("! {}  {}", approval.tool_name, approval.summary);
+        self.paint(cur, 0, first_row, &label, w, label_style);
+
+        for (i, line) in approval.preview.iter().take(4).enumerate() {
+            let display: String = line.chars().take(w as usize).collect();
+            self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
+        }
+
+        let hint_row = first_row + 1 + preview_count as u16;
+        self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
     }
 }
 
