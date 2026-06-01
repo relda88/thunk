@@ -122,7 +122,7 @@ impl Renderer {
         } else if state.is_launcher_active() {
             state
                 .launcher_view(5)
-                .map(|(q, e)| e.len() + if !q.is_empty() { 1 } else { 0 })
+                .map(|(_, e)| e.len() + 1)
                 .unwrap_or(0) as u16
         } else {
             0
@@ -163,7 +163,7 @@ impl Renderer {
                 self.paint_autocomplete_overlay(state, cur, w, h, overlay_rows);
             } else if let Some((query, matched)) = state.reverse_search_view() {
                 let row = h.saturating_sub(overlay_rows + 1);
-                let text = format!("bkwd-search: {}  {}", query, matched);
+                let text = format!("search: {} → {}", query, matched);
                 let display: String = text.chars().take(w as usize).collect();
                 self.paint(cur, 0, row, &display, w, base);
             } else if let Some((query, entries)) = state.launcher_view(5) {
@@ -220,6 +220,12 @@ impl Renderer {
         self.frames[cur].write_text_clipped(x, y, text, max_width, style, &mut self.symbols);
     }
 
+    #[cfg(test)]
+    fn rendered_cell_style(&self, x: u16, y: u16) -> PackedStyle {
+        let rendered = 1 - self.current;
+        self.frames[rendered].get(x, y).style
+    }
+
     fn paint_header(&mut self, state: &AppState, cur: usize, w: u16) {
         let name = format!(" {} ", state.app_name);
         let sep = " | ";
@@ -250,6 +256,22 @@ impl Renderer {
                 hints_len.min(w - hints_col),
                 self.theme.dim(),
             );
+        }
+
+        let (label, label_style) = if state.pending_approval.is_some() {
+            ("● awaiting approval", self.theme.chip_warning())
+        } else if state.status == "error" {
+            ("● error", self.theme.chip_danger())
+        } else if state.status == "ready" {
+            ("● ready", self.theme.dim())
+        } else {
+            ("● generating", self.theme.chip_accent())
+        };
+        let label_len = label.chars().count() as u16;
+        let left_used = name_len + sep1_len + hints_len;
+        if w > label_len && w.saturating_sub(label_len) > left_used {
+            let col = w.saturating_sub(label_len);
+            self.paint(cur, col, 0, label, label_len, label_style);
         }
     }
 
@@ -548,7 +570,7 @@ impl Renderer {
         let accent = self.theme.chip_accent();
         let dim = self.theme.dim();
         let mut row_offset: u16 = 0;
-        if !query.is_empty() {
+        {
             let row = h.saturating_sub(overlay_rows - row_offset + 1);
             let text = format!("/ {}", query);
             let display: String = text.chars().take(w as usize).collect();
@@ -574,7 +596,9 @@ impl Renderer {
     fn paint_input(&mut self, state: &AppState, cur: usize, w: u16, h: u16, input_base_rows: u16) {
         let first_row = h.saturating_sub(input_base_rows + 1);
         let base = self.theme.base();
-        let prefix_style = if state.is_busy {
+        let is_generating =
+            state.status != "ready" && state.status != "error" && state.pending_approval.is_none();
+        let prefix_style = if is_generating {
             self.theme.chip_accent()
         } else {
             self.theme.muted()
@@ -827,5 +851,65 @@ mod tests {
                 assert_ne!(last.0, "▍", "cursor must not appear on completed message");
             }
         }
+    }
+
+    #[test]
+    fn paint_input_prefix_is_muted_when_ready() {
+        let (_dir, mut state) = make_state();
+        // status starts as "ready" and pending_approval is None — is_generating = false
+        let mut renderer = Renderer::new(80, 24);
+        let mut out = Vec::<u8>::new();
+        renderer
+            .render(&mut state, &mut out, DirtySections::ALL)
+            .unwrap();
+        // input row: h - input_base_rows - 1 = 24 - 1 - 1 = 22; prefix at col 0
+        let cell_style = renderer.rendered_cell_style(0, 22);
+        assert_eq!(
+            cell_style,
+            renderer.theme.muted(),
+            "prefix must be muted when status is ready"
+        );
+    }
+
+    #[test]
+    fn paint_input_prefix_is_accent_when_generating() {
+        let (_dir, mut state) = make_state();
+        state.set_status("generating...");
+        let mut renderer = Renderer::new(80, 24);
+        let mut out = Vec::<u8>::new();
+        renderer
+            .render(&mut state, &mut out, DirtySections::ALL)
+            .unwrap();
+        let cell_style = renderer.rendered_cell_style(0, 22);
+        assert_eq!(
+            cell_style,
+            renderer.theme.chip_accent(),
+            "prefix must be accent when actively generating"
+        );
+    }
+
+    #[test]
+    fn paint_input_prefix_is_muted_during_approval_wait() {
+        use crate::tui::state::{ApprovalRisk, PendingApprovalState};
+        let (_dir, mut state) = make_state();
+        state.set_status("awaiting approval");
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "shell".to_string(),
+            summary: "run cargo test".to_string(),
+            risk: ApprovalRisk::Low,
+            evidence: vec![],
+            preview: vec![],
+        });
+        let mut renderer = Renderer::new(80, 24);
+        let mut out = Vec::<u8>::new();
+        renderer
+            .render(&mut state, &mut out, DirtySections::ALL)
+            .unwrap();
+        let cell_style = renderer.rendered_cell_style(0, 22);
+        assert_eq!(
+            cell_style,
+            renderer.theme.muted(),
+            "prefix must be muted while awaiting approval"
+        );
     }
 }
