@@ -137,10 +137,6 @@ fn civil_from_unix_days(days: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
-pub(super) fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
-    let _ = std::fs::write(path, prompt);
-}
-
 #[cfg(test)]
 mod tests {
     use super::{

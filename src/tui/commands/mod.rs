@@ -1,5 +1,8 @@
 pub(crate) mod dispatch;
 
+use crate::core::config::{AllowedCommandTool, Config};
+use crate::runtime::RuntimeRequest;
+
 /// A parsed slash command entered by the user.
 /// Command parsing is a pure transformation — no runtime calls, no side effects.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -254,6 +257,36 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
             description: "undo the last assistant action",
         },
     ]
+}
+
+/// Resolves a raw input string against the custom command definitions in config.
+///
+/// Returns:
+/// - `None`           — no custom command with this name; caller shows "unknown command"
+/// - `Some(Err(msg))` — command found but argument is missing
+/// - `Some(Ok(req))`  — resolved to a RuntimeRequest ready for dispatch
+pub(crate) fn resolve_custom_command(
+    config: &Config,
+    input: &str,
+) -> Option<std::result::Result<RuntimeRequest, String>> {
+    let trimmed = input.trim();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let slash_name = parts.next()?;
+    let name = slash_name.strip_prefix('/')?;
+    let def = config.commands.get(name)?;
+
+    let arg = parts.next().map(str::trim).filter(|s| !s.is_empty());
+    let arg_str = match arg {
+        Some(a) => a.to_string(),
+        None => return Some(Err(format!("/{name}: argument required"))),
+    };
+
+    let value = def.template.replace("{input}", &arg_str);
+    let req = match def.tool {
+        AllowedCommandTool::ReadFile => RuntimeRequest::ReadFile { path: value },
+        AllowedCommandTool::SearchCode => RuntimeRequest::SearchCode { query: value },
+    };
+    Some(Ok(req))
 }
 
 #[cfg(test)]

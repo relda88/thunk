@@ -5,10 +5,10 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event};
 
-use crate::app::config::Config;
 use crate::app::paths::AppPaths;
 use crate::app::AppContext;
-use crate::app::Result;
+use crate::core::config::Config;
+use crate::core::error::Result;
 use crate::runtime::RuntimeEvent;
 
 use super::cursor::{sync_terminal_affordances, CursorShape};

@@ -8,7 +8,6 @@ use crate::runtime::RuntimeRequest;
 
 use super::commands;
 use super::commands::dispatch;
-use super::format;
 use super::state::AppState;
 use super::worker::WorkerCmd;
 
@@ -51,7 +50,7 @@ pub(super) fn handle_key_event(
                     None => dispatch::submit_to_app(state, cmd_tx, input)?,
                     Some(Ok(cmd)) => dispatch::handle_command(state, cmd_tx, cmd)?,
                     Some(Err(commands::ParseError::UnknownCommand)) => {
-                        match dispatch::resolve_custom_command(config, &input) {
+                        match commands::resolve_custom_command(config, &input) {
                             None => state.add_system_message(
                                 commands::ParseError::UnknownCommand.user_message(),
                             ),
@@ -74,7 +73,7 @@ pub(super) fn handle_key_event(
         (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
             if let Some(prompt) = &state.last_prompt {
                 let path = std::env::temp_dir().join("thunk_last_prompt.txt");
-                format::dump_prompt_to_file(&path, prompt);
+                dump_prompt_to_file(&path, prompt);
                 state.set_status(&format!("prompt dumped to {}", path.display()));
             } else {
                 state.set_status("no prompt captured yet");
@@ -123,4 +122,8 @@ pub(super) fn handle_key_event(
     }
 
     Ok(())
+}
+
+fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
+    let _ = std::fs::write(path, prompt);
 }

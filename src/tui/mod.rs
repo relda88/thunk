@@ -25,7 +25,7 @@ use crossterm::{
 use crate::app::config::Config;
 use crate::app::context::AppContext;
 use crate::app::paths::AppPaths;
-use crate::app::{AppError, Result};
+use crate::core::error::{AppError, Result};
 
 /// Main entry point for the TUI, handling terminal setup and teardown
 pub fn run(config: &Config, paths: &AppPaths, app: AppContext) -> Result<()> {
