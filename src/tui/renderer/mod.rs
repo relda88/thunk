@@ -87,9 +87,6 @@ impl Renderer {
 
         let base = PackedStyle::new(FG, BG);
         let bold = base.with_bold();
-        let dim = PackedStyle::new(FG_DIM, BG);
-        let alert = PackedStyle::new(FG_ALERT, BG).with_bold();
-        let error_style = PackedStyle::new(FG_ERROR, BG);
 
         let blank_id = self.symbols.blank_id();
         self.frames[cur].fill(Cell {
@@ -127,122 +124,7 @@ impl Renderer {
 
         // Rows 2..h-effective_rows-2: transcript
         if h > effective_rows + 3 {
-            let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
-            let avail_w = w.saturating_sub(1) as usize;
-
-            // Each entry: (display_text, kind, source_message_index).
-            let mut lines: Vec<(String, MessageKind, Option<usize>)> = Vec::new();
-            for (i, msg) in state.messages.iter().enumerate() {
-                if !state.expanded_file_read {
-                    if let Some(idx) = state.last_file_read_index {
-                        if i == idx && msg.role == Role::Assistant {
-                            continue;
-                        }
-                    }
-                }
-                let is_expanded = state.expanded_file_read
-                    && state.last_file_read_index.map_or(false, |idx| i == idx)
-                    && msg.role == Role::Assistant;
-
-                if msg.is_collapsible && state.collapsed_message_indices.contains(&i) {
-                    // Collapsed: emit one summary line with a toggle affordance.
-                    let summary: String = msg.content.chars().take(60).collect();
-                    let ellipsis = if msg.content.chars().count() > 60 {
-                        "…"
-                    } else {
-                        ""
-                    };
-                    let focused = state
-                        .focused_collapsible_idx
-                        .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
-                        == Some(i);
-                    let indicator = if focused { "▶[+] " } else { " [+] " };
-                    lines.push((format!("{indicator}{summary}{ellipsis}"), msg.kind, Some(i)));
-                    lines.push((String::new(), msg.kind, Some(i)));
-                    continue;
-                }
-
-                let prefix = if is_expanded {
-                    ""
-                } else {
-                    match msg.role {
-                        Role::System => "system: ",
-                        Role::User => "you: ",
-                        Role::Assistant => "assistant: ",
-                    }
-                };
-
-                // Two-char prefix reserved for all collapsible messages so wrap
-                // geometry is stable when focus moves. Focused = "▶ ", unfocused = "  ".
-                let focus_prefix = if msg.is_collapsible {
-                    let focused = state
-                        .focused_collapsible_idx
-                        .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
-                        == Some(i);
-                    if focused {
-                        "▶ "
-                    } else {
-                        ""
-                    }
-                } else {
-                    ""
-                };
-
-                let text = format!("{focus_prefix}{prefix}{}", msg.content);
-                for line in wrap_text(&text, avail_w.max(8)) {
-                    lines.push((line, msg.kind, Some(i)));
-                }
-                lines.push((String::new(), msg.kind, Some(i)));
-            }
-
-            let max_scroll = lines.len().saturating_sub(transcript_height);
-            state.max_scroll = max_scroll;
-
-            // Scroll the newly focused collapsible into the upper third of the
-            // viewport. Consumed once per focus-cycle key press.
-            if let Some(msg_idx) = state.scroll_to_message_idx.take() {
-                if let Some(target_line) =
-                    lines.iter().position(|(_, _, src)| *src == Some(msg_idx))
-                {
-                    let upper_third = transcript_height / 3;
-                    // desired_start is where we want the viewport to begin.
-                    let desired_start = target_line.saturating_sub(upper_third);
-                    // offset counts lines from the bottom; invert desired_start.
-                    state.scroll_offset = max_scroll.saturating_sub(desired_start).min(max_scroll);
-                }
-            }
-
-            let offset = state.scroll_offset.min(max_scroll);
-            let end = lines.len().saturating_sub(offset);
-            let start = end.saturating_sub(transcript_height);
-            let visible = &lines[start..end];
-            let cap = h.saturating_sub(effective_rows + 1);
-
-            for (idx, (line, kind, _msg_idx)) in visible.iter().enumerate() {
-                let row = 2 + idx as u16;
-                if row >= cap {
-                    break;
-                }
-                let style = match kind {
-                    MessageKind::Dimmed => dim,
-                    MessageKind::Alert => alert,
-                    MessageKind::Error => error_style,
-                    MessageKind::Normal => base,
-                };
-                self.paint(cur, 0, row, line, w, style);
-            }
-
-            if offset > 0 && !visible.is_empty() {
-                let indicator = format!("↑ {} lines", offset);
-                let ind_len = indicator.chars().count() as u16;
-                if w > ind_len {
-                    let col = w.saturating_sub(ind_len);
-                    let row = 2 + visible.len().saturating_sub(1) as u16;
-                    if row < cap {
-                        self.paint(cur, col, row, &indicator, ind_len, base);
-                    }
-                }
-            }
+            self.paint_transcript(state, cur, w, h, effective_rows);
         }
 
         // Row h-effective_rows-2: horizontal rule before input
@@ -261,20 +143,7 @@ impl Renderer {
 
         // Rows above overlay: input area
         if h > input_base_rows + 1 {
-            let first_row = h.saturating_sub(input_base_rows + 1);
-            let prefix = "> ";
-            let prefix_w = prefix.len() as u16;
-            let avail = w.saturating_sub(prefix_w) as usize;
-            let (visible_lines, _, _) = state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
-            for (i, line) in visible_lines.iter().enumerate() {
-                let row = first_row + i as u16;
-                if i == 0 {
-                    self.paint(cur, 0, row, prefix, prefix_w, bold);
-                } else {
-                    self.paint(cur, 0, row, "  ", prefix_w, bold);
-                }
-                self.paint(cur, prefix_w, row, line, w.saturating_sub(prefix_w), base);
-            }
+            self.paint_input(state, cur, w, h, input_base_rows);
         }
 
         // Reverse-search overlay row
@@ -360,6 +229,154 @@ impl Renderer {
         style: PackedStyle,
     ) {
         self.frames[cur].write_text_clipped(x, y, text, max_width, style, &mut self.symbols);
+    }
+
+    fn paint_transcript(
+        &mut self,
+        state: &mut AppState,
+        cur: usize,
+        w: u16,
+        h: u16,
+        effective_rows: u16,
+    ) {
+        let transcript_height = h.saturating_sub(effective_rows + 3) as usize;
+        let avail_w = w.saturating_sub(1) as usize;
+
+        let base = PackedStyle::new(FG, BG);
+        let dim = PackedStyle::new(FG_DIM, BG);
+        let alert = PackedStyle::new(FG_ALERT, BG).with_bold();
+        let error_style = PackedStyle::new(FG_ERROR, BG);
+
+        // Each entry: (display_text, kind, source_message_index).
+        let mut lines: Vec<(String, MessageKind, Option<usize>)> = Vec::new();
+        for (i, msg) in state.messages.iter().enumerate() {
+            if !state.expanded_file_read {
+                if let Some(idx) = state.last_file_read_index {
+                    if i == idx && msg.role == Role::Assistant {
+                        continue;
+                    }
+                }
+            }
+            let is_expanded = state.expanded_file_read
+                && state.last_file_read_index.map_or(false, |idx| i == idx)
+                && msg.role == Role::Assistant;
+
+            if msg.is_collapsible && state.collapsed_message_indices.contains(&i) {
+                // Collapsed: emit one summary line with a toggle affordance.
+                let summary: String = msg.content.chars().take(60).collect();
+                let ellipsis = if msg.content.chars().count() > 60 {
+                    "…"
+                } else {
+                    ""
+                };
+                let focused = state
+                    .focused_collapsible_idx
+                    .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
+                    == Some(i);
+                let indicator = if focused { "▶[+] " } else { " [+] " };
+                lines.push((format!("{indicator}{summary}{ellipsis}"), msg.kind, Some(i)));
+                lines.push((String::new(), msg.kind, Some(i)));
+                continue;
+            }
+
+            let prefix = if is_expanded {
+                ""
+            } else {
+                match msg.role {
+                    Role::System => "system: ",
+                    Role::User => "you: ",
+                    Role::Assistant => "assistant: ",
+                }
+            };
+
+            // Two-char prefix reserved for all collapsible messages so wrap
+            // geometry is stable when focus moves. Focused = "▶ ", unfocused = "  ".
+            let focus_prefix = if msg.is_collapsible {
+                let focused = state
+                    .focused_collapsible_idx
+                    .and_then(|fi| state.collapsible_message_indices.get(fi).copied())
+                    == Some(i);
+                if focused {
+                    "▶ "
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            };
+
+            let text = format!("{focus_prefix}{prefix}{}", msg.content);
+            for line in wrap_text(&text, avail_w.max(8)) {
+                lines.push((line, msg.kind, Some(i)));
+            }
+            lines.push((String::new(), msg.kind, Some(i)));
+        }
+
+        let max_scroll = lines.len().saturating_sub(transcript_height);
+        state.max_scroll = max_scroll;
+
+        // Scroll the newly focused collapsible into the upper third of the
+        // viewport. Consumed once per focus-cycle key press.
+        if let Some(msg_idx) = state.scroll_to_message_idx.take() {
+            if let Some(target_line) = lines.iter().position(|(_, _, src)| *src == Some(msg_idx)) {
+                let upper_third = transcript_height / 3;
+                // desired_start is where we want the viewport to begin.
+                let desired_start = target_line.saturating_sub(upper_third);
+                // offset counts lines from the bottom; invert desired_start.
+                state.scroll_offset = max_scroll.saturating_sub(desired_start).min(max_scroll);
+            }
+        }
+
+        let offset = state.scroll_offset.min(max_scroll);
+        let end = lines.len().saturating_sub(offset);
+        let start = end.saturating_sub(transcript_height);
+        let visible = &lines[start..end];
+        let cap = h.saturating_sub(effective_rows + 1);
+
+        for (idx, (line, kind, _msg_idx)) in visible.iter().enumerate() {
+            let row = 2 + idx as u16;
+            if row >= cap {
+                break;
+            }
+            let style = match kind {
+                MessageKind::Dimmed => dim,
+                MessageKind::Alert => alert,
+                MessageKind::Error => error_style,
+                MessageKind::Normal => base,
+            };
+            self.paint(cur, 0, row, line, w, style);
+        }
+
+        if offset > 0 && !visible.is_empty() {
+            let indicator = format!("↑ {} lines", offset);
+            let ind_len = indicator.chars().count() as u16;
+            if w > ind_len {
+                let col = w.saturating_sub(ind_len);
+                let row = 2 + visible.len().saturating_sub(1) as u16;
+                if row < cap {
+                    self.paint(cur, col, row, &indicator, ind_len, base);
+                }
+            }
+        }
+    }
+
+    fn paint_input(&mut self, state: &AppState, cur: usize, w: u16, h: u16, input_base_rows: u16) {
+        let first_row = h.saturating_sub(input_base_rows + 1);
+        let base = PackedStyle::new(FG, BG);
+        let bold = base.with_bold();
+        let prefix = "> ";
+        let prefix_w = prefix.len() as u16;
+        let avail = w.saturating_sub(prefix_w) as usize;
+        let (visible_lines, _, _) = state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
+        for (i, line) in visible_lines.iter().enumerate() {
+            let row = first_row + i as u16;
+            if i == 0 {
+                self.paint(cur, 0, row, prefix, prefix_w, bold);
+            } else {
+                self.paint(cur, 0, row, "  ", prefix_w, bold);
+            }
+            self.paint(cur, prefix_w, row, line, w.saturating_sub(prefix_w), base);
+        }
     }
 
     fn paint_approval_widget(

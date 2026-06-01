@@ -1,3 +1,5 @@
+pub(crate) mod dispatch;
+
 /// A parsed slash command entered by the user.
 /// Command parsing is a pure transformation — no runtime calls, no side effects.
 #[derive(Debug, Clone, PartialEq, Eq)]

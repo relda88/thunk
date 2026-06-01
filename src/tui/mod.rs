@@ -1,10 +1,13 @@
 mod app;
 pub mod commands;
+mod cursor;
 mod events;
 mod format;
 mod input;
+mod keybindings;
 mod renderer;
 mod state;
+mod worker;
 
 use std::io::{self, IsTerminal};
 
