@@ -10,7 +10,7 @@ use self::diff::PatchWriter;
 use self::style::{PackedStyle, Rgb};
 use self::symbols::SymbolPool;
 
-use super::state::{AppState, DirtySections, MessageKind, Role};
+use super::state::{AppState, ApprovalRisk, DirtySections, MessageKind, Role};
 
 const BG: Rgb = Rgb::new(0, 0, 0);
 const FG: Rgb = Rgb::new(220, 220, 220);
@@ -118,7 +118,13 @@ impl Renderer {
         } else {
             0
         };
-        let effective_rows = input_rows + overlay_rows;
+        let approval_rows: u16 = if state.pending_approval.is_some() {
+            3
+        } else {
+            0
+        };
+        let input_base_rows = input_rows + overlay_rows;
+        let effective_rows = input_base_rows + approval_rows;
 
         // Rows 2..h-effective_rows-2: transcript
         if h > effective_rows + 3 {
@@ -246,9 +252,33 @@ impl Renderer {
             self.paint(cur, 0, row, &rule, w, base);
         }
 
-        // Rows h-effective_rows-1..h-overlay_rows-2: input area
-        if h > effective_rows + 1 {
-            let first_row = h.saturating_sub(effective_rows + 1);
+        // Approval widget: 3 rows above the input area (between separator and input)
+        if approval_rows > 0 {
+            if let Some(ref approval) = state.pending_approval {
+                let first_row = h.saturating_sub(effective_rows + 1);
+                let risk_color = match approval.risk {
+                    ApprovalRisk::High => Rgb::new(237, 104, 109),
+                    ApprovalRisk::Medium => Rgb::new(242, 179, 86),
+                    ApprovalRisk::Low => Rgb::new(102, 214, 255),
+                };
+                let label_style = PackedStyle::new(risk_color, BG).with_bold();
+                let label = format!("! {}  {}", approval.tool_name, approval.summary);
+                self.paint(cur, 0, first_row, &label, w, label_style);
+
+                let evidence_line: String = approval
+                    .evidence
+                    .first()
+                    .map(|s| s.chars().take(w as usize).collect())
+                    .unwrap_or_default();
+                self.paint(cur, 0, first_row + 1, &evidence_line, w, dim);
+
+                self.paint(cur, 0, first_row + 2, "  ^Y approve   ^N reject", w, dim);
+            }
+        }
+
+        // Rows above overlay: input area
+        if h > input_base_rows + 1 {
+            let first_row = h.saturating_sub(input_base_rows + 1);
             let prefix = "> ";
             let prefix_w = prefix.len() as u16;
             let avail = w.saturating_sub(prefix_w) as usize;
@@ -309,13 +339,13 @@ impl Renderer {
         }
 
         // Input cursor position
-        let (cx, cy) = if h > effective_rows + 1 {
+        let (cx, cy) = if h > input_base_rows + 1 {
             let prefix_len = 2usize;
             let avail = w.saturating_sub(prefix_len as u16) as usize;
             let (_, cursor_row, cursor_col) =
                 state.input_display_lines(avail.max(1), MAX_INPUT_ROWS);
             let x = (prefix_len + cursor_col).min(w as usize) as u16;
-            let y = h.saturating_sub(effective_rows + 1) + cursor_row as u16;
+            let y = h.saturating_sub(input_base_rows + 1) + cursor_row as u16;
             (x, y)
         } else {
             (0, 0)

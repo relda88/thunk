@@ -3,6 +3,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::config::{AllowedCommandTool, Config};
@@ -11,10 +12,11 @@ use crate::app::AppContext;
 use crate::app::Result;
 use crate::runtime::{AnswerSource, RuntimeEvent, RuntimeRequest};
 use crate::storage::session::SessionMeta;
+use crate::tools::RiskLevel;
 
 use super::commands;
 use super::renderer::Renderer;
-use super::state::{AppState, DirtySections};
+use super::state::{AppState, ApprovalRisk, DirtySections, PendingApprovalState};
 
 const ACTIVE_MS: u64 = 33;
 const SLOW_MS: u64 = 66;
@@ -67,6 +69,7 @@ impl RenderScheduler {
     }
 }
 
+#[derive(Debug)]
 enum WorkerCmd {
     Handle(RuntimeRequest),
     Reset,
@@ -135,6 +138,46 @@ fn run_worker(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CursorShape {
+    SteadyBar,
+    SteadyBlock,
+    SteadyUnderScore,
+    BlinkingBlock,
+}
+
+impl CursorShape {
+    fn to_crossterm(self) -> SetCursorStyle {
+        match self {
+            CursorShape::SteadyBar => SetCursorStyle::SteadyBar,
+            CursorShape::SteadyBlock => SetCursorStyle::SteadyBlock,
+            CursorShape::SteadyUnderScore => SetCursorStyle::SteadyUnderScore,
+            CursorShape::BlinkingBlock => SetCursorStyle::BlinkingBlock,
+        }
+    }
+}
+
+fn sync_terminal_affordances(
+    state: &AppState,
+    last_shape: &mut Option<CursorShape>,
+    out: &mut io::Stdout,
+) -> io::Result<()> {
+    let shape = if state.pending_approval.is_some() {
+        CursorShape::BlinkingBlock
+    } else if state.is_reverse_search_active() {
+        CursorShape::SteadyUnderScore
+    } else if state.is_busy {
+        CursorShape::SteadyBlock
+    } else {
+        CursorShape::SteadyBar
+    };
+    if *last_shape != Some(shape) {
+        crossterm::queue!(out, shape.to_crossterm())?;
+        *last_shape = Some(shape);
+    }
+    Ok(())
+}
+
 pub(crate) fn run_app(
     stdout: &mut io::Stdout,
     config: &Config,
@@ -145,6 +188,7 @@ pub(crate) fn run_app(
     let (w, h) = crossterm::terminal::size()?;
     let mut renderer = Renderer::new(w, h);
     let mut scheduler = RenderScheduler::new();
+    let mut last_cursor_shape: Option<CursorShape> = None;
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCmd>();
     let (reply_tx, reply_rx) = mpsc::channel::<WorkerReply>();
@@ -157,6 +201,7 @@ pub(crate) fn run_app(
 
         if scheduler.should_draw(&state) {
             let t = Instant::now();
+            sync_terminal_affordances(&state, &mut last_cursor_shape, stdout)?;
             let dirty = state.dirty_sections;
             renderer.render(&mut state, stdout, dirty)?;
             state.clear_dirty_sections();
@@ -274,7 +319,18 @@ fn handle_key_event(
             }
         }
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => state.recall_previous_input(),
-        (KeyCode::Char('n'), KeyModifiers::CONTROL) => state.recall_next_input(),
+        (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+            if state.pending_approval.is_some() {
+                dispatch_command_runtime_request(state, cmd_tx, RuntimeRequest::Reject)?;
+            } else {
+                state.recall_next_input();
+            }
+        }
+        (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+            if state.pending_approval.is_some() {
+                dispatch_command_runtime_request(state, cmd_tx, RuntimeRequest::Approve)?;
+            }
+        }
         (KeyCode::Up, _) => state.scroll_up(1),
         (KeyCode::Down, _) => state.scroll_down(1),
         (KeyCode::PageUp, _) => state.scroll_up(10),
@@ -583,29 +639,6 @@ fn dump_prompt_to_file(path: &std::path::Path, prompt: &str) {
     let _ = std::fs::write(path, prompt);
 }
 
-/// Decodes a v2 edit_file payload and returns a diff approval message, or None if the
-/// payload doesn't match the expected format (caller falls back to the generic summary).
-///
-/// Payload format: `v2\x00{absolute_path}\x00{display_path}\x00{search_text}\x00{replace_text}`
-fn format_edit_approval(payload: &str) -> Option<String> {
-    let parts: Vec<&str> = payload.split('\x00').collect();
-    if parts.len() < 5 || parts[0] != "v2" {
-        return None;
-    }
-    let display_path = parts[2];
-    let search_text = parts[3];
-    let replace_text = parts[4];
-    let diff_lines = search_text
-        .lines()
-        .map(|l| format!("- {l}"))
-        .chain(replace_text.lines().map(|l| format!("+ {l}")))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some(format!(
-        "[approval required] edit {display_path}\n{diff_lines}\ntype /approve to confirm or /reject to cancel"
-    ))
-}
-
 fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ActivityChanged(activity) => state.set_status(&activity.label()),
@@ -624,40 +657,32 @@ fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             None => state.add_tool_message(format!("tool failed: {name}")),
         },
         RuntimeEvent::AnswerReady(source) => {
+            state.pending_approval = None;
+            state.mark_dirty(DirtySections::INPUT);
             state.set_status("ready");
             if let AnswerSource::ToolLimitReached = source {
                 state.add_system_message("Tool limit reached. Response may be incomplete.");
             }
         }
         RuntimeEvent::Failed { message } => {
+            state.pending_approval = None;
+            state.mark_dirty(DirtySections::INPUT);
             state.set_status("error");
             state.add_error_message(message);
         }
         RuntimeEvent::ApprovalRequired { pending, evidence } => {
-            let message = if pending.tool_name == "edit_file" {
-                format_edit_approval(&pending.payload).unwrap_or_else(|| {
-                    let evidence_str = if evidence.is_empty() {
-                        String::new()
-                    } else {
-                        format!("\nEvidence: {}", evidence.join(" | "))
-                    };
-                    format!(
-                        "[approval required] {}{} — type /approve to confirm or /reject to cancel",
-                        pending.summary, evidence_str
-                    )
-                })
-            } else {
-                let evidence_str = if evidence.is_empty() {
-                    String::new()
-                } else {
-                    format!("\nEvidence: {}", evidence.join(" | "))
-                };
-                format!(
-                    "[approval required] {}{} — type /approve to confirm or /reject to cancel",
-                    pending.summary, evidence_str
-                )
+            let risk = match pending.risk {
+                RiskLevel::High => ApprovalRisk::High,
+                RiskLevel::Medium => ApprovalRisk::Medium,
+                RiskLevel::Low => ApprovalRisk::Low,
             };
-            state.add_alert_message(message);
+            state.pending_approval = Some(PendingApprovalState {
+                tool_name: pending.tool_name,
+                summary: pending.summary,
+                risk,
+                evidence,
+            });
+            state.mark_dirty(DirtySections::INPUT);
             state.set_status("awaiting approval");
         }
         RuntimeEvent::InfoMessage(text) => {
@@ -703,50 +728,21 @@ mod tests {
     use crate::app::session::ActiveSession;
     use crate::app::AppContext;
     use crate::llm::providers::build_backend;
-    use crate::runtime::{ProjectRoot, RuntimeEvent, RuntimeRequest};
+    use crate::runtime::{AnswerSource, ProjectRoot, RuntimeEvent, RuntimeRequest};
     use crate::storage::session::{SessionStore, StoredMessage};
     use crate::tools::default_registry;
 
     use super::{
-        apply_runtime_event, format_edit_approval, format_session_updated_at, format_sessions_list,
-        parse_read_file_header, summarize_command_output,
+        apply_runtime_event, format_session_updated_at, format_sessions_list, handle_key_event,
+        parse_read_file_header, summarize_command_output, WorkerCmd,
     };
-    use crate::tui::state::AppState;
+    use crate::tui::state::{AppState, ApprovalRisk, PendingApprovalState};
 
     fn tool_result(name: &str, body: &str) -> String {
         format!("=== tool_result: {name} ===\n{body}\n=== /tool_result ===\n\n")
     }
 
     // parse_read_file_header
-
-    // format_edit_approval
-
-    #[test]
-    fn edit_approval_renders_diff_with_path() {
-        let payload = "v2\x00/abs/src/main.rs\x00src/main.rs\x00old line\x00new line";
-        let msg = format_edit_approval(payload).unwrap();
-        assert!(msg.starts_with("[approval required] edit src/main.rs\n"));
-        assert!(msg.contains("- old line"));
-        assert!(msg.contains("+ new line"));
-        assert!(msg.ends_with("\ntype /approve to confirm or /reject to cancel"));
-    }
-
-    #[test]
-    fn edit_approval_multiline_diff() {
-        let payload = "v2\x00/abs/lib.rs\x00lib.rs\x00fn old() {}\nfn also_old() {}\x00fn new() {}\nfn also_new() {}";
-        let msg = format_edit_approval(payload).unwrap();
-        assert!(msg.contains("- fn old() {}"));
-        assert!(msg.contains("- fn also_old() {}"));
-        assert!(msg.contains("+ fn new() {}"));
-        assert!(msg.contains("+ fn also_new() {}"));
-    }
-
-    #[test]
-    fn edit_approval_returns_none_for_malformed_payload() {
-        assert!(format_edit_approval("not_v2\x00a\x00b\x00c\x00d").is_none());
-        assert!(format_edit_approval("v2\x00only_three\x00parts").is_none());
-        assert!(format_edit_approval("no_nulls_at_all").is_none());
-    }
 
     #[test]
     fn parses_untruncated_header() {
@@ -1049,5 +1045,201 @@ mod tests {
         );
 
         assert_eq!(state.context_pct, Some(100));
+    }
+
+    fn make_pending(tool_name: &str, risk: crate::tools::RiskLevel) -> crate::tools::PendingAction {
+        crate::tools::PendingAction {
+            tool_name: tool_name.to_string(),
+            summary: format!("{tool_name} summary"),
+            risk,
+            payload: String::new(),
+        }
+    }
+
+    fn make_key(
+        code: crossterm::event::KeyCode,
+        mods: crossterm::event::KeyModifiers,
+    ) -> crossterm::event::KeyEvent {
+        crossterm::event::KeyEvent {
+            code,
+            modifiers: mods,
+            kind: crossterm::event::KeyEventKind::Press,
+            state: crossterm::event::KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn approval_required_sets_pending_approval() {
+        use crate::tools::RiskLevel;
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        let messages_before = state.messages.len();
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending: make_pending("shell", RiskLevel::High),
+                evidence: vec!["src/main.rs:10".to_string()],
+            },
+        );
+
+        let approval = state.pending_approval.as_ref().expect("should be Some");
+        assert_eq!(approval.tool_name, "shell");
+        assert_eq!(approval.summary, "shell summary");
+        assert_eq!(approval.risk, ApprovalRisk::High);
+        assert_eq!(approval.evidence, vec!["src/main.rs:10"]);
+        assert_eq!(state.status, "awaiting approval");
+        assert_eq!(
+            state.messages.len(),
+            messages_before,
+            "no transcript entry added"
+        );
+    }
+
+    #[test]
+    fn approval_required_maps_medium_risk() {
+        use crate::tools::RiskLevel;
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending: make_pending("edit_file", RiskLevel::Medium),
+                evidence: vec![],
+            },
+        );
+
+        let approval = state.pending_approval.as_ref().unwrap();
+        assert_eq!(approval.risk, ApprovalRisk::Medium);
+    }
+
+    #[test]
+    fn answer_ready_clears_pending_approval() {
+        use crate::tools::RiskLevel;
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending: make_pending("shell", RiskLevel::High),
+                evidence: vec![],
+            },
+        );
+        assert!(state.pending_approval.is_some());
+
+        apply_runtime_event(&mut state, RuntimeEvent::AnswerReady(AnswerSource::Direct));
+        assert!(
+            state.pending_approval.is_none(),
+            "AnswerReady must clear pending_approval"
+        );
+    }
+
+    #[test]
+    fn failed_clears_pending_approval() {
+        use crate::tools::RiskLevel;
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending: make_pending("edit_file", RiskLevel::Medium),
+                evidence: vec![],
+            },
+        );
+        assert!(state.pending_approval.is_some());
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::Failed {
+                message: "err".into(),
+            },
+        );
+        assert!(
+            state.pending_approval.is_none(),
+            "Failed must clear pending_approval"
+        );
+    }
+
+    #[test]
+    fn ctrl_n_with_pending_approval_dispatches_reject() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "shell".into(),
+            summary: "run tests".into(),
+            risk: ApprovalRisk::High,
+            evidence: vec![],
+        });
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
+        let key = make_key(KeyCode::Char('n'), KeyModifiers::CONTROL);
+        handle_key_event(&mut state, &cmd_tx, &harness.config, key).unwrap();
+
+        assert!(state.is_busy, "dispatch must set is_busy");
+        match cmd_rx.try_recv().expect("command must be sent") {
+            WorkerCmd::Handle(RuntimeRequest::Reject) => {}
+            other => panic!("expected Reject, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_n_without_pending_approval_calls_recall_next_input() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        assert!(state.pending_approval.is_none());
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
+        let key = make_key(KeyCode::Char('n'), KeyModifiers::CONTROL);
+        handle_key_event(&mut state, &cmd_tx, &harness.config, key).unwrap();
+
+        assert!(!state.is_busy, "must not dispatch when no pending approval");
+        assert!(cmd_rx.try_recv().is_err(), "no command must be sent");
+    }
+
+    #[test]
+    fn ctrl_y_with_pending_approval_dispatches_approve() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "edit_file".into(),
+            summary: "patch".into(),
+            risk: ApprovalRisk::Medium,
+            evidence: vec![],
+        });
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
+        let key = make_key(KeyCode::Char('y'), KeyModifiers::CONTROL);
+        handle_key_event(&mut state, &cmd_tx, &harness.config, key).unwrap();
+
+        assert!(state.is_busy, "dispatch must set is_busy");
+        match cmd_rx.try_recv().expect("command must be sent") {
+            WorkerCmd::Handle(RuntimeRequest::Approve) => {}
+            other => panic!("expected Approve, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clear_messages_resets_pending_approval() {
+        use crate::tools::RiskLevel;
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending: make_pending("shell", RiskLevel::High),
+                evidence: vec![],
+            },
+        );
+        assert!(state.pending_approval.is_some());
+
+        state.clear_messages();
+        assert!(
+            state.pending_approval.is_none(),
+            "clear_messages must reset pending_approval"
+        );
     }
 }

@@ -40,6 +40,20 @@ impl std::ops::BitOrAssign for DirtySections {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApprovalRisk {
+    Low,
+    Medium,
+    High,
+}
+
+pub(crate) struct PendingApprovalState {
+    pub(crate) tool_name: String,
+    pub(crate) summary: String,
+    pub(crate) risk: ApprovalRisk,
+    pub(crate) evidence: Vec<String>,
+}
+
 /// Represents a chat message with a role (system, user, assistant) and content
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
@@ -81,6 +95,7 @@ pub struct AppState {
     /// Set by focus_next/prev_collapsible; consumed by the renderer to scroll
     /// the newly focused message into the upper third of the viewport.
     pub(crate) scroll_to_message_idx: Option<usize>,
+    pub(crate) pending_approval: Option<PendingApprovalState>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -128,6 +143,7 @@ impl AppState {
             collapsible_message_indices: Vec::new(),
             focused_collapsible_idx: None,
             scroll_to_message_idx: None,
+            pending_approval: None,
             welcome_message: welcome,
         }
     }
@@ -240,6 +256,7 @@ impl AppState {
         self.collapsible_message_indices.clear();
         self.focused_collapsible_idx = None;
         self.scroll_to_message_idx = None;
+        self.pending_approval = None;
         self.reset_scroll();
     }
 
@@ -496,6 +513,24 @@ mod tests {
         assert!(
             !state.collapsed_message_indices.contains(&msg_idx),
             "should be expanded again"
+        );
+    }
+
+    #[test]
+    fn clear_messages_resets_pending_approval() {
+        let mut state = make_state();
+        state.pending_approval = Some(super::PendingApprovalState {
+            tool_name: "shell".into(),
+            summary: "run tests".into(),
+            risk: super::ApprovalRisk::High,
+            evidence: vec![],
+        });
+        assert!(state.pending_approval.is_some());
+
+        state.clear_messages();
+        assert!(
+            state.pending_approval.is_none(),
+            "clear_messages must reset pending_approval"
         );
     }
 }
