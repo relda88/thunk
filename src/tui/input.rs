@@ -353,11 +353,13 @@ impl AppState {
         if !self.launcher_active {
             return None;
         }
+        let view_start = self.launcher_index.saturating_sub(max.saturating_sub(1));
         let items = self
             .launcher_filtered
             .iter()
-            .take(max)
             .enumerate()
+            .skip(view_start)
+            .take(max)
             .map(|(idx, cmd)| (*cmd, idx == self.launcher_index))
             .collect();
         Some((self.launcher_query.clone(), items))
