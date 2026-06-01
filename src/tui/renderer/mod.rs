@@ -425,7 +425,7 @@ impl Renderer {
         let dim = PackedStyle::new(FG_DIM, BG);
         let items = state.autocomplete_preview_items(4);
         for (i, (item, selected)) in items.iter().enumerate() {
-            let row = h.saturating_sub(overlay_rows - i as u16);
+            let row = h.saturating_sub(overlay_rows - i as u16 + 1);
             let marker = if *selected { "→ " } else { "  " };
             let style = if *selected { accent } else { dim };
             let text = format!("{}{}", marker, item);
