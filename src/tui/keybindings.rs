@@ -24,6 +24,7 @@ pub(super) fn handle_key_event(
             state.should_quit = true;
         }
         (KeyCode::Enter, KeyModifiers::ALT) => state.insert_newline(),
+        (KeyCode::Esc, _) if state.is_autocomplete_active() => state.clear_autocomplete(),
         (KeyCode::Esc, _) if state.is_reverse_search_active() => state.cancel_reverse_search(),
         (KeyCode::Enter, _) if state.is_reverse_search_active() => state.accept_reverse_search(),
         (KeyCode::Backspace, _) if state.is_reverse_search_active() => {
@@ -92,6 +93,16 @@ pub(super) fn handle_key_event(
         (KeyCode::Char('['), KeyModifiers::ALT) => state.focus_prev_collapsible(),
         (KeyCode::Char(']'), KeyModifiers::ALT) => state.focus_next_collapsible(),
         (KeyCode::Char('o'), KeyModifiers::ALT) => state.toggle_collapse_focused(),
+        (KeyCode::Tab, KeyModifiers::NONE) => {
+            if !state.is_busy {
+                state.autocomplete_command(commands::autocomplete_names(), false);
+            }
+        }
+        (KeyCode::BackTab, _) => {
+            if !state.is_busy {
+                state.autocomplete_command(commands::autocomplete_names(), true);
+            }
+        }
         (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => state.insert_char(c),
         _ => {}
     }

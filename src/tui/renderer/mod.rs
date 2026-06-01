@@ -110,7 +110,9 @@ impl Renderer {
             .input_content_rows(w as usize)
             .max(1)
             .min(MAX_INPUT_ROWS) as u16;
-        let overlay_rows: u16 = if state.reverse_search_view().is_some() {
+        let overlay_rows: u16 = if state.is_autocomplete_active() {
+            state.autocomplete_preview_items(4).len() as u16
+        } else if state.reverse_search_view().is_some() {
             1
         } else {
             0
@@ -146,9 +148,11 @@ impl Renderer {
             self.paint_input(state, cur, w, h, input_base_rows);
         }
 
-        // Reverse-search overlay row
+        // Overlay rows: autocomplete dropdown or reverse-search bar (mutually exclusive).
         if overlay_rows > 0 {
-            if let Some((query, matched)) = state.reverse_search_view() {
+            if state.is_autocomplete_active() {
+                self.paint_autocomplete_overlay(state, cur, w, h, overlay_rows);
+            } else if let Some((query, matched)) = state.reverse_search_view() {
                 let row = h.saturating_sub(overlay_rows + 1);
                 let text = format!("bkwd-search: {}  {}", query, matched);
                 let display: String = text.chars().take(w as usize).collect();
@@ -407,6 +411,27 @@ impl Renderer {
 
         let hint_row = first_row + 1 + preview_count as u16;
         self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
+    }
+
+    fn paint_autocomplete_overlay(
+        &mut self,
+        state: &AppState,
+        cur: usize,
+        w: u16,
+        h: u16,
+        overlay_rows: u16,
+    ) {
+        let accent = PackedStyle::new(Rgb::new(102, 214, 255), BG).with_bold();
+        let dim = PackedStyle::new(FG_DIM, BG);
+        let items = state.autocomplete_preview_items(4);
+        for (i, (item, selected)) in items.iter().enumerate() {
+            let row = h.saturating_sub(overlay_rows - i as u16);
+            let marker = if *selected { "→ " } else { "  " };
+            let style = if *selected { accent } else { dim };
+            let text = format!("{}{}", marker, item);
+            let display: String = text.chars().take(w as usize).collect();
+            self.paint(cur, 0, row, &display, w, style);
+        }
     }
 }
 

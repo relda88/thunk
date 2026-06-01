@@ -93,6 +93,9 @@ pub struct AppState {
     /// the newly focused message into the upper third of the viewport.
     pub(crate) scroll_to_message_idx: Option<usize>,
     pub(crate) pending_approval: Option<PendingApprovalState>,
+    pub(crate) autocomplete_matches: Vec<String>,
+    pub(crate) autocomplete_index: usize,
+    pub(crate) autocomplete_prefix: Option<String>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -141,6 +144,9 @@ impl AppState {
             focused_collapsible_idx: None,
             scroll_to_message_idx: None,
             pending_approval: None,
+            autocomplete_matches: Vec::new(),
+            autocomplete_index: 0,
+            autocomplete_prefix: None,
             welcome_message: welcome,
         }
     }
@@ -285,6 +291,7 @@ impl AppState {
             self.input_history.push(submitted.clone());
         }
         self.exit_reverse_search();
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
         Some(submitted)
     }

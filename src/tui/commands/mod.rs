@@ -132,6 +132,34 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
     }
 }
 
+/// Returns the complete set of first-level slash command tokens for Tab autocomplete.
+/// Must stay adjacent to parse() so additions to one are reflected in the other.
+pub(crate) fn autocomplete_names() -> &'static [&'static str] {
+    &[
+        "/anchors",
+        "/approve",
+        "/clear",
+        "/compact",
+        "/context",
+        "/exit",
+        "/git",
+        "/help",
+        "/history",
+        "/index",
+        "/last",
+        "/ls",
+        "/lsp",
+        "/providers",
+        "/quit",
+        "/read",
+        "/reject",
+        "/search",
+        "/session",
+        "/sessions",
+        "/undo",
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

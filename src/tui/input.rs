@@ -9,6 +9,7 @@ impl AppState {
         self.history_cursor = None;
         self.history_draft = None;
         self.exit_reverse_search();
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -19,6 +20,7 @@ impl AppState {
         self.history_cursor = None;
         self.history_draft = None;
         self.exit_reverse_search();
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -38,6 +40,7 @@ impl AppState {
         self.history_cursor = None;
         self.history_draft = None;
         self.exit_reverse_search();
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -52,6 +55,7 @@ impl AppState {
             prev -= 1;
         }
         self.cursor = prev;
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -66,6 +70,7 @@ impl AppState {
             next += 1;
         }
         self.cursor = next.min(self.input.len());
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -88,6 +93,7 @@ impl AppState {
         self.history_cursor = None;
         self.history_draft = None;
         self.exit_reverse_search();
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -107,6 +113,7 @@ impl AppState {
         self.history_cursor = None;
         self.history_draft = None;
         self.exit_reverse_search();
+        self.clear_autocomplete();
         self.mark_dirty(DirtySections::INPUT);
     }
 
@@ -194,6 +201,7 @@ impl AppState {
         if self.input_history.is_empty() {
             return;
         }
+        self.clear_autocomplete();
         if !self.reverse_search_active {
             self.reverse_search_active = true;
             self.reverse_search_query.clear();
@@ -270,6 +278,115 @@ impl AppState {
         self.reverse_search_query.clear();
         self.reverse_search_selection = 0;
         self.reverse_search_draft = None;
+    }
+
+    // Returns (start=0, end=command_end, prefix=&input[..command_end]).
+    // Returns None if input does not start with '/' or cursor is past the first space.
+    fn slash_prefix_range(&self) -> Option<(usize, usize, &str)> {
+        if !self.input.starts_with('/') {
+            return None;
+        }
+        let safe_cursor = self.cursor.min(self.input.len());
+        let active = &self.input[..safe_cursor];
+        let command_end = active.find(' ').unwrap_or(active.len());
+        if command_end == 0 || safe_cursor > command_end {
+            return None;
+        }
+        Some((0, command_end, &self.input[..command_end]))
+    }
+
+    pub(crate) fn clear_autocomplete(&mut self) {
+        self.autocomplete_matches.clear();
+        self.autocomplete_index = 0;
+        self.autocomplete_prefix = None;
+    }
+
+    pub(crate) fn is_autocomplete_active(&self) -> bool {
+        !self.autocomplete_matches.is_empty()
+    }
+
+    pub(crate) fn autocomplete_preview_items(&self, max: usize) -> Vec<(String, bool)> {
+        self.autocomplete_matches
+            .iter()
+            .take(max)
+            .enumerate()
+            .map(|(idx, value)| (value.clone(), idx == self.autocomplete_index))
+            .collect()
+    }
+
+    pub(crate) fn autocomplete_command(&mut self, names: &[&str], reverse: bool) -> bool {
+        self.exit_reverse_search();
+
+        let (start, end, typed_prefix) = match self.slash_prefix_range() {
+            Some(range) => range,
+            None => {
+                self.clear_autocomplete();
+                return false;
+            }
+        };
+        let typed_prefix = typed_prefix.to_string();
+
+        // When already cycling, preserve the original prefix so cycling doesn't narrow.
+        let prefix = if !self.autocomplete_matches.is_empty()
+            && self.autocomplete_index < self.autocomplete_matches.len()
+            && self.autocomplete_matches[self.autocomplete_index] == self.input[..end]
+        {
+            self.autocomplete_prefix.clone().unwrap_or(typed_prefix)
+        } else {
+            typed_prefix
+        };
+
+        let matches: Vec<String> = names
+            .iter()
+            .filter(|cmd| cmd.starts_with(prefix.as_str()))
+            .map(|cmd| cmd.to_string())
+            .collect();
+
+        if matches.is_empty() {
+            self.clear_autocomplete();
+            return false;
+        }
+
+        let same_cycle = self
+            .autocomplete_prefix
+            .as_ref()
+            .map(|existing| existing == &prefix)
+            .unwrap_or(false)
+            && self.autocomplete_matches == matches;
+
+        if same_cycle {
+            if reverse {
+                if self.autocomplete_index == 0 {
+                    self.autocomplete_index = self.autocomplete_matches.len() - 1;
+                } else {
+                    self.autocomplete_index -= 1;
+                }
+            } else {
+                self.autocomplete_index =
+                    (self.autocomplete_index + 1) % self.autocomplete_matches.len();
+            }
+        } else {
+            self.autocomplete_matches = matches;
+            self.autocomplete_prefix = Some(prefix);
+            self.autocomplete_index = if reverse {
+                self.autocomplete_matches.len() - 1
+            } else {
+                0
+            };
+        }
+
+        let selected = self.autocomplete_matches[self.autocomplete_index].clone();
+        self.input.replace_range(start..end, &selected);
+        self.cursor = start + selected.len();
+
+        // Unique match: append a trailing space so the user can type the subcommand immediately.
+        if self.autocomplete_matches.len() == 1 && self.input[self.cursor..].is_empty() {
+            self.input.push(' ');
+            self.cursor += 1;
+        }
+
+        self.mark_dirty(DirtySections::INPUT);
+        true
     }
 
     fn reverse_search_matches(&self) -> Vec<usize> {
@@ -391,6 +508,80 @@ mod tests {
             state.input, "my draft",
             "original draft must be restored exactly"
         );
+    }
+
+    #[test]
+    fn autocomplete_command_cycles_forward_through_matches() {
+        let mut state = make_state();
+        state.input = "/d".to_string();
+        state.cursor = 2;
+
+        let names = &["/def", "/diag", "/debug-log"];
+        assert!(state.autocomplete_command(names, false));
+        assert_eq!(state.input, "/def");
+
+        assert!(state.autocomplete_command(names, false));
+        assert_eq!(state.input, "/diag");
+
+        assert!(state.autocomplete_command(names, false));
+        assert_eq!(state.input, "/debug-log");
+
+        // Wraps back to first.
+        assert!(state.autocomplete_command(names, false));
+        assert_eq!(state.input, "/def");
+    }
+
+    #[test]
+    fn autocomplete_command_cycles_backward_through_matches() {
+        let mut state = make_state();
+        state.input = "/d".to_string();
+        state.cursor = 2;
+
+        let names = &["/def", "/diag", "/debug-log"];
+        assert!(state.autocomplete_command(names, true));
+        assert_eq!(state.input, "/debug-log");
+
+        assert!(state.autocomplete_command(names, true));
+        assert_eq!(state.input, "/diag");
+    }
+
+    #[test]
+    fn autocomplete_command_unique_match_appends_space() {
+        let mut state = make_state();
+        state.input = "/reject".to_string();
+        state.cursor = state.input.len();
+
+        assert!(state.autocomplete_command(&["/reject"], false));
+        assert_eq!(state.input, "/reject ");
+        assert_eq!(state.cursor, "/reject ".len());
+    }
+
+    #[test]
+    fn insert_char_dismisses_autocomplete() {
+        let mut state = make_state();
+        state.input = "/h".to_string();
+        state.cursor = 2;
+        state.autocomplete_command(&["/help", "/history"], false);
+        assert!(state.is_autocomplete_active());
+
+        state.insert_char('x');
+        assert!(!state.is_autocomplete_active());
+    }
+
+    #[test]
+    fn slash_prefix_range_returns_none_when_cursor_past_first_space() {
+        let mut state = make_state();
+        state.input = "/help foo".to_string();
+        state.cursor = 9; // past the space
+        assert!(state.slash_prefix_range().is_none());
+    }
+
+    #[test]
+    fn slash_prefix_range_returns_none_when_input_does_not_start_with_slash() {
+        let mut state = make_state();
+        state.input = "hello".to_string();
+        state.cursor = 3;
+        assert!(state.slash_prefix_range().is_none());
     }
 }
 
