@@ -38,3 +38,16 @@ The runtime must not depend on LSP availability for correctness. LSP results upd
 ## InvestigationGraph Is Advisory
 `InvestigationGraph` (petgraph) owned by `InvestigationState.graph` records import edges and LSP definition edges.
 `promoted_candidates()` is consulted as a fallback read candidate; it does not override the search-candidate set or evidence gates.
+
+## TUI Render State Exceptions
+`Renderer::render()` intentionally takes `&mut AppState`.
+`paint_transcript()` intentionally mutates `state.max_scroll` and `state.visible_collapsible_ids`, consumes `state.scroll_to_message_idx`, and may adjust `state.scroll_offset`.
+This is a justified exception: the mutation is load-bearing for collapsible viewport focus and is documented in `src/tui/renderer/mod.rs`.
+
+## TUI Spinner
+`spin_tick` increments only when `state.is_busy`.
+The zero-cells render test depends on this: an unchanged non-busy state must render with zero changed cells.
+
+## Terminal Key Protocol
+`Alt+[` is terminal-limited on macOS/crossterm: `ESC [` is interpreted as a CSI prefix.
+Without kitty keyboard protocol support, the `Alt+[` binding never fires even though `keybindings.rs` contains it.

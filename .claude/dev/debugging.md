@@ -32,6 +32,16 @@ Inspect the full path: `resolve()` → tool `run()` → `PendingAction` payload 
 
 Session data lives at `<thunk-data-dir>/data/sessions.db`. Schema is v3. `ActiveSession::open_or_restore()` loads the most recent session matching the current `project_root`. Restored anchor state (`last_read_file`, `last_search_query`, `last_search_scope`) comes from the `sessions` table. Code: `src/app/session.rs`, `src/storage/session/store.rs`, `src/storage/session/schema.rs`.
 
+## TUI Key and Render Issues
+
+`Alt+[` is limited by terminal protocol on macOS/crossterm: `ESC [` is interpreted as a CSI prefix. Without kitty keyboard protocol support, the `Alt+[` binding in `src/tui/keybindings.rs` never fires.
+
+Collapsible focus uses a one-shot scroll request: `focus_next_collapsible()` and `focus_prev_collapsible()` write `state.scroll_to_message_idx`; `paint_transcript()` consumes it with `take()`, scrolls the target message into the upper third of the viewport, and repopulates `state.visible_collapsible_ids`.
+
+Spinner races: Phase 32.11 fixed the busy-state race by clearing `state.is_busy` on `RuntimeEvent::AnswerReady` in `events.rs`, not only on `WorkerReply::HandleOk` in `app.rs`. `spin_tick` only increments while `state.is_busy`, so zero-cell render tests rely on non-busy state staying visually stable.
+
+Generation cursor guard: the streaming cursor is appended only when the last assistant message is also the last message in `state.messages`. This prevents the cursor from appearing on a completed response while a new prompt is busy but before `AssistantMessageStarted` fires.
+
 ## Useful Test Entry Points
 
 - Retrieval and scope: `src/runtime/tests/investigation.rs`, `src/runtime/tests/path_scope.rs`, `src/runtime/tests/investigation_modes.rs`, `src/runtime/tests/investigation_inline.rs`

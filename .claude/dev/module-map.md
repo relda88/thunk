@@ -78,7 +78,27 @@ Key files: `src/app/mod.rs`, `src/app/context.rs`, `src/app/session.rs`, `src/ap
 ## src/tui/
 Owns command parsing (`tui/commands/mod.rs`), input handling, screen rendering, and `RuntimeEvent` → UI state mapping.
 No business logic. No tool dispatch. No direct runtime calls except via `RuntimeRequest`.
-Key files: `src/tui/app.rs`, `src/tui/commands/mod.rs`, `src/tui/render.rs`, `src/tui/state.rs`
+Key files:
+- `src/tui/mod.rs` — terminal setup/teardown and module declarations
+- `src/tui/app.rs` — TUI event loop, render scheduling, worker reply handling
+- `src/tui/worker.rs` — background `AppContext` command runner
+- `src/tui/cursor.rs` — cursor shape and terminal affordance sync
+- `src/tui/keybindings.rs` — key event dispatch
+- `src/tui/events.rs` — `RuntimeEvent` to `AppState` mutations
+- `src/tui/format.rs` — UI formatting and command-output summarization helpers
+- `src/tui/state.rs` — mutable UI state
+- `src/tui/input.rs` — input editing, history, reverse search, launcher, autocomplete
+- `src/tui/collapsible.rs` — pure collapsible summary classification; no renderer dependency
+- `src/tui/commands/mod.rs` — slash command parser, autocomplete names, launcher entries
+- `src/tui/commands/dispatch.rs` — command dispatch to worker/runtime requests
+- `src/tui/renderer/mod.rs` — renderer, transcript painting, overlays, approval widget, spinner
+- `src/tui/renderer/buffer.rs` — cell buffer
+- `src/tui/renderer/diff.rs` — frame diff writer
+- `src/tui/renderer/style.rs` — `Theme`, colors, packed style
+- `src/tui/renderer/symbols.rs` — symbol pool
+
+Renderer exception: `Renderer::render()` takes `&mut AppState` because `paint_transcript()` has load-bearing render side effects documented in `renderer/mod.rs`: it updates `state.max_scroll`, consumes `state.scroll_to_message_idx`, adjusts `state.scroll_offset`, and repopulates `state.visible_collapsible_ids` so collapsible viewport focus works.
+`src/tui/renderer/transcript.rs` does not exist in the current tree; transcript rendering lives in `renderer/mod.rs`.
 
 ## src/logging/
 Owns `SessionLog`: per-session append-only log file opened in `data/logs/`.

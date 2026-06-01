@@ -4,14 +4,15 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 928 passing via `cargo test --no-default-features`
+Test baseline: 996 passing via `just verify`
 Never make commits — user commits manually.
 
 ## Current Phase State
 - Phase 29: COMPLETE
 - Phase 30: COMPLETE — persistent symbol/import index backed by SQLite
 - Phase 31: COMPLETE — context window intelligence; Slice 31.5 summarization deferred
-- Phase 32: ACTIVE — TUI overhaul pending scope definition
+- Phase 32: COMPLETE — TUI overhaul
+- Phase 33: ACTIVE
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model
@@ -43,6 +44,54 @@ Never make commits — user commits manually.
 | Tool dispatch | src/runtime/orchestration/tool_round.rs |
 | Shared types | src/core/ |
 
+## TUI Module Structure
+- `src/tui/mod.rs` — terminal setup/teardown and module declarations
+- `src/tui/app.rs` — TUI event loop, worker channel integration, render scheduling
+- `src/tui/worker.rs` — background `AppContext` command runner
+- `src/tui/cursor.rs` — terminal cursor shape/affordance sync
+- `src/tui/keybindings.rs` — key event dispatch
+- `src/tui/events.rs` — `RuntimeEvent` to `AppState` mapping
+- `src/tui/format.rs` — UI formatting helpers
+- `src/tui/state.rs` — mutable UI state
+- `src/tui/input.rs` — input buffer, history, reverse search, launcher, autocomplete
+- `src/tui/collapsible.rs` — pure collapsible summary classification
+- `src/tui/commands/mod.rs` — slash command parsing, autocomplete names, launcher entries
+- `src/tui/commands/dispatch.rs` — command to `RuntimeRequest`/worker dispatch
+- `src/tui/renderer/mod.rs` — renderer, transcript painting, overlays, spinner, approval widget
+- `src/tui/renderer/buffer.rs` — cell buffer
+- `src/tui/renderer/diff.rs` — frame diff writer
+- `src/tui/renderer/style.rs` — `Theme`, colors, packed styles
+- `src/tui/renderer/symbols.rs` — symbol interning
+
+Note: `src/tui/renderer/transcript.rs` is not present in the current tree; transcript rendering lives in `renderer/mod.rs`.
+
+## TUI Keybindings
+| Key | Behavior |
+| --- | --- |
+| `Ctrl+C`, `Ctrl+Q` | Quit |
+| `Enter` | Submit input, accept launcher, or accept reverse search depending on active mode |
+| `Alt+Enter` | Insert newline |
+| `Backspace` | Delete before cursor, launcher query char, or reverse-search query char depending on active mode |
+| `Alt+Backspace`, `Ctrl+W` | Delete word before cursor |
+| `Left`, `Right` | Move cursor |
+| `Home`, `End` | Move to current logical line start/end |
+| `Ctrl+D` | Dump last assembled prompt to temp file |
+| `Ctrl+P` | Recall previous input |
+| `Ctrl+N` | Reject pending approval, otherwise recall next input |
+| `Ctrl+Y` | Approve pending approval |
+| `Up`, `Down` | Cycle launcher selection when launcher is active; otherwise scroll transcript by 1 |
+| `PageUp`, `PageDown` | Scroll transcript by 10 |
+| `Ctrl+O` | Toggle expanded file-read transcript view |
+| `Ctrl+K` | Open command launcher when not busy |
+| `Ctrl+R` | Start/cycle reverse search |
+| `Esc` | Cancel launcher, autocomplete, or reverse search depending on active mode |
+| `Tab` | Forward slash-command autocomplete when not busy |
+| `Shift+Tab` / `BackTab` | Reverse slash-command autocomplete when not busy |
+| `Alt+[` | Focus previous collapsible block where supported by terminal protocol |
+| `Alt+]` | Focus next collapsible block |
+| `Alt+O` | Toggle focused collapsible block |
+| Printable characters | Insert into input, launcher query, or reverse-search query depending on active mode |
+
 ## Build
 ```bash
 cargo check --all-targets                                    # fast type-check
@@ -58,6 +107,7 @@ THUNK_TRACE_RUNTIME=1 cargo run --release --no-default-features  # debug
 - Weakening evidence gates
 - Model involvement in structural decisions
 - Importing AppError or Config from app/ — use core/
+- Treating `Theme` as a standalone TUI concern outside `Renderer`
 
 ## Reference Docs
 @.claude/rules/invariants.md
