@@ -109,6 +109,11 @@ pub struct Runtime {
     /// mutation on a `.rs` file. Initialized from config.project.verify_after_mutation;
     /// can be toggled at runtime via /verify on|off without restarting.
     verify_after_mutation: bool,
+    /// Tracks how many correction attempts have been made for the current mutation.
+    /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
+    correction_attempts: u32,
+    /// Maximum allowed correction attempts per mutation. From config.project.max_correction_attempts.
+    max_correction_attempts: u32,
 }
 
 impl Runtime {
@@ -152,6 +157,8 @@ impl Runtime {
             context_75_warned: false,
             prompt_physics,
             verify_after_mutation: config.project.verify_after_mutation,
+            correction_attempts: 0,
+            max_correction_attempts: config.project.max_correction_attempts,
         }
     }
 
@@ -169,6 +176,11 @@ impl Runtime {
 
     pub fn with_verify_after_mutation(mut self, enabled: bool) -> Self {
         self.verify_after_mutation = enabled;
+        self
+    }
+
+    pub fn with_max_correction_attempts(mut self, n: u32) -> Self {
+        self.max_correction_attempts = n;
         self
     }
 
@@ -549,12 +561,63 @@ impl Runtime {
                                         combined.truncate(4000);
                                         combined.push_str("\n[output truncated]");
                                     }
-                                    let msg = if out.status.success() {
-                                        "cargo check: ok".to_string()
+                                    if out.status.success() {
+                                        on_event(RuntimeEvent::SystemMessage(
+                                            "cargo check: ok".to_string(),
+                                        ));
+                                        self.correction_attempts = 0;
+                                    } else if self.max_correction_attempts > 0
+                                        && self.correction_attempts < self.max_correction_attempts
+                                    {
+                                        // Correction attempt: inject a correction prompt and
+                                        // re-enter the turn loop. The [runtime:correction]
+                                        // prefix is mandatory — it suppresses TurnContext
+                                        // surface/intent re-classification (engine.rs ~line 1641).
+                                        self.correction_attempts += 1;
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "cargo check: failed — requesting correction \
+                                             (attempt {}/{})",
+                                            self.correction_attempts, self.max_correction_attempts
+                                        )));
+                                        let correction_prompt = format!(
+                                            "[runtime:correction] cargo check failed after \
+                                             editing {}:\n{}\n\nEmit a corrective \
+                                             [edit_file: ...] that fixes the compilation \
+                                             error. Do not include any other content.",
+                                            abs_path,
+                                            combined.trim()
+                                        );
+                                        self.conversation.push_user(correction_prompt);
+                                        on_event(RuntimeEvent::ActivityChanged(
+                                            Activity::Processing,
+                                        ));
+                                        self.run_turns(0, on_event);
+                                        if self.pending_action.is_some() {
+                                            // Corrective edit is pending approval — suspend
+                                            // here and let the next Approve call continue.
+                                            return;
+                                        }
+                                        // Model responded with prose instead of an edit.
+                                        // run_turns already called finish_with_runtime_answer
+                                        // for the prose answer, so we must not call it again.
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "cargo check: failed after {} correction \
+                                             attempt(s) — manual fix required\n{}",
+                                            self.correction_attempts,
+                                            combined.trim()
+                                        )));
+                                        self.correction_attempts = 0;
+                                        return;
                                     } else {
-                                        format!("cargo check: failed\n{}", combined.trim())
-                                    };
-                                    on_event(RuntimeEvent::SystemMessage(msg));
+                                        // Corrections disabled or max attempts reached.
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "cargo check: failed after {} correction \
+                                             attempt(s) — manual fix required\n{}",
+                                            self.correction_attempts,
+                                            combined.trim()
+                                        )));
+                                        self.correction_attempts = 0;
+                                    }
                                 }
                                 Err(_) => {
                                     on_event(RuntimeEvent::SystemMessage(
@@ -1635,7 +1698,14 @@ impl TurnContext {
         reads_this_turn: &HashSet<String>,
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) -> Result<TurnContext, ()> {
-        let original_user_prompt = runtime.conversation.last_user_content().filter(|c| {
+        let last_user = runtime.conversation.last_user_content();
+        // Correction rounds are injected by the runtime after a cargo check failure.
+        // They must be excluded from intent classification (no retrieval/mutation detection)
+        // but must allow mutation so the model's corrective edit can go through the approval gate.
+        let is_correction_round = last_user
+            .as_deref()
+            .map_or(false, |c| c.starts_with("[runtime:correction]"));
+        let original_user_prompt = last_user.filter(|c| {
             !c.starts_with("=== tool_result:")
                 && !c.starts_with("=== tool_error:")
                 && !c.starts_with("[runtime:correction]")
@@ -1658,9 +1728,10 @@ impl TurnContext {
                     && prompt_requires_investigation(prompt)
             })
             .unwrap_or(false);
-        let mutation_allowed = original_user_prompt
-            .map(|p| user_requested_mutation(p) || user_requested_execution(p))
-            .unwrap_or(false);
+        let mutation_allowed = is_correction_round
+            || original_user_prompt
+                .map(|p| user_requested_mutation(p) || user_requested_execution(p))
+                .unwrap_or(false);
         let simple_edit_request = original_user_prompt.and_then(requested_simple_edit);
         let tool_surface = original_user_prompt
             .map(|p| {
@@ -1671,7 +1742,10 @@ impl TurnContext {
                     requested_read_path.is_some() || !reads_this_turn.is_empty(),
                 )
             })
-            .unwrap_or(if reads_this_turn.is_empty() {
+            .unwrap_or(if is_correction_round {
+                // Correction rounds must use MutationEnabled so edit_file is available.
+                ToolSurface::MutationEnabled
+            } else if reads_this_turn.is_empty() {
                 ToolSurface::AnswerOnly
             } else {
                 ToolSurface::RetrievalFirst

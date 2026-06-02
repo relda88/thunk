@@ -607,7 +607,8 @@ fn diagnostics_not_injected_when_lsp_disabled() {
     let payload = format!("{}\x00fn hello()\x00fn world()", abs_path);
 
     // Config::default() has lsp.enabled = false — diagnostics must not be injected.
-    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path());
+    // Disable corrections (tmpdir has no Cargo.toml; this test is not about corrections).
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_max_correction_attempts(0);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
@@ -647,7 +648,8 @@ fn lsp_disabled_pre_check_skipped_mutation_executes_in_one_approval() {
     let payload = format!("{abs_path}\x00fn foo()\x00fn bar()");
 
     // Config::default() has lsp.enabled = false — pre-check must be bypassed.
-    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path());
+    // Disable corrections (tmpdir has no Cargo.toml; this test is not about corrections).
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_max_correction_attempts(0);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
@@ -691,9 +693,12 @@ fn verify_emits_system_message_after_mutation() {
     fs::write(&main_rs, "fn main() {}\n").unwrap();
 
     let abs_path = main_rs.to_string_lossy().into_owned();
-    let payload = format!("{abs_path}\x00fn main()\x00fn main() {{ let _x = 1; }}");
+    // Use the full "fn main() {}" as old content so the replacement doesn't leave stray "{}".
+    let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
 
-    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_verify_after_mutation(true);
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_after_mutation(true)
+        .with_max_correction_attempts(0);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
@@ -751,5 +756,138 @@ fn verify_skipped_when_disabled() {
     assert!(
         !has_cargo_check_msg,
         "must not emit 'cargo check' SystemMessage when verify is disabled: {events:?}"
+    );
+}
+
+#[test]
+fn correction_loop_emits_approval_on_first_failure() {
+    // After an approved mutation that fails cargo check, and with corrections enabled,
+    // the runtime must inject a correction prompt, get a corrective edit from the model,
+    // and emit ApprovalRequired for that corrective edit. Approving the corrective edit
+    // must complete the turn with AnswerReady.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"corr-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let main_rs = src_dir.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+    let abs_path = main_rs.to_string_lossy().into_owned();
+
+    // Initial edit introduces a type error. Payload: abs_path\x00old\x00new.
+    let initial_payload =
+        format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let x: i32 = \"bad\"; }}");
+
+    // The corrective edit the mock backend will propose. Use a relative path so the
+    // resolver does not hit the /tmp vs /private/tmp symlink mismatch on macOS.
+    let corrective_edit =
+        "[edit_file]\npath: src/main.rs\nold content: let x: i32 = \"bad\";\nnew content: let _x: i32 = 1;\n[/edit_file]";
+    let (rt, _) =
+        make_runtime_in_with_recorded_requests(vec![corrective_edit, "Fixed."], tmp.path());
+    let mut rt = rt
+        .with_verify_after_mutation(true)
+        .with_max_correction_attempts(2);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload: initial_payload,
+    });
+
+    // First Approve: executes original (broken) edit, cargo check fails, correction requested.
+    let first_events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(
+        !has_failed(&first_events),
+        "first approve must not fail: {first_events:?}"
+    );
+    assert!(
+        first_events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("requesting correction (attempt 1/2)"))),
+        "must emit correction request SystemMessage: {first_events:?}"
+    );
+    assert!(
+        first_events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. })),
+        "must emit ApprovalRequired for the corrective edit: {first_events:?}"
+    );
+
+    // Second Approve: executes the corrective edit; cargo check should pass now.
+    let second_events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(
+        !has_failed(&second_events),
+        "second approve must not fail: {second_events:?}"
+    );
+    assert!(
+        second_events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::AnswerReady(_))),
+        "second approve must complete with AnswerReady: {second_events:?}"
+    );
+}
+
+#[test]
+fn correction_exhaustion_emits_summary() {
+    // When the model responds with prose instead of an edit after a correction prompt,
+    // the runtime must emit an exhaustion SystemMessage containing "manual fix required"
+    // and complete the turn with AnswerReady — no infinite loop.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"exhaust-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let main_rs = src_dir.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+    let abs_path = main_rs.to_string_lossy().into_owned();
+
+    // Initial edit introduces a type error.
+    let initial_payload =
+        format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let x: i32 = \"bad\"; }}");
+
+    // Backend responds with prose — no edit_file tool call.
+    let (rt, _) = make_runtime_in_with_recorded_requests(
+        vec!["Sorry, I cannot fix this automatically."],
+        tmp.path(),
+    );
+    let mut rt = rt
+        .with_verify_after_mutation(true)
+        .with_max_correction_attempts(1);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload: initial_payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            RuntimeEvent::SystemMessage(msg) if msg.contains("manual fix required")
+        )),
+        "must emit exhaustion SystemMessage: {events:?}"
+    );
+    // AnswerReady must fire exactly once — no double-fire from run_turns + outer finish.
+    let answer_ready_count = events
+        .iter()
+        .filter(|e| matches!(e, RuntimeEvent::AnswerReady(_)))
+        .count();
+    assert_eq!(
+        answer_ready_count, 1,
+        "AnswerReady must fire exactly once: {events:?}"
     );
 }

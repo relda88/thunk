@@ -126,6 +126,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_two() -> u32 {
+    2
+}
+
 /// Per-project settings that customize runtime behavior for a specific codebase.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -136,6 +140,11 @@ pub struct ProjectConfig {
     /// enter conversation state. Defaults to true — set to false to opt out.
     #[serde(default = "default_true")]
     pub verify_after_mutation: bool,
+    /// Maximum number of self-correction attempts after a cargo check failure.
+    /// Each attempt injects a correction prompt, gets a new edit from the model,
+    /// and presents it for user approval. 0 = corrections disabled.
+    #[serde(default = "default_two")]
+    pub max_correction_attempts: u32,
 }
 
 impl Default for ProjectConfig {
@@ -143,6 +152,7 @@ impl Default for ProjectConfig {
         Self {
             test_command: None,
             verify_after_mutation: true,
+            max_correction_attempts: 2,
         }
     }
 }

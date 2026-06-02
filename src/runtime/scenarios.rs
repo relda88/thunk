@@ -683,6 +683,8 @@ mod tests {
             "[edit_file]\npath: f.rs\nFind: hello world\nReplace: hello thunk\n[/edit_file]";
         let valid_edit = "[edit_file]\npath: f.rs\n---search---\nhello world\n---replace---\nhello thunk\n[/edit_file]";
 
+        // Disable corrections: f.rs has no Cargo.toml — cargo check would fail and fire
+        // the correction loop. This test is about edit-repair, not post-mutation verification.
         let mut rt = make_runtime(
             &dir,
             vec![
@@ -691,7 +693,8 @@ mod tests {
                 valid_edit,
                 "Edit applied.",
             ],
-        );
+        )
+        .with_max_correction_attempts(0);
 
         let submit_events = collect_events(
             &mut rt,
