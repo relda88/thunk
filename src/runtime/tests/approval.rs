@@ -891,3 +891,159 @@ fn correction_exhaustion_emits_summary() {
         "AnswerReady must fire exactly once: {events:?}"
     );
 }
+
+// ---- Transaction tests (Slice 34.4) ----------------------------------------
+
+#[test]
+fn transaction_produces_grouped_approval() {
+    use crate::runtime::types::RuntimeEvent;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("file_a.py"), "old_a\n").unwrap();
+    fs::write(tmp.path().join("file_b.py"), "old_b\n").unwrap();
+
+    let two_edits = format!(
+        "[edit_file]\npath: file_a.py\n---search---\nold_a\n---replace---\nnew_a\n[/edit_file]\n\
+         [edit_file]\npath: file_b.py\n---search---\nold_b\n---replace---\nnew_b\n[/edit_file]"
+    );
+
+    let mut rt = make_runtime_in(vec![two_edits], tmp.path());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "edit both files".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "submit must not fail: {events:?}");
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            RuntimeEvent::TransactionApprovalRequired { actions, .. }
+            if actions.len() == 2
+        )),
+        "must fire TransactionApprovalRequired with 2 actions: {events:?}"
+    );
+}
+
+#[test]
+fn transaction_executes_atomically() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("file_a.py"), "old_a\n").unwrap();
+    fs::write(tmp.path().join("file_b.py"), "old_b\n").unwrap();
+
+    let two_edits = format!(
+        "[edit_file]\npath: file_a.py\n---search---\nold_a\n---replace---\nnew_a\n[/edit_file]\n\
+         [edit_file]\npath: file_b.py\n---search---\nold_b\n---replace---\nnew_b\n[/edit_file]"
+    );
+
+    let mut rt = make_runtime_in(vec![two_edits], tmp.path());
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "edit both files".into(),
+        },
+    );
+
+    let approve_events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(
+        !has_failed(&approve_events),
+        "approve must not fail: {approve_events:?}"
+    );
+    assert!(
+        approve_events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::AnswerReady(_))),
+        "AnswerReady must fire after transaction: {approve_events:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("file_a.py"))
+            .unwrap()
+            .trim(),
+        "new_a",
+        "file_a.py must be updated"
+    );
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("file_b.py"))
+            .unwrap()
+            .trim(),
+        "new_b",
+        "file_b.py must be updated"
+    );
+}
+
+#[test]
+fn transaction_rolls_back_on_failure() {
+    // Scenario: model proposes two valid edits. After approval is shown to the user,
+    // file_b.py is modified externally (simulating a concurrent write). On Approve,
+    // the first edit succeeds, the second fails the staleness check in execute_approved(),
+    // and the runtime rolls back the first edit.
+    use crate::runtime::types::RuntimeEvent;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("file_a.py"), "old_a\n").unwrap();
+    fs::write(tmp.path().join("file_b.py"), "old_b\n").unwrap();
+
+    // Both search texts exist at Submit time so both pass EditFileTool::run().
+    let two_edits = format!(
+        "[edit_file]\npath: file_a.py\n---search---\nold_a\n---replace---\nnew_a\n[/edit_file]\n\
+         [edit_file]\npath: file_b.py\n---search---\nold_b\n---replace---\nnew_b\n[/edit_file]"
+    );
+
+    let mut rt = make_runtime_in(vec![two_edits], tmp.path());
+    let submit_events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "edit both files".into(),
+        },
+    );
+    assert!(
+        submit_events.iter().any(|e| matches!(
+            e,
+            RuntimeEvent::TransactionApprovalRequired { actions, .. }
+            if actions.len() == 2
+        )),
+        "must fire TransactionApprovalRequired: {submit_events:?}"
+    );
+
+    // Simulate external modification of file_b.py after proposal but before approval.
+    // The staleness check in execute_approved() will fail because "old_b" is gone.
+    fs::write(tmp.path().join("file_b.py"), "externally_modified\n").unwrap();
+
+    let approve_events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(
+        !has_failed(&approve_events),
+        "approve must not emit Failed even on rollback: {approve_events:?}"
+    );
+    assert!(
+        approve_events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::AnswerReady(_))),
+        "AnswerReady must fire so the turn completes: {approve_events:?}"
+    );
+    assert!(
+        approve_events.iter().any(|e| {
+            if let RuntimeEvent::SystemMessage(msg) = e {
+                msg.contains("rolled back")
+            } else {
+                false
+            }
+        }),
+        "must emit rolled back system message: {approve_events:?}"
+    );
+    // file_a.py must be restored to its original content after rollback.
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("file_a.py"))
+            .unwrap()
+            .trim(),
+        "old_a",
+        "file_a.py must be rolled back to original content"
+    );
+}

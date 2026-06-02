@@ -79,6 +79,27 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
                 risk,
                 evidence,
                 preview,
+                transaction_files: vec![],
+            });
+            state.mark_dirty(DirtySections::INPUT);
+            state.set_status("awaiting approval");
+        }
+        RuntimeEvent::TransactionApprovalRequired { actions, evidence } => {
+            let first = &actions[0];
+            let risk = match first.risk {
+                RiskLevel::High => ApprovalRisk::High,
+                RiskLevel::Medium => ApprovalRisk::Medium,
+                RiskLevel::Low => ApprovalRisk::Low,
+            };
+            let preview = decode_approval_preview(&first.tool_name, &first.payload);
+            let transaction_files = actions.iter().map(|a| a.summary.clone()).collect();
+            state.pending_approval = Some(PendingApprovalState {
+                tool_name: first.tool_name.clone(),
+                summary: format!("{} edits", actions.len()),
+                risk,
+                evidence,
+                preview,
+                transaction_files,
             });
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("awaiting approval");

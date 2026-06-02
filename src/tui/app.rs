@@ -345,6 +345,7 @@ mod tests {
             risk: ApprovalRisk::High,
             evidence: vec![],
             preview: vec![],
+            transaction_files: vec![],
         });
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
@@ -368,6 +369,7 @@ mod tests {
             risk: ApprovalRisk::High,
             evidence: vec![],
             preview: vec![],
+            transaction_files: vec![],
         });
         assert!(state.pending_approval.is_some());
         state.clear_messages();
@@ -403,6 +405,7 @@ mod tests {
             risk: ApprovalRisk::Medium,
             evidence: vec![],
             preview: vec![],
+            transaction_files: vec![],
         });
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();

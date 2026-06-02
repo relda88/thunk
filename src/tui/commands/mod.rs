@@ -34,6 +34,7 @@ pub enum Command {
     Compact,
     PromptPhysics(Option<bool>),
     VerifyMutation(Option<String>),
+    TransactionStatus,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -135,6 +136,7 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") | None => Some(Ok(Command::VerifyMutation(None))),
             Some(cmd) => Some(Ok(Command::VerifyMutation(Some(cmd.to_string())))),
         },
+        "/transaction" => Some(Ok(Command::TransactionStatus)),
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -173,6 +175,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/search",
         "/session",
         "/sessions",
+        "/transaction",
         "/undo",
         "/verify",
     ]
@@ -270,6 +273,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/sessions",
             description: "list saved sessions",
+        },
+        LauncherCommand {
+            name: "/transaction",
+            description: "show pending transaction state",
         },
         LauncherCommand {
             name: "/undo",

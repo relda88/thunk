@@ -166,6 +166,12 @@ pub(crate) enum ToolRoundOutcome {
         accumulated: String,
         pending: PendingAction,
     },
+    /// Two or more consecutive mutation tools requested approval in a single turn.
+    /// The caller presents all as a single grouped approval and executes atomically.
+    TransactionRequired {
+        accumulated: String,
+        actions: Vec<PendingAction>,
+    },
 
     /// Runtime has selected the next tool call itself.
     /// The caller must re-enter the normal tool execution loop with this call;
@@ -210,7 +216,8 @@ pub(crate) fn run_tool_round(
     let mut accumulated = String::new();
     let mut git_answer_sections = Vec::new();
 
-    for mut input in calls {
+    let mut calls_iter = calls.into_iter();
+    while let Some(mut input) = calls_iter.next() {
         simplify_search_input(&mut input);
         // Enforce the prompt-derived path scope as an upper bound on search dispatch.
         // None → inject scope (9.1.2 behavior).
@@ -1168,9 +1175,40 @@ pub(crate) fn run_tool_round(
                         .unwrap_or(true),
                     "tool '{name}' returned Approval but spec declares Immediate"
                 );
-                return ToolRoundOutcome::ApprovalRequired {
+                // Collect any consecutive edit_file/write_file approvals from remaining calls
+                // into a transaction. ToolCallStarted fires for each during collection;
+                // ToolCallFinished fires during execute_transaction() after approval.
+                let mut tx_actions = vec![pending];
+                for remaining in calls_iter.by_ref() {
+                    if !matches!(
+                        remaining,
+                        ToolInput::EditFile { .. } | ToolInput::WriteFile { .. }
+                    ) {
+                        break;
+                    }
+                    let r_name = remaining.tool_name().to_string();
+                    on_event(RuntimeEvent::ToolCallStarted {
+                        name: r_name.clone(),
+                    });
+                    match resolve(project_root, &remaining) {
+                        Ok(resolved) => match registry.dispatch(resolved) {
+                            Ok(ToolRunResult::Approval(r_pending)) => {
+                                tx_actions.push(r_pending);
+                            }
+                            _ => break,
+                        },
+                        Err(_) => break,
+                    }
+                }
+                if tx_actions.len() == 1 {
+                    return ToolRoundOutcome::ApprovalRequired {
+                        accumulated,
+                        pending: tx_actions.remove(0),
+                    };
+                }
+                return ToolRoundOutcome::TransactionRequired {
                     accumulated,
-                    pending,
+                    actions: tx_actions,
                 };
             }
             Err(e) => {

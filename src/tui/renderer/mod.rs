@@ -129,7 +129,10 @@ impl Renderer {
             0
         };
         let approval_rows: u16 = state.pending_approval.as_ref().map_or(0, |a| {
-            1 + a.evidence.len().min(4) as u16 + a.preview.len().min(4) as u16 + 1
+            1 + a.transaction_files.len().min(6) as u16
+                + a.evidence.len().min(4) as u16
+                + a.preview.len().min(4) as u16
+                + 1
         });
         let input_base_rows = input_rows + overlay_rows;
         let effective_rows = input_base_rows + approval_rows;
@@ -529,22 +532,39 @@ impl Renderer {
         let label = format!("! {}  {}", kind_label, approval.summary);
         self.paint(cur, 0, first_row, &label, w, label_style);
 
+        let mut offset: u16 = 1;
+
+        // Transaction file list (capped at 6).
+        let tx_count = approval.transaction_files.len().min(6);
+        for (i, file) in approval.transaction_files.iter().take(6).enumerate() {
+            let display: String = format!("  · {}", file).chars().take(w as usize).collect();
+            self.paint(cur, 0, first_row + offset + i as u16, &display, w, dim);
+        }
+        offset += tx_count as u16;
+
         let actual_preview = approval.preview.len().min(4);
         for (i, line) in approval.preview.iter().take(4).enumerate() {
             let display: String = format!("  › {}", line).chars().take(w as usize).collect();
-            self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
+            self.paint(cur, 0, first_row + offset + i as u16, &display, w, dim);
         }
+        offset += actual_preview as u16;
 
         let evidence_count = approval.evidence.len().min(4);
         for (i, ev) in approval.evidence.iter().take(4).enumerate() {
-            let ev_row = first_row + 1 + actual_preview as u16 + i as u16;
             let ev_text = format!("  › {}", ev);
             let display: String = ev_text.chars().take(w as usize).collect();
-            self.paint(cur, 0, ev_row, &display, w, dim);
+            self.paint(cur, 0, first_row + offset + i as u16, &display, w, dim);
         }
+        offset += evidence_count as u16;
 
-        let hint_row = first_row + 1 + actual_preview as u16 + evidence_count as u16;
-        self.paint(cur, 0, hint_row, "  ^Y approve   ^N reject", w, dim);
+        self.paint(
+            cur,
+            0,
+            first_row + offset,
+            "  ^Y approve   ^N reject",
+            w,
+            dim,
+        );
     }
 
     fn paint_autocomplete_overlay(
@@ -784,6 +804,7 @@ mod tests {
             risk: ApprovalRisk::Low,
             evidence: vec![],
             preview: vec![],
+            transaction_files: vec![],
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -818,6 +839,7 @@ mod tests {
             risk: ApprovalRisk::Low,
             evidence: vec!["some evidence".to_string()],
             preview: vec![],
+            transaction_files: vec![],
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -850,6 +872,7 @@ mod tests {
             risk: ApprovalRisk::Low,
             evidence: vec![],
             preview: vec![],
+            transaction_files: vec![],
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -884,6 +907,7 @@ mod tests {
                 risk: ApprovalRisk::Low,
                 evidence: (0..count).map(|i| format!("ev{}", i)).collect(),
                 preview: vec![],
+                transaction_files: vec![],
             });
             let mut renderer = Renderer::new(80, 24);
             let mut out = Vec::<u8>::new();

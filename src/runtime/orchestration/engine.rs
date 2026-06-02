@@ -4,7 +4,8 @@ use crate::core::config::Config;
 use crate::llm::backend::ModelBackend;
 use crate::storage::index::SymbolStore;
 use crate::tools::{
-    PendingAction, PendingApprovalStage, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
+    PendingAction, PendingApprovalStage, PendingTransaction, ToolInput, ToolOutput, ToolRegistry,
+    ToolRunResult,
 };
 
 use super::super::lsp::LspManager;
@@ -276,6 +277,7 @@ impl Runtime {
             RuntimeRequest::VerifyMutationToggle { command } => {
                 self.handle_verify_mutation_toggle(command, on_event)
             }
+            RuntimeRequest::TransactionStatus => self.handle_transaction_status(on_event),
         }
     }
 
@@ -413,43 +415,60 @@ impl Runtime {
         };
 
         match stage {
-            PendingApprovalStage::AwaitingPreCheck(pending) => {
-                let is_file_mutation =
-                    matches!(pending.tool_name.as_str(), "edit_file" | "write_file");
-                if is_file_mutation && self.lsp.is_enabled() {
-                    if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
-                        let path = std::path::Path::new(&abs_path);
-                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                        if path.exists() && self.lsp.config().extensions.contains(&ext.to_string())
+            PendingApprovalStage::AwaitingPreCheck(tx) => {
+                if tx.is_single() {
+                    let pending = tx.first().clone();
+                    let is_file_mutation =
+                        matches!(pending.tool_name.as_str(), "edit_file" | "write_file");
+                    if is_file_mutation && self.lsp.is_enabled() {
+                        if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload)
                         {
-                            if let Ok(source) = std::fs::read_to_string(path) {
-                                if let Ok(diags) = self.lsp.query_diagnostics(path, &source) {
-                                    let errors: Vec<_> =
-                                        diags.iter().filter(|d| d.severity == "error").collect();
-                                    if !errors.is_empty() {
-                                        let evidence: Vec<String> = errors
+                            let path = std::path::Path::new(&abs_path);
+                            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                            if path.exists()
+                                && self.lsp.config().extensions.contains(&ext.to_string())
+                            {
+                                if let Ok(source) = std::fs::read_to_string(path) {
+                                    if let Ok(diags) = self.lsp.query_diagnostics(path, &source) {
+                                        let errors: Vec<_> = diags
                                             .iter()
-                                            .take(4)
-                                            .map(|d| format!("line {}: {}", d.line + 1, d.message))
+                                            .filter(|d| d.severity == "error")
                                             .collect();
-                                        self.pending_action = Some(
-                                            PendingApprovalStage::PreCheckComplete(pending.clone()),
-                                        );
-                                        on_event(RuntimeEvent::ApprovalRequired {
-                                            pending,
-                                            evidence,
-                                        });
-                                        return;
+                                        if !errors.is_empty() {
+                                            let evidence: Vec<String> = errors
+                                                .iter()
+                                                .take(4)
+                                                .map(|d| {
+                                                    format!("line {}: {}", d.line + 1, d.message)
+                                                })
+                                                .collect();
+                                            self.pending_action =
+                                                Some(PendingApprovalStage::PreCheckComplete(
+                                                    PendingTransaction::single(pending.clone()),
+                                                ));
+                                            on_event(RuntimeEvent::ApprovalRequired {
+                                                pending,
+                                                evidence,
+                                            });
+                                            return;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    self.execute_and_handle(pending, on_event);
+                } else {
+                    // Multi-action transaction: skip per-file LSP pre-check.
+                    self.execute_transaction(tx, on_event);
                 }
-                self.execute_and_handle(pending, on_event);
             }
-            PendingApprovalStage::PreCheckComplete(pending) => {
-                self.execute_and_handle(pending, on_event);
+            PendingApprovalStage::PreCheckComplete(tx) => {
+                if tx.is_single() {
+                    self.execute_and_handle(tx.into_single(), on_event);
+                } else {
+                    self.execute_transaction(tx, on_event);
+                }
             }
         }
     }
@@ -642,9 +661,10 @@ impl Runtime {
                         if let Ok(resolved) = resolve(&self.project_root, &input) {
                             match self.registry.dispatch(resolved) {
                                 Ok(ToolRunResult::Approval(pending)) => {
-                                    self.pending_action = Some(
-                                        PendingApprovalStage::AwaitingPreCheck(pending.clone()),
-                                    );
+                                    self.pending_action =
+                                        Some(PendingApprovalStage::AwaitingPreCheck(
+                                            PendingTransaction::single(pending.clone()),
+                                        ));
                                     on_event(RuntimeEvent::ApprovalRequired {
                                         pending,
                                         evidence: vec![],
@@ -676,9 +696,189 @@ impl Runtime {
         }
     }
 
+    /// Executes a multi-action transaction atomically:
+    /// 1. Captures pre-edit snapshots for all files (best-effort — no ACID guarantee).
+    /// 2. Executes each action in order; rolls back all prior edits on any failure.
+    /// 3. Runs verify_command after all edits complete if configured.
+    ///    Correction loop is intentionally skipped for transactions — it applies to
+    ///    single-edit mutations only.
+    fn execute_transaction(
+        &mut self,
+        tx: PendingTransaction,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools {
+            tool: short_tool_name(&tx.first().tool_name).to_string(),
+            detail: None,
+        }));
+
+        // Step 1: Capture pre-edit state for rollback.
+        // Files that do not exist yet (write_file creating a new file) get an empty snapshot;
+        // restoring them is a no-op if the write was the first action to fail.
+        let mut snapshots: Vec<(String, String)> = Vec::new();
+        for action in &tx.actions {
+            if matches!(action.tool_name.as_str(), "edit_file" | "write_file") {
+                if let Some(abs_path) = extract_absolute_path_from_payload(&action.payload) {
+                    let before = std::fs::read_to_string(&abs_path).unwrap_or_default();
+                    snapshots.push((abs_path, before));
+                }
+            }
+        }
+
+        // Step 2: Execute all actions; roll back on first failure.
+        let mut results = String::new();
+        let mut all_ok = true;
+        let mut failed_name = String::new();
+        let mut failed_error = String::new();
+        let mut executed_count = 0usize;
+
+        for action in &tx.actions {
+            match self.registry.execute_approved(action) {
+                Ok(output) => {
+                    self.invalidate_project_snapshot_if_needed(&output);
+                    let summary = tool_codec::render_compact_summary(&output);
+                    on_event(RuntimeEvent::ToolCallFinished {
+                        name: action.tool_name.clone(),
+                        summary: Some(summary.clone()),
+                    });
+                    results.push_str(&tool_codec::format_tool_result(&action.tool_name, &output));
+                    executed_count += 1;
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::ToolCallFinished {
+                        name: action.tool_name.clone(),
+                        summary: None,
+                    });
+                    all_ok = false;
+                    failed_name = action.tool_name.clone();
+                    failed_error = e.to_string();
+                    break;
+                }
+            }
+        }
+
+        if !all_ok {
+            // Roll back all successfully executed edits in reverse order.
+            // This is best-effort: filesystem errors during rollback are silently ignored.
+            for (path, before) in snapshots[..executed_count].iter().rev() {
+                let _ = std::fs::write(path, before);
+            }
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "transaction failed on {}: {} — rolled back {} edit(s)",
+                failed_name, failed_error, executed_count
+            )));
+            self.finish_with_runtime_answer(
+                "Transaction rolled back.",
+                AnswerSource::ToolAssisted { rounds: 1 },
+                on_event,
+            );
+            return;
+        }
+
+        // All edits succeeded — push pre-edit states to undo stack for /undo support.
+        for (abs_path, before) in snapshots {
+            self.undo_stack.push((abs_path, before));
+            if self.undo_stack.len() > 5 {
+                self.undo_stack.remove(0);
+            }
+        }
+
+        if !results.is_empty() {
+            self.commit_tool_results(results);
+            self.conversation
+                .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
+        }
+
+        let n = tx.actions.len();
+        let final_answer = format!("{n} edit(s) applied successfully.");
+
+        // Step 3: Run verify_command if configured.
+        // Correction loop is intentionally skipped for transactions.
+        if let Some(verify_cmd) = self.verify_command.clone() {
+            let mut cmd_parts = verify_cmd.split_whitespace();
+            if let Some(program) = cmd_parts.next() {
+                let args: Vec<&str> = cmd_parts.collect();
+                on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
+                match std::process::Command::new(program)
+                    .args(&args)
+                    .current_dir(self.project_root.path())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+                {
+                    Ok(out) => {
+                        let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+                        combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                        if combined.len() > 4000 {
+                            combined.truncate(4000);
+                            combined.push_str("\n[output truncated]");
+                        }
+                        if out.status.success() {
+                            on_event(RuntimeEvent::SystemMessage(format!("{verify_cmd}: ok")));
+                            self.correction_attempts = 0;
+                        } else {
+                            on_event(RuntimeEvent::SystemMessage(format!(
+                                "{verify_cmd}: failed after transaction — \
+                                 manual fix required\n{}",
+                                combined.trim()
+                            )));
+                        }
+                    }
+                    Err(_) => {
+                        on_event(RuntimeEvent::SystemMessage(format!(
+                            "{verify_cmd}: unavailable"
+                        )));
+                    }
+                }
+            }
+        }
+
+        self.finish_with_runtime_answer(
+            &final_answer,
+            AnswerSource::ToolAssisted { rounds: 1 },
+            on_event,
+        );
+    }
+
+    fn handle_transaction_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        match &self.pending_action {
+            Some(stage) => {
+                let tx = match stage {
+                    PendingApprovalStage::AwaitingPreCheck(tx)
+                    | PendingApprovalStage::PreCheckComplete(tx) => tx,
+                };
+                if tx.is_single() {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "pending: 1 action — {}",
+                        tx.first().summary
+                    )));
+                } else {
+                    let files: Vec<String> = tx
+                        .actions
+                        .iter()
+                        .map(|a| {
+                            extract_absolute_path_from_payload(&a.payload)
+                                .unwrap_or_else(|| a.tool_name.clone())
+                        })
+                        .collect();
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "pending transaction: {} action(s)\n{}",
+                        tx.actions.len(),
+                        files.join("\n")
+                    )));
+                }
+            }
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "no pending transaction".to_string(),
+                ));
+            }
+        }
+    }
+
     fn handle_reject(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
-        let pending = match self.pending_action.take() {
-            Some(stage) => stage.into_action(),
+        let tx = match self.pending_action.take() {
+            Some(stage) => stage.into_transaction(),
             None => {
                 on_event(RuntimeEvent::Failed {
                     message: "No pending action to reject.".to_string(),
@@ -687,11 +887,14 @@ impl Runtime {
             }
         };
 
-        let tool_name = pending.tool_name.clone();
-        on_event(RuntimeEvent::ToolCallFinished {
-            name: tool_name.clone(),
-            summary: None,
-        });
+        // Fire ToolCallFinished for all actions (matching ToolCallStarted fired during proposal).
+        for action in &tx.actions {
+            on_event(RuntimeEvent::ToolCallFinished {
+                name: action.tool_name.clone(),
+                summary: None,
+            });
+        }
+        let tool_name = tx.first().tool_name.clone();
         let rejection = tool_codec::format_tool_error(
             &tool_name,
             "user rejected this action — do not retry or re-propose it. \
@@ -1035,9 +1238,34 @@ impl Runtime {
                     self.conversation
                         .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                 }
-                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(
+                    PendingTransaction::single(pending.clone()),
+                ));
                 let evidence = state.investigation.evidence_summary();
                 on_event(RuntimeEvent::ApprovalRequired { pending, evidence });
+                on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                return TurnSignal::Finish;
+            }
+            ToolRoundOutcome::TransactionRequired {
+                accumulated,
+                actions,
+            } => {
+                if let Some(t) = t_tool_start {
+                    state
+                        .turn_perf
+                        .record_tool_elapsed(t.elapsed().as_millis() as u64);
+                }
+                if !accumulated.is_empty() {
+                    self.commit_tool_results(accumulated);
+                    self.conversation
+                        .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
+                }
+                self.pending_action =
+                    Some(PendingApprovalStage::AwaitingPreCheck(PendingTransaction {
+                        actions: actions.clone(),
+                    }));
+                let evidence = state.investigation.evidence_summary();
+                on_event(RuntimeEvent::TransactionApprovalRequired { actions, evidence });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
                 return TurnSignal::Finish;
             }
@@ -1676,7 +1904,9 @@ impl Runtime {
 
     #[cfg(test)]
     pub(crate) fn set_pending_for_test(&mut self, action: PendingAction) {
-        self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(action));
+        self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(
+            PendingTransaction::single(action),
+        ));
     }
 
     #[cfg(test)]

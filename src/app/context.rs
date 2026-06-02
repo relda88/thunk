@@ -181,6 +181,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::Compact => "compact",
         RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",
         RuntimeRequest::VerifyMutationToggle { .. } => "verify_mutation_toggle",
+        RuntimeRequest::TransactionStatus => "transaction_status",
     }
 }
 
@@ -193,6 +194,10 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         RuntimeEvent::ApprovalRequired { pending: p, .. } => {
             Some(format!("approval required: {}", p.summary))
         }
+        RuntimeEvent::TransactionApprovalRequired { actions, .. } => Some(format!(
+            "transaction approval required: {} action(s)",
+            actions.len()
+        )),
         RuntimeEvent::InfoMessage(text) => Some(format!("info: {text}")),
         RuntimeEvent::SystemMessage(text) => Some(format!("system: {text}")),
         // Handled with timing in handle():

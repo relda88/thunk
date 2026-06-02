@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use crate::tools::{ExecutionKind, PendingApprovalStage, ToolError, ToolInput, ToolRunResult};
+use crate::tools::{
+    ExecutionKind, PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolRunResult,
+};
 
 use super::super::super::investigation::investigation::{InvestigationMode, InvestigationState};
 use super::super::super::investigation::tool_surface::ToolSurface;
@@ -88,9 +90,30 @@ impl Runtime {
                     self.conversation
                         .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                 }
-                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(
+                    PendingTransaction::single(pending.clone()),
+                ));
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
+                    evidence: vec![],
+                });
+                on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+            }
+            ToolRoundOutcome::TransactionRequired {
+                accumulated,
+                actions,
+            } => {
+                if !accumulated.is_empty() {
+                    self.commit_tool_results(accumulated);
+                    self.conversation
+                        .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
+                }
+                self.pending_action =
+                    Some(PendingApprovalStage::AwaitingPreCheck(PendingTransaction {
+                        actions: actions.clone(),
+                    }));
+                on_event(RuntimeEvent::TransactionApprovalRequired {
+                    actions,
                     evidence: vec![],
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
@@ -197,7 +220,9 @@ impl Runtime {
                         .unwrap_or(false),
                     "tool '{name}' requested approval but spec declares Immediate"
                 );
-                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(
+                    PendingTransaction::single(pending.clone()),
+                ));
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],

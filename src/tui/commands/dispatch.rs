@@ -80,6 +80,7 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::VerifyMutation(command) => {
             CommandAction::Runtime(RuntimeRequest::VerifyMutationToggle { command })
         }
+        Command::TransactionStatus => CommandAction::Runtime(RuntimeRequest::TransactionStatus),
     }
 }
 

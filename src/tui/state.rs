@@ -49,6 +49,9 @@ pub(crate) struct PendingApprovalState {
     pub(crate) risk: ApprovalRisk,
     pub(crate) evidence: Vec<String>,
     pub(crate) preview: Vec<String>,
+    /// For multi-file transactions: list of affected file paths (display form).
+    /// Empty for single-action approvals.
+    pub(crate) transaction_files: Vec<String>,
 }
 
 /// Represents a chat message with a role (system, user, assistant) and content
@@ -540,6 +543,7 @@ mod tests {
             risk: super::ApprovalRisk::High,
             evidence: vec![],
             preview: vec![],
+            transaction_files: vec![],
         });
         assert!(state.pending_approval.is_some());
 

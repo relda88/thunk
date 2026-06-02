@@ -170,6 +170,9 @@ pub enum RuntimeRequest {
     VerifyMutationToggle {
         command: Option<String>,
     },
+    /// Read-only query: returns the current pending transaction state as a SystemMessage.
+    /// Does not mutate conversation state or trigger session save.
+    TransactionStatus,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
@@ -192,6 +195,13 @@ pub enum RuntimeEvent {
     /// The turn is paused until RuntimeRequest::Approve or Reject is received.
     ApprovalRequired {
         pending: PendingAction,
+        evidence: Vec<String>,
+    },
+    /// Fired when multiple mutating tools in a single turn require grouped approval.
+    /// The turn is paused until RuntimeRequest::Approve or Reject is received.
+    /// All actions execute atomically on approval; any failure rolls back all prior edits.
+    TransactionApprovalRequired {
+        actions: Vec<PendingAction>,
         evidence: Vec<String>,
     },
     AnswerReady(AnswerSource),
