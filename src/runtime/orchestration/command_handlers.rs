@@ -1,5 +1,5 @@
 use crate::llm::backend::Role;
-use crate::tools::{ToolError, ToolInput, ToolRunResult};
+use crate::tools::{PendingApprovalStage, ToolError, ToolInput, ToolRunResult};
 
 use super::super::super::protocol::tool_codec;
 use super::super::super::resolve;
@@ -162,7 +162,7 @@ impl Runtime {
                 )));
             }
             Ok(ToolRunResult::Approval(pending)) => {
-                self.pending_action = Some(pending.clone());
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],

@@ -129,7 +129,7 @@ impl Renderer {
             0
         };
         let approval_rows: u16 = state.pending_approval.as_ref().map_or(0, |a| {
-            1 + a.evidence.len().min(2) as u16 + a.preview.len().min(4) as u16 + 1
+            1 + a.evidence.len().min(4) as u16 + a.preview.len().min(4) as u16 + 1
         });
         let input_base_rows = input_rows + overlay_rows;
         let effective_rows = input_base_rows + approval_rows;
@@ -535,8 +535,8 @@ impl Renderer {
             self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
         }
 
-        let evidence_count = approval.evidence.len().min(2);
-        for (i, ev) in approval.evidence.iter().take(2).enumerate() {
+        let evidence_count = approval.evidence.len().min(4);
+        for (i, ev) in approval.evidence.iter().take(4).enumerate() {
             let ev_row = first_row + 1 + actual_preview as u16 + i as u16;
             let ev_text = format!("  › {}", ev);
             let display: String = ev_text.chars().take(w as usize).collect();

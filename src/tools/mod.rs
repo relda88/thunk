@@ -17,7 +17,7 @@ use crate::runtime::ResolvedToolInput;
 use list_dir::ListDirTool;
 use read_file::ReadFileTool;
 
-pub use pending::{PendingAction, RiskLevel};
+pub use pending::{PendingAction, PendingApprovalStage, RiskLevel};
 pub use registry::ToolRegistry;
 pub use types::{
     EntryKind, ExecutionKind, ToolError, ToolInput, ToolOutput, ToolRunResult, ToolSpec,

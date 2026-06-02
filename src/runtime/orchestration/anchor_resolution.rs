@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::tools::{ExecutionKind, ToolError, ToolInput, ToolRunResult};
+use crate::tools::{ExecutionKind, PendingApprovalStage, ToolError, ToolInput, ToolRunResult};
 
 use super::super::super::investigation::investigation::{InvestigationMode, InvestigationState};
 use super::super::super::investigation::tool_surface::ToolSurface;
@@ -88,7 +88,7 @@ impl Runtime {
                     self.conversation
                         .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                 }
-                self.pending_action = Some(pending.clone());
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],
@@ -197,7 +197,7 @@ impl Runtime {
                         .unwrap_or(false),
                     "tool '{name}' requested approval but spec declares Immediate"
                 );
-                self.pending_action = Some(pending.clone());
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],

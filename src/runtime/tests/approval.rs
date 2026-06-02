@@ -626,3 +626,47 @@ fn diagnostics_not_injected_when_lsp_disabled() {
         "lsp_diagnostics must not appear when LSP is disabled: {snapshot:?}"
     );
 }
+
+// When LSP is disabled (Config::default()), the pre-edit safety check is skipped.
+// Approve fires once → mutation executes immediately; no second ApprovalRequired is emitted.
+// This is the regression test for Slice 34.1: the pre-check gate must not affect
+// any existing approval path when LSP is off.
+//
+// When test infrastructure gains mock LSP support, add a companion test that enables
+// LSP, injects errors, and verifies the second-approval re-prompt path.
+#[test]
+fn lsp_disabled_pre_check_skipped_mutation_executes_in_one_approval() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let file = tmp.path().join("lib.rs");
+    fs::write(&file, "fn foo() {}\n").unwrap();
+    let abs_path = file.to_string_lossy().into_owned();
+    // Legacy payload format: abs_path\x00search\x00replace
+    let payload = format!("{abs_path}\x00fn foo()\x00fn bar()");
+
+    // Config::default() has lsp.enabled = false — pre-check must be bypassed.
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path());
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+
+    let re_approval_count = events
+        .iter()
+        .filter(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. }))
+        .count();
+    assert_eq!(
+        re_approval_count, 0,
+        "pre-check must not re-issue ApprovalRequired when LSP is disabled: {events:?}"
+    );
+    assert!(
+        !has_failed(&events),
+        "approve must succeed when LSP is disabled: {events:?}"
+    );
+}

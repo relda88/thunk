@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use crate::core::config::Config;
 use crate::llm::backend::ModelBackend;
 use crate::storage::index::SymbolStore;
-use crate::tools::{PendingAction, ToolInput, ToolOutput, ToolRegistry, ToolRunResult};
+use crate::tools::{
+    PendingAction, PendingApprovalStage, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
+};
 
 use super::super::lsp::LspManager;
 
@@ -81,7 +83,8 @@ pub struct Runtime {
     /// Holds a mutating tool action that is waiting for user approval.
     /// Set when a tool round suspends; cleared by Approve or Reject.
     /// At most one pending action exists at any time.
-    pending_action: Option<PendingAction>,
+    /// The stage tracks whether the pre-edit LSP safety check has run.
+    pending_action: Option<PendingApprovalStage>,
     config: Config,
     /// Queued runtime-owned tool call to execute at the start of the next run_turns invocation.
     /// Set by handle_approve when a post-mutation follow-up (e.g. test run) is configured.
@@ -374,8 +377,8 @@ impl Runtime {
     }
 
     fn handle_approve(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
-        let pending = match self.pending_action.take() {
-            Some(p) => p,
+        let stage = match self.pending_action.take() {
+            Some(s) => s,
             None => {
                 on_event(RuntimeEvent::Failed {
                     message: "No pending action to approve.".to_string(),
@@ -384,6 +387,52 @@ impl Runtime {
             }
         };
 
+        match stage {
+            PendingApprovalStage::AwaitingPreCheck(pending) => {
+                let is_file_mutation =
+                    matches!(pending.tool_name.as_str(), "edit_file" | "write_file");
+                if is_file_mutation && self.lsp.is_enabled() {
+                    if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
+                        let path = std::path::Path::new(&abs_path);
+                        if path.exists() && path.extension().and_then(|e| e.to_str()) == Some("rs")
+                        {
+                            if let Ok(source) = std::fs::read_to_string(path) {
+                                if let Ok(diags) = self.lsp.query_diagnostics(path, &source) {
+                                    let errors: Vec<_> =
+                                        diags.iter().filter(|d| d.severity == "error").collect();
+                                    if !errors.is_empty() {
+                                        let evidence: Vec<String> = errors
+                                            .iter()
+                                            .take(4)
+                                            .map(|d| format!("line {}: {}", d.line + 1, d.message))
+                                            .collect();
+                                        self.pending_action = Some(
+                                            PendingApprovalStage::PreCheckComplete(pending.clone()),
+                                        );
+                                        on_event(RuntimeEvent::ApprovalRequired {
+                                            pending,
+                                            evidence,
+                                        });
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                self.execute_and_handle(pending, on_event);
+            }
+            PendingApprovalStage::PreCheckComplete(pending) => {
+                self.execute_and_handle(pending, on_event);
+            }
+        }
+    }
+
+    fn execute_and_handle(
+        &mut self,
+        pending: PendingAction,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
         let tool_name = pending.tool_name.clone();
         on_event(RuntimeEvent::ActivityChanged(Activity::ExecutingTools {
             tool: short_tool_name(&tool_name).to_string(),
@@ -470,7 +519,9 @@ impl Runtime {
                         if let Ok(resolved) = resolve(&self.project_root, &input) {
                             match self.registry.dispatch(resolved) {
                                 Ok(ToolRunResult::Approval(pending)) => {
-                                    self.pending_action = Some(pending.clone());
+                                    self.pending_action = Some(
+                                        PendingApprovalStage::AwaitingPreCheck(pending.clone()),
+                                    );
                                     on_event(RuntimeEvent::ApprovalRequired {
                                         pending,
                                         evidence: vec![],
@@ -504,7 +555,7 @@ impl Runtime {
 
     fn handle_reject(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let pending = match self.pending_action.take() {
-            Some(p) => p,
+            Some(stage) => stage.into_action(),
             None => {
                 on_event(RuntimeEvent::Failed {
                     message: "No pending action to reject.".to_string(),
@@ -861,7 +912,7 @@ impl Runtime {
                     self.conversation
                         .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
                 }
-                self.pending_action = Some(pending.clone());
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(pending.clone()));
                 let evidence = state.investigation.evidence_summary();
                 on_event(RuntimeEvent::ApprovalRequired { pending, evidence });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
@@ -1502,7 +1553,7 @@ impl Runtime {
 
     #[cfg(test)]
     pub(crate) fn set_pending_for_test(&mut self, action: PendingAction) {
-        self.pending_action = Some(action);
+        self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(action));
     }
 
     #[cfg(test)]

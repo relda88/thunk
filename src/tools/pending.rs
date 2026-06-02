@@ -16,6 +16,30 @@ pub struct PendingAction {
     pub payload: String,
 }
 
+/// Tracks which phase of the approval lifecycle a pending action is in.
+///
+/// `AwaitingPreCheck` — freshly proposed; pre-edit LSP check has not run yet.
+/// `PreCheckComplete` — pre-check ran (or was bypassed); safe to execute immediately.
+#[derive(Debug)]
+pub enum PendingApprovalStage {
+    AwaitingPreCheck(PendingAction),
+    PreCheckComplete(PendingAction),
+}
+
+impl PendingApprovalStage {
+    pub fn action(&self) -> &PendingAction {
+        match self {
+            Self::AwaitingPreCheck(a) | Self::PreCheckComplete(a) => a,
+        }
+    }
+
+    pub fn into_action(self) -> PendingAction {
+        match self {
+            Self::AwaitingPreCheck(a) | Self::PreCheckComplete(a) => a,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
