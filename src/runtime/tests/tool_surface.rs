@@ -262,6 +262,7 @@ fn path_qualified_file_prompt_reads_before_first_model_generation() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -309,6 +310,7 @@ fn explicit_directory_prompt_lists_before_first_model_generation() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -355,6 +357,7 @@ fn structural_directory_prompt_lists_before_first_model_generation() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -410,6 +413,7 @@ fn investigation_prompt_still_generates_before_first_tool() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -718,6 +722,7 @@ fn answer_only_surface_hint_sent_to_model_during_post_read_synthesis() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     collect_events(
@@ -792,6 +797,7 @@ fn retrieval_first_project_snapshot_hint_is_compact_and_deterministic() {
         project_root.clone(),
         Box::new(RecordingBackend::new(vec!["Done."], Arc::clone(&requests))),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     collect_events(
@@ -853,6 +859,7 @@ fn answer_only_surface_hint_sent_after_second_runtime_owned_usage_read() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     collect_events(
@@ -913,6 +920,7 @@ fn seeded_list_dir_synthesis_receives_answer_only_surface() {
             Arc::clone(&requests),
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -972,6 +980,7 @@ fn seeded_list_dir_blocks_post_listing_search_code() {
             "sandbox/ contains main.py.", // correction causes re-generation
         ])),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -1008,6 +1017,7 @@ fn seeded_list_dir_blocks_post_listing_read_file() {
             "sandbox/ contains main.py.",   // correction causes re-generation
         ])),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(

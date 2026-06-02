@@ -3,6 +3,8 @@ use std::path::Path;
 use crate::tools::{ExecutionKind, ToolSpec};
 
 use super::super::project::{ProjectStructureEntryKind, ProjectStructureSnapshot};
+use super::prompt_physics;
+use super::prompt_physics::PromptPhysicsConfig;
 use super::tool_codec;
 
 /// Builds the ephemeral per-turn tool-surface hint injected before generation.
@@ -98,8 +100,14 @@ pub fn build_system_prompt(
     project_root: &Path,
     specs: &[ToolSpec],
     include_mutation_tools: bool,
+    prompt_physics: &PromptPhysicsConfig,
 ) -> String {
-    let mut prompt = format!(
+    let mut prompt = String::new();
+    if let Some(anchor) = prompt_physics::primacy_anchor_block(prompt_physics) {
+        prompt.push_str(&anchor);
+        prompt.push('\n');
+    }
+    prompt.push_str(&format!(
         "You are {app_name}, a local AI coding assistant.\n\
 Project: {}\n\n\
 Be concise, grounded, and practical. \
@@ -107,7 +115,7 @@ When the user asks about this project's code, investigate using the tools before
 do not guess or ask the user for information the tools can find. \
 When you show code, keep it focused on the user's request.",
         project_root.display()
-    );
+    ));
 
     let visible_specs: Vec<&ToolSpec> = specs
         .iter()

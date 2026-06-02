@@ -28,6 +28,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         .map_err(|e| AppError::Config(e.to_string()))?;
     let registry = default_registry().with_project_root(project_root.as_path_buf());
     let log = crate::logging::SessionLog::open(&paths.logs_dir);
+    let thunk_md = std::fs::read_to_string(paths.project_root.join("THUNK.md")).ok();
 
     let (active_session, history, anchors) =
         session::ActiveSession::open_or_restore(&paths.session_db, &project_root)?;
@@ -41,6 +42,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         anchors,
         log,
         Some(&paths.session_db),
+        thunk_md,
     )?;
 
     tui::run(&config, &paths, app)

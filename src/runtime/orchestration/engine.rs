@@ -18,6 +18,7 @@ use super::super::project::ProjectRoot;
 use super::super::project::ProjectStructureSnapshot;
 use super::super::project::ProjectStructureSnapshotCache;
 use super::super::protocol::prompt;
+use super::super::protocol::prompt_physics::PromptPhysicsConfig;
 use super::super::protocol::tool_codec;
 use super::super::resolve;
 use super::super::types::{
@@ -100,6 +101,8 @@ pub struct Runtime {
     /// Set to true after the 75% context warning fires. Cleared on reset so the
     /// warning re-arms for the next session.
     pub(super) context_75_warned: bool,
+    #[allow(dead_code)]
+    prompt_physics: PromptPhysicsConfig,
 }
 
 impl Runtime {
@@ -108,10 +111,20 @@ impl Runtime {
         project_root: ProjectRoot,
         backend: Box<dyn ModelBackend>,
         registry: ToolRegistry,
+        thunk_md: Option<String>,
     ) -> Self {
         let specs = registry.specs();
-        let system_prompt =
-            prompt::build_system_prompt(&config.app.name, project_root.path(), &specs, false);
+        let prompt_physics = PromptPhysicsConfig {
+            enabled: false,
+            thunk_md,
+        };
+        let system_prompt = prompt::build_system_prompt(
+            &config.app.name,
+            project_root.path(),
+            &specs,
+            false,
+            &prompt_physics,
+        );
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
         let lsp = LspManager::new(&config.lsp, project_root.path());
         Self {
@@ -131,6 +144,7 @@ impl Runtime {
             symbol_store: None,
             index_triggered: false,
             context_75_warned: false,
+            prompt_physics,
         }
     }
 

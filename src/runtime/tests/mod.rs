@@ -132,6 +132,7 @@ pub fn make_runtime(responses: Vec<impl Into<String>>) -> Runtime {
         root.clone(),
         Box::new(TestBackend::new(responses)),
         default_registry().with_project_root(root.as_path_buf()),
+        None,
     )
 }
 
@@ -142,6 +143,7 @@ pub fn make_runtime_in(responses: Vec<impl Into<String>>, root: &std::path::Path
         project_root.clone(),
         Box::new(TestBackend::new(responses)),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     )
 }
 
@@ -155,6 +157,7 @@ pub fn make_runtime_with_recorded_requests(
         root.clone(),
         Box::new(RecordingBackend::new(responses, Arc::clone(&requests))),
         default_registry().with_project_root(root.as_path_buf()),
+        None,
     );
     (runtime, requests)
 }
@@ -240,6 +243,7 @@ pub fn make_runtime_with_token_counting_backend(
             context_window_tokens,
         )),
         default_registry().with_project_root(root.as_path_buf()),
+        None,
     )
 }
 

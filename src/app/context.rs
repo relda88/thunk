@@ -133,8 +133,9 @@ impl AppContext {
         anchors: (Option<String>, Option<String>, Option<String>),
         log: Option<SessionLog>,
         db_path: Option<&std::path::Path>,
+        thunk_md: Option<String>,
     ) -> Result<Self> {
-        let mut runtime = Runtime::new(config, project_root, backend, registry);
+        let mut runtime = Runtime::new(config, project_root, backend, registry, thunk_md);
         if let Some(path) = db_path {
             runtime = runtime.with_symbol_store(path);
         }

@@ -309,6 +309,7 @@ mod tests {
                 anchors,
                 None,
                 Some(&paths.session_db),
+                None,
             )
             .unwrap();
 

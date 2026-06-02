@@ -66,6 +66,7 @@ fn make_runtime_in(responses: Vec<impl Into<String>>, root: &std::path::Path) ->
         project_root.clone(),
         Box::new(TestBackend::new(responses)),
         default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     )
 }
 
