@@ -122,10 +122,6 @@ fn validate_command_names(commands: &HashMap<String, CustomCommandDef>) -> Resul
     Ok(())
 }
 
-fn default_true() -> bool {
-    true
-}
-
 fn default_two() -> u32 {
     2
 }
@@ -135,12 +131,13 @@ fn default_two() -> u32 {
 #[serde(default)]
 pub struct ProjectConfig {
     pub test_command: Option<String>,
-    /// Run `cargo check` automatically after every approved edit_file/write_file
-    /// mutation on a `.rs` file. Output is surfaced as a SystemMessage; it does not
-    /// enter conversation state. Defaults to true — set to false to opt out.
-    #[serde(default = "default_true")]
-    pub verify_after_mutation: bool,
-    /// Maximum number of self-correction attempts after a cargo check failure.
+    /// Shell command to run after an approved mutation.
+    /// None = disabled. Examples:
+    ///   "cargo check"     (Rust)
+    ///   "ruff check ."    (Python)
+    ///   "tsc --noEmit"    (TypeScript)
+    pub verify_command: Option<String>,
+    /// Maximum number of self-correction attempts after a verify command failure.
     /// Each attempt injects a correction prompt, gets a new edit from the model,
     /// and presents it for user approval. 0 = corrections disabled.
     #[serde(default = "default_two")]
@@ -151,7 +148,7 @@ impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
             test_command: None,
-            verify_after_mutation: true,
+            verify_command: None,
             max_correction_attempts: 2,
         }
     }

@@ -77,8 +77,8 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::PromptPhysics(enabled) => {
             CommandAction::Runtime(RuntimeRequest::PromptPhysicsToggle { enabled })
         }
-        Command::VerifyMutation(enabled) => {
-            CommandAction::Runtime(RuntimeRequest::VerifyMutationToggle { enabled })
+        Command::VerifyMutation(command) => {
+            CommandAction::Runtime(RuntimeRequest::VerifyMutationToggle { command })
         }
     }
 }

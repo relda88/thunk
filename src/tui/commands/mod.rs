@@ -33,7 +33,7 @@ pub enum Command {
     ContextStats,
     Compact,
     PromptPhysics(Option<bool>),
-    VerifyMutation(Option<bool>),
+    VerifyMutation(Option<String>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -131,10 +131,9 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             _ => Some(Err(ParseError::UnknownCommand)),
         },
         "/verify" => match arg {
-            Some("on") => Some(Ok(Command::VerifyMutation(Some(true)))),
-            Some("off") => Some(Ok(Command::VerifyMutation(Some(false)))),
+            Some("off") => Some(Ok(Command::VerifyMutation(Some("off".to_string())))),
             Some("status") | None => Some(Ok(Command::VerifyMutation(None))),
-            _ => Some(Err(ParseError::UnknownCommand)),
+            Some(cmd) => Some(Ok(Command::VerifyMutation(Some(cmd.to_string())))),
         },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
@@ -578,23 +577,31 @@ mod tests {
     }
 
     #[test]
-    fn parses_verify_on() {
+    fn parses_verify_off() {
         assert_eq!(
-            parse("/verify on"),
-            Some(Ok(Command::VerifyMutation(Some(true))))
+            parse("/verify off"),
+            Some(Ok(Command::VerifyMutation(Some("off".to_string()))))
         );
     }
 
     #[test]
-    fn parses_verify_off() {
+    fn parses_verify_status() {
         assert_eq!(
-            parse("/verify off"),
-            Some(Ok(Command::VerifyMutation(Some(false))))
+            parse("/verify status"),
+            Some(Ok(Command::VerifyMutation(None)))
         );
     }
 
     #[test]
     fn parses_verify_bare() {
         assert_eq!(parse("/verify"), Some(Ok(Command::VerifyMutation(None))));
+    }
+
+    #[test]
+    fn parses_verify_command() {
+        assert_eq!(
+            parse("/verify cargo check"),
+            Some(Ok(Command::VerifyMutation(Some("cargo check".to_string()))))
+        );
     }
 }

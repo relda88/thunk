@@ -697,7 +697,7 @@ fn verify_emits_system_message_after_mutation() {
     let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
 
     let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
-        .with_verify_after_mutation(true)
+        .with_verify_command(Some("cargo check".into()))
         .with_max_correction_attempts(0);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),
@@ -739,7 +739,7 @@ fn verify_skipped_when_disabled() {
     let abs_path = main_rs.to_string_lossy().into_owned();
     let payload = format!("{abs_path}\x00fn main()\x00fn main() {{ let _x = 1; }}");
 
-    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_verify_after_mutation(false);
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_verify_command(None);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
@@ -791,7 +791,7 @@ fn correction_loop_emits_approval_on_first_failure() {
     let (rt, _) =
         make_runtime_in_with_recorded_requests(vec![corrective_edit, "Fixed."], tmp.path());
     let mut rt = rt
-        .with_verify_after_mutation(true)
+        .with_verify_command(Some("cargo check".into()))
         .with_max_correction_attempts(2);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),
@@ -863,7 +863,7 @@ fn correction_exhaustion_emits_summary() {
         tmp.path(),
     );
     let mut rt = rt
-        .with_verify_after_mutation(true)
+        .with_verify_command(Some("cargo check".into()))
         .with_max_correction_attempts(1);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),

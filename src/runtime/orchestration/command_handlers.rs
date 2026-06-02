@@ -538,29 +538,25 @@ impl Runtime {
 
     pub(super) fn handle_verify_mutation_toggle(
         &mut self,
-        enabled: Option<bool>,
+        command: Option<String>,
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) {
-        match enabled {
-            Some(true) => {
-                self.verify_after_mutation = true;
-                on_event(RuntimeEvent::SystemMessage(
-                    "verify after mutation: enabled".to_string(),
-                ));
+        match command {
+            Some(ref s) if s == "off" => {
+                self.verify_command = None;
+                on_event(RuntimeEvent::SystemMessage("verify: disabled".to_string()));
             }
-            Some(false) => {
-                self.verify_after_mutation = false;
-                on_event(RuntimeEvent::SystemMessage(
-                    "verify after mutation: disabled".to_string(),
-                ));
+            Some(cmd) => {
+                let msg = format!("verify: set to \"{}\"", cmd);
+                self.verify_command = Some(cmd);
+                on_event(RuntimeEvent::SystemMessage(msg));
             }
             None => {
-                let status = if self.verify_after_mutation {
-                    "verify after mutation: enabled"
-                } else {
-                    "verify after mutation: disabled"
+                let status = match &self.verify_command {
+                    Some(cmd) => format!("verify: \"{}\"", cmd),
+                    None => "verify: disabled".to_string(),
                 };
-                on_event(RuntimeEvent::SystemMessage(status.to_string()));
+                on_event(RuntimeEvent::SystemMessage(status));
             }
         }
     }

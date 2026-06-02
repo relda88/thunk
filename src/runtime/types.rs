@@ -164,10 +164,11 @@ pub enum RuntimeRequest {
     PromptPhysicsToggle {
         enabled: Option<bool>,
     },
-    /// Session-scoped verify toggle. `Some(true)` enables, `Some(false)` disables,
-    /// `None` queries current status. Does not mutate conversation or trigger session save.
+    /// Session-scoped verify command setter. `Some("off")` disables, `Some(cmd)` sets
+    /// the verify command, `None` queries current status. Does not mutate conversation
+    /// or trigger session save.
     VerifyMutationToggle {
-        enabled: Option<bool>,
+        command: Option<String>,
     },
 }
 

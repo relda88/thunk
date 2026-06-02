@@ -105,10 +105,10 @@ pub struct Runtime {
     /// warning re-arms for the next session.
     pub(super) context_75_warned: bool,
     prompt_physics: PromptPhysicsConfig,
-    /// Session-scoped flag: run `cargo check` after every approved edit_file/write_file
-    /// mutation on a `.rs` file. Initialized from config.project.verify_after_mutation;
-    /// can be toggled at runtime via /verify on|off without restarting.
-    verify_after_mutation: bool,
+    /// Session-scoped verify command: run after every approved edit_file/write_file
+    /// mutation. None = disabled. Initialized from config.project.verify_command;
+    /// can be changed at runtime via /verify <command>|off without restarting.
+    verify_command: Option<String>,
     /// Tracks how many correction attempts have been made for the current mutation.
     /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
     correction_attempts: u32,
@@ -156,7 +156,7 @@ impl Runtime {
             index_triggered: false,
             context_75_warned: false,
             prompt_physics,
-            verify_after_mutation: config.project.verify_after_mutation,
+            verify_command: config.project.verify_command.clone(),
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
         }
@@ -174,8 +174,8 @@ impl Runtime {
         self
     }
 
-    pub fn with_verify_after_mutation(mut self, enabled: bool) -> Self {
-        self.verify_after_mutation = enabled;
+    pub fn with_verify_command(mut self, cmd: Option<String>) -> Self {
+        self.verify_command = cmd;
         self
     }
 
@@ -273,8 +273,8 @@ impl Runtime {
             RuntimeRequest::PromptPhysicsToggle { enabled } => {
                 self.handle_prompt_physics_toggle(enabled, on_event)
             }
-            RuntimeRequest::VerifyMutationToggle { enabled } => {
-                self.handle_verify_mutation_toggle(enabled, on_event)
+            RuntimeRequest::VerifyMutationToggle { command } => {
+                self.handle_verify_mutation_toggle(command, on_event)
             }
         }
     }
@@ -419,8 +419,7 @@ impl Runtime {
                 if is_file_mutation && self.lsp.is_enabled() {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
                         let path = std::path::Path::new(&abs_path);
-                        if path.exists() && path.extension().and_then(|e| e.to_str()) == Some("rs")
-                        {
+                        if path.exists() {
                             if let Ok(source) = std::fs::read_to_string(path) {
                                 if let Ok(diags) = self.lsp.query_diagnostics(path, &source) {
                                     let errors: Vec<_> =
@@ -489,140 +488,135 @@ impl Runtime {
                 if matches!(tool_name.as_str(), "edit_file" | "write_file") && self.lsp.is_enabled()
                 {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
-                        if std::path::Path::new(&abs_path)
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            == Some("rs")
-                        {
-                            if let Ok(source) = std::fs::read_to_string(&abs_path) {
-                                if let Ok(diagnostics) = self
-                                    .lsp
-                                    .query_diagnostics(std::path::Path::new(&abs_path), &source)
-                                {
-                                    if !diagnostics.is_empty() {
-                                        let diag_text = diagnostics
-                                            .iter()
-                                            .map(|d| {
-                                                format!(
-                                                    "[{}] line {}:{} {}: {}",
-                                                    d.severity,
-                                                    d.line,
-                                                    d.column,
-                                                    d.source.as_deref().unwrap_or("rust-analyzer"),
-                                                    d.message
-                                                )
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("\n");
-                                        trace_runtime_decision(
-                                            on_event,
-                                            "lsp_diagnostics_injected",
-                                            &[
-                                                ("path", abs_path.clone()),
-                                                ("count", diagnostics.len().to_string()),
-                                            ],
-                                        );
-                                        self.commit_tool_results(format!(
-                                            "\n=== lsp_diagnostics: {} ===\n{}\n=== /lsp_diagnostics ===\n",
-                                            abs_path, diag_text
-                                        ));
-                                    }
+                        if let Ok(source) = std::fs::read_to_string(&abs_path) {
+                            if let Ok(diagnostics) = self
+                                .lsp
+                                .query_diagnostics(std::path::Path::new(&abs_path), &source)
+                            {
+                                if !diagnostics.is_empty() {
+                                    let diag_text = diagnostics
+                                        .iter()
+                                        .map(|d| {
+                                            format!(
+                                                "[{}] line {}:{} {}: {}",
+                                                d.severity,
+                                                d.line,
+                                                d.column,
+                                                d.source.as_deref().unwrap_or("rust-analyzer"),
+                                                d.message
+                                            )
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    trace_runtime_decision(
+                                        on_event,
+                                        "lsp_diagnostics_injected",
+                                        &[
+                                            ("path", abs_path.clone()),
+                                            ("count", diagnostics.len().to_string()),
+                                        ],
+                                    );
+                                    self.commit_tool_results(format!(
+                                        "\n=== lsp_diagnostics: {} ===\n{}\n=== /lsp_diagnostics ===\n",
+                                        abs_path, diag_text
+                                    ));
                                 }
                             }
                         }
                     }
                 }
-                // Runtime-initiated cargo check: not a model-proposed mutation, not subject
+                // Runtime-initiated verify command: not a model-proposed mutation, not subject
                 // to the approval gate. Uses std::process::Command directly (not ShellTool or
                 // registry.execute_approved) because this is a read-only verification step
                 // initiated by the runtime after an approved mutation, not a user action.
-                if self.verify_after_mutation
-                    && matches!(tool_name.as_str(), "edit_file" | "write_file")
-                {
-                    if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
-                        if std::path::Path::new(&abs_path)
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            == Some("rs")
+                if matches!(tool_name.as_str(), "edit_file" | "write_file") {
+                    if let Some(verify_cmd) = self.verify_command.clone() {
+                        if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload)
                         {
-                            on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
-                            match std::process::Command::new("cargo")
-                                .arg("check")
-                                .current_dir(self.project_root.path())
-                                .stdout(std::process::Stdio::piped())
-                                .stderr(std::process::Stdio::piped())
-                                .output()
-                            {
-                                Ok(out) => {
-                                    let mut combined =
-                                        String::from_utf8_lossy(&out.stdout).into_owned();
-                                    combined.push_str(&String::from_utf8_lossy(&out.stderr));
-                                    if combined.len() > 4000 {
-                                        combined.truncate(4000);
-                                        combined.push_str("\n[output truncated]");
-                                    }
-                                    if out.status.success() {
-                                        on_event(RuntimeEvent::SystemMessage(
-                                            "cargo check: ok".to_string(),
-                                        ));
-                                        self.correction_attempts = 0;
-                                    } else if self.max_correction_attempts > 0
-                                        && self.correction_attempts < self.max_correction_attempts
-                                    {
-                                        // Correction attempt: inject a correction prompt and
-                                        // re-enter the turn loop. The [runtime:correction]
-                                        // prefix is mandatory — it suppresses TurnContext
-                                        // surface/intent re-classification (engine.rs ~line 1641).
-                                        self.correction_attempts += 1;
-                                        on_event(RuntimeEvent::SystemMessage(format!(
-                                            "cargo check: failed — requesting correction \
-                                             (attempt {}/{})",
-                                            self.correction_attempts, self.max_correction_attempts
-                                        )));
-                                        let correction_prompt = format!(
-                                            "[runtime:correction] cargo check failed after \
-                                             editing {}:\n{}\n\nEmit a corrective \
-                                             [edit_file: ...] that fixes the compilation \
-                                             error. Do not include any other content.",
-                                            abs_path,
-                                            combined.trim()
-                                        );
-                                        self.conversation.push_user(correction_prompt);
-                                        on_event(RuntimeEvent::ActivityChanged(
-                                            Activity::Processing,
-                                        ));
-                                        self.run_turns(0, on_event);
-                                        if self.pending_action.is_some() {
-                                            // Corrective edit is pending approval — suspend
-                                            // here and let the next Approve call continue.
-                                            return;
+                            let mut cmd_parts = verify_cmd.split_whitespace();
+                            if let Some(program) = cmd_parts.next() {
+                                let args: Vec<&str> = cmd_parts.collect();
+                                on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
+                                match std::process::Command::new(program)
+                                    .args(&args)
+                                    .current_dir(self.project_root.path())
+                                    .stdout(std::process::Stdio::piped())
+                                    .stderr(std::process::Stdio::piped())
+                                    .output()
+                                {
+                                    Ok(out) => {
+                                        let mut combined =
+                                            String::from_utf8_lossy(&out.stdout).into_owned();
+                                        combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                                        if combined.len() > 4000 {
+                                            combined.truncate(4000);
+                                            combined.push_str("\n[output truncated]");
                                         }
-                                        // Model responded with prose instead of an edit.
-                                        // run_turns already called finish_with_runtime_answer
-                                        // for the prose answer, so we must not call it again.
-                                        on_event(RuntimeEvent::SystemMessage(format!(
-                                            "cargo check: failed after {} correction \
-                                             attempt(s) — manual fix required\n{}",
-                                            self.correction_attempts,
-                                            combined.trim()
-                                        )));
-                                        self.correction_attempts = 0;
-                                        return;
-                                    } else {
-                                        // Corrections disabled or max attempts reached.
-                                        on_event(RuntimeEvent::SystemMessage(format!(
-                                            "cargo check: failed after {} correction \
-                                             attempt(s) — manual fix required\n{}",
-                                            self.correction_attempts,
-                                            combined.trim()
-                                        )));
-                                        self.correction_attempts = 0;
+                                        if out.status.success() {
+                                            on_event(RuntimeEvent::SystemMessage(format!(
+                                                "{verify_cmd}: ok"
+                                            )));
+                                            self.correction_attempts = 0;
+                                        } else if self.max_correction_attempts > 0
+                                            && self.correction_attempts
+                                                < self.max_correction_attempts
+                                        {
+                                            // Correction attempt: inject a correction prompt and
+                                            // re-enter the turn loop. The [runtime:correction]
+                                            // prefix is mandatory — it suppresses TurnContext
+                                            // surface/intent re-classification (engine.rs ~line 1641).
+                                            self.correction_attempts += 1;
+                                            on_event(RuntimeEvent::SystemMessage(format!(
+                                                "{verify_cmd}: failed — requesting correction \
+                                                 (attempt {}/{})",
+                                                self.correction_attempts,
+                                                self.max_correction_attempts
+                                            )));
+                                            let correction_prompt = format!(
+                                                "[runtime:correction] {verify_cmd} failed after \
+                                                 editing {}:\n{}\n\nEmit a corrective \
+                                                 [edit_file: ...] that fixes the error. \
+                                                 Do not include any other content.",
+                                                abs_path,
+                                                combined.trim()
+                                            );
+                                            self.conversation.push_user(correction_prompt);
+                                            on_event(RuntimeEvent::ActivityChanged(
+                                                Activity::Processing,
+                                            ));
+                                            self.run_turns(0, on_event);
+                                            if self.pending_action.is_some() {
+                                                // Corrective edit is pending approval — suspend
+                                                // here and let the next Approve call continue.
+                                                return;
+                                            }
+                                            // Model responded with prose instead of an edit.
+                                            // run_turns already called finish_with_runtime_answer
+                                            // for the prose answer, so we must not call it again.
+                                            on_event(RuntimeEvent::SystemMessage(format!(
+                                                "{verify_cmd}: failed after {} correction \
+                                                 attempt(s) — manual fix required\n{}",
+                                                self.correction_attempts,
+                                                combined.trim()
+                                            )));
+                                            self.correction_attempts = 0;
+                                            return;
+                                        } else {
+                                            // Corrections disabled or max attempts reached.
+                                            on_event(RuntimeEvent::SystemMessage(format!(
+                                                "{verify_cmd}: failed after {} correction \
+                                                 attempt(s) — manual fix required\n{}",
+                                                self.correction_attempts,
+                                                combined.trim()
+                                            )));
+                                            self.correction_attempts = 0;
+                                        }
                                     }
-                                }
-                                Err(_) => {
-                                    on_event(RuntimeEvent::SystemMessage(
-                                        "cargo check: unavailable".to_string(),
-                                    ));
+                                    Err(_) => {
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "{verify_cmd}: unavailable"
+                                        )));
+                                    }
                                 }
                             }
                         }
