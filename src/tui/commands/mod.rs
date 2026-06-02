@@ -33,6 +33,7 @@ pub enum Command {
     ContextStats,
     Compact,
     PromptPhysics(Option<bool>),
+    VerifyMutation(Option<bool>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -129,6 +130,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") | None => Some(Ok(Command::PromptPhysics(None))),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/verify" => match arg {
+            Some("on") => Some(Ok(Command::VerifyMutation(Some(true)))),
+            Some("off") => Some(Ok(Command::VerifyMutation(Some(false)))),
+            Some("status") | None => Some(Ok(Command::VerifyMutation(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -168,6 +175,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/session",
         "/sessions",
         "/undo",
+        "/verify",
     ]
 }
 
@@ -267,6 +275,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/undo",
             description: "undo the last assistant action",
+        },
+        LauncherCommand {
+            name: "/verify",
+            description: "enable, disable, or check post-mutation cargo check",
         },
     ]
 }
@@ -563,5 +575,26 @@ mod tests {
             parse("/prompt-physics"),
             Some(Ok(Command::PromptPhysics(None)))
         );
+    }
+
+    #[test]
+    fn parses_verify_on() {
+        assert_eq!(
+            parse("/verify on"),
+            Some(Ok(Command::VerifyMutation(Some(true))))
+        );
+    }
+
+    #[test]
+    fn parses_verify_off() {
+        assert_eq!(
+            parse("/verify off"),
+            Some(Ok(Command::VerifyMutation(Some(false))))
+        );
+    }
+
+    #[test]
+    fn parses_verify_bare() {
+        assert_eq!(parse("/verify"), Some(Ok(Command::VerifyMutation(None))));
     }
 }

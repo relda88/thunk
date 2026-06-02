@@ -670,3 +670,86 @@ fn lsp_disabled_pre_check_skipped_mutation_executes_in_one_approval() {
         "approve must succeed when LSP is disabled: {events:?}"
     );
 }
+
+#[test]
+fn verify_emits_system_message_after_mutation() {
+    // After an approved edit_file mutation on a .rs file with verify_after_mutation
+    // enabled, the runtime must emit at least one SystemMessage containing "cargo check".
+    // Uses a real tmpdir project so cargo check has a valid manifest to run against.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"verify-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    let main_rs = src.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main()\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_verify_after_mutation(true);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+
+    let has_cargo_check_msg = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("cargo check")));
+    assert!(
+        has_cargo_check_msg,
+        "must emit a SystemMessage containing 'cargo check' when verify is enabled: {events:?}"
+    );
+}
+
+#[test]
+fn verify_skipped_when_disabled() {
+    // When verify_after_mutation is false, no SystemMessage containing "cargo check"
+    // must be emitted, even for a .rs file mutation.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"verify-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    let main_rs = src.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main()\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path()).with_verify_after_mutation(false);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+
+    let has_cargo_check_msg = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("cargo check")));
+    assert!(
+        !has_cargo_check_msg,
+        "must not emit 'cargo check' SystemMessage when verify is disabled: {events:?}"
+    );
+}

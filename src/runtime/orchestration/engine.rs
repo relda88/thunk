@@ -105,6 +105,10 @@ pub struct Runtime {
     /// warning re-arms for the next session.
     pub(super) context_75_warned: bool,
     prompt_physics: PromptPhysicsConfig,
+    /// Session-scoped flag: run `cargo check` after every approved edit_file/write_file
+    /// mutation on a `.rs` file. Initialized from config.project.verify_after_mutation;
+    /// can be toggled at runtime via /verify on|off without restarting.
+    verify_after_mutation: bool,
 }
 
 impl Runtime {
@@ -147,6 +151,7 @@ impl Runtime {
             index_triggered: false,
             context_75_warned: false,
             prompt_physics,
+            verify_after_mutation: config.project.verify_after_mutation,
         }
     }
 
@@ -159,6 +164,11 @@ impl Runtime {
 
     pub fn with_prompt_physics_enabled(mut self) -> Self {
         self.prompt_physics.enabled = true;
+        self
+    }
+
+    pub fn with_verify_after_mutation(mut self, enabled: bool) -> Self {
+        self.verify_after_mutation = enabled;
         self
     }
 
@@ -250,6 +260,9 @@ impl Runtime {
             RuntimeRequest::Compact => self.handle_compact(on_event),
             RuntimeRequest::PromptPhysicsToggle { enabled } => {
                 self.handle_prompt_physics_toggle(enabled, on_event)
+            }
+            RuntimeRequest::VerifyMutationToggle { enabled } => {
+                self.handle_verify_mutation_toggle(enabled, on_event)
             }
         }
     }
@@ -502,6 +515,51 @@ impl Runtime {
                                             abs_path, diag_text
                                         ));
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Runtime-initiated cargo check: not a model-proposed mutation, not subject
+                // to the approval gate. Uses std::process::Command directly (not ShellTool or
+                // registry.execute_approved) because this is a read-only verification step
+                // initiated by the runtime after an approved mutation, not a user action.
+                if self.verify_after_mutation
+                    && matches!(tool_name.as_str(), "edit_file" | "write_file")
+                {
+                    if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
+                        if std::path::Path::new(&abs_path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            == Some("rs")
+                        {
+                            on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
+                            match std::process::Command::new("cargo")
+                                .arg("check")
+                                .current_dir(self.project_root.path())
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .output()
+                            {
+                                Ok(out) => {
+                                    let mut combined =
+                                        String::from_utf8_lossy(&out.stdout).into_owned();
+                                    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                                    if combined.len() > 4000 {
+                                        combined.truncate(4000);
+                                        combined.push_str("\n[output truncated]");
+                                    }
+                                    let msg = if out.status.success() {
+                                        "cargo check: ok".to_string()
+                                    } else {
+                                        format!("cargo check: failed\n{}", combined.trim())
+                                    };
+                                    on_event(RuntimeEvent::SystemMessage(msg));
+                                }
+                                Err(_) => {
+                                    on_event(RuntimeEvent::SystemMessage(
+                                        "cargo check: unavailable".to_string(),
+                                    ));
                                 }
                             }
                         }

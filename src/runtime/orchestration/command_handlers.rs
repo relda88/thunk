@@ -535,4 +535,33 @@ impl Runtime {
             }
         }
     }
+
+    pub(super) fn handle_verify_mutation_toggle(
+        &mut self,
+        enabled: Option<bool>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match enabled {
+            Some(true) => {
+                self.verify_after_mutation = true;
+                on_event(RuntimeEvent::SystemMessage(
+                    "verify after mutation: enabled".to_string(),
+                ));
+            }
+            Some(false) => {
+                self.verify_after_mutation = false;
+                on_event(RuntimeEvent::SystemMessage(
+                    "verify after mutation: disabled".to_string(),
+                ));
+            }
+            None => {
+                let status = if self.verify_after_mutation {
+                    "verify after mutation: enabled"
+                } else {
+                    "verify after mutation: disabled"
+                };
+                on_event(RuntimeEvent::SystemMessage(status.to_string()));
+            }
+        }
+    }
 }

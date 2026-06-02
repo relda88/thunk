@@ -122,11 +122,29 @@ fn validate_command_names(commands: &HashMap<String, CustomCommandDef>) -> Resul
     Ok(())
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Per-project settings that customize runtime behavior for a specific codebase.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ProjectConfig {
     pub test_command: Option<String>,
+    /// Run `cargo check` automatically after every approved edit_file/write_file
+    /// mutation on a `.rs` file. Output is surfaced as a SystemMessage; it does not
+    /// enter conversation state. Defaults to true — set to false to opt out.
+    #[serde(default = "default_true")]
+    pub verify_after_mutation: bool,
+}
+
+impl Default for ProjectConfig {
+    fn default() -> Self {
+        Self {
+            test_command: None,
+            verify_after_mutation: true,
+        }
+    }
 }
 
 /// LSP provider configuration

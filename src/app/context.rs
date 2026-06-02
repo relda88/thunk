@@ -180,6 +180,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::ContextStats => "context_stats",
         RuntimeRequest::Compact => "compact",
         RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",
+        RuntimeRequest::VerifyMutationToggle { .. } => "verify_mutation_toggle",
     }
 }
 
