@@ -419,7 +419,9 @@ impl Runtime {
                 if is_file_mutation && self.lsp.is_enabled() {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
                         let path = std::path::Path::new(&abs_path);
-                        if path.exists() {
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if path.exists() && self.lsp.config().extensions.contains(&ext.to_string())
+                        {
                             if let Ok(source) = std::fs::read_to_string(path) {
                                 if let Ok(diags) = self.lsp.query_diagnostics(path, &source) {
                                     let errors: Vec<_> =
@@ -488,38 +490,44 @@ impl Runtime {
                 if matches!(tool_name.as_str(), "edit_file" | "write_file") && self.lsp.is_enabled()
                 {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
-                        if let Ok(source) = std::fs::read_to_string(&abs_path) {
-                            if let Ok(diagnostics) = self
-                                .lsp
-                                .query_diagnostics(std::path::Path::new(&abs_path), &source)
-                            {
-                                if !diagnostics.is_empty() {
-                                    let diag_text = diagnostics
-                                        .iter()
-                                        .map(|d| {
-                                            format!(
-                                                "[{}] line {}:{} {}: {}",
-                                                d.severity,
-                                                d.line,
-                                                d.column,
-                                                d.source.as_deref().unwrap_or("rust-analyzer"),
-                                                d.message
-                                            )
-                                        })
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    trace_runtime_decision(
-                                        on_event,
-                                        "lsp_diagnostics_injected",
-                                        &[
-                                            ("path", abs_path.clone()),
-                                            ("count", diagnostics.len().to_string()),
-                                        ],
-                                    );
-                                    self.commit_tool_results(format!(
-                                        "\n=== lsp_diagnostics: {} ===\n{}\n=== /lsp_diagnostics ===\n",
-                                        abs_path, diag_text
-                                    ));
+                        let ext = std::path::Path::new(&abs_path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("");
+                        if self.lsp.config().extensions.contains(&ext.to_string()) {
+                            if let Ok(source) = std::fs::read_to_string(&abs_path) {
+                                if let Ok(diagnostics) = self
+                                    .lsp
+                                    .query_diagnostics(std::path::Path::new(&abs_path), &source)
+                                {
+                                    if !diagnostics.is_empty() {
+                                        let diag_text = diagnostics
+                                            .iter()
+                                            .map(|d| {
+                                                format!(
+                                                    "[{}] line {}:{} {}: {}",
+                                                    d.severity,
+                                                    d.line,
+                                                    d.column,
+                                                    d.source.as_deref().unwrap_or("rust-analyzer"),
+                                                    d.message
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        trace_runtime_decision(
+                                            on_event,
+                                            "lsp_diagnostics_injected",
+                                            &[
+                                                ("path", abs_path.clone()),
+                                                ("count", diagnostics.len().to_string()),
+                                            ],
+                                        );
+                                        self.commit_tool_results(format!(
+                                            "\n=== lsp_diagnostics: {} ===\n{}\n=== /lsp_diagnostics ===\n",
+                                            abs_path, diag_text
+                                        ));
+                                    }
                                 }
                             }
                         }

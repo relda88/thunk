@@ -126,6 +126,10 @@ fn default_two() -> u32 {
     2
 }
 
+fn default_lsp_extensions() -> Vec<String> {
+    vec!["rs".into()]
+}
+
 /// Per-project settings that customize runtime behavior for a specific codebase.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -171,6 +175,10 @@ pub struct LspConfig {
     /// startup. This absorbs initial indexing time. Timeout here is not an error — the
     /// session proceeds and per-query retries handle residual not-ready responses.
     pub startup_timeout_ms: u64,
+    /// File extensions the LSP server handles. Pre-check and diagnostics are skipped
+    /// for files with extensions not in this list. Defaults to ["rs"] for rust-analyzer.
+    #[serde(default = "default_lsp_extensions")]
+    pub extensions: Vec<String>,
 }
 
 impl Default for LspConfig {
@@ -180,6 +188,7 @@ impl Default for LspConfig {
             rust_analyzer_path: None,
             timeout_ms: 5000,
             startup_timeout_ms: 30000,
+            extensions: default_lsp_extensions(),
         }
     }
 }
