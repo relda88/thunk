@@ -34,6 +34,9 @@ pub(super) fn run_generate_turn(
     if let Some(refresh) = prompt_physics::periodic_refresh_message(prompt_physics) {
         messages.push(Message::system(refresh));
     }
+    if let Some(recency) = prompt_physics::recency_field_message(prompt_physics, tool_surface) {
+        messages.push(Message::system(recency));
+    }
     let request = GenerateRequest::new(messages);
     let mut response = String::new();
 

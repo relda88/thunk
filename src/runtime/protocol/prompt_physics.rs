@@ -1,3 +1,5 @@
+use crate::runtime::investigation::tool_surface::ToolSurface;
+
 pub struct PromptPhysicsConfig {
     pub enabled: bool,
     pub thunk_md: Option<String>,
@@ -30,9 +32,25 @@ pub fn periodic_refresh_message(config: &PromptPhysicsConfig) -> Option<String> 
     )
 }
 
-#[allow(dead_code)]
-pub fn recency_field_message(_config: &PromptPhysicsConfig) -> Option<String> {
-    None
+pub fn recency_field_message(config: &PromptPhysicsConfig, surface: ToolSurface) -> Option<String> {
+    if !config.enabled {
+        return None;
+    }
+    let mut tools = String::new();
+    for name in surface.allowed_tool_names() {
+        if !tools.is_empty() {
+            tools.push_str(", ");
+        }
+        tools.push_str(name);
+    }
+    if tools.is_empty() {
+        tools.push_str("none");
+    }
+    Some(format!(
+        "[thunk: current context]\nSurface: {}\nTools: {}\nRuntime owns control flow. Emit wire format only.\n[/thunk: current context]",
+        surface.as_str(),
+        tools,
+    ))
 }
 
 #[cfg(test)]
@@ -86,5 +104,65 @@ mod tests {
         assert!(result.contains("[project rules]"));
         assert!(result.contains("[/project rules]"));
         assert!(result.contains("# Rules\nBe concise."));
+    }
+
+    #[test]
+    fn recency_field_none_when_disabled() {
+        let config = PromptPhysicsConfig {
+            enabled: false,
+            thunk_md: None,
+        };
+        assert!(recency_field_message(&config, ToolSurface::RetrievalFirst).is_none());
+    }
+
+    #[test]
+    fn recency_field_contains_surface_name() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            thunk_md: None,
+        };
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        assert!(result.contains("RetrievalFirst"));
+    }
+
+    #[test]
+    fn recency_field_contains_tools() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            thunk_md: None,
+        };
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        assert!(result.contains("search_code"));
+    }
+
+    #[test]
+    fn recency_field_has_delimiters() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            thunk_md: None,
+        };
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        assert!(result.contains("[thunk: current context]"));
+        assert!(result.contains("[/thunk: current context]"));
+    }
+
+    #[test]
+    fn recency_field_has_invariant_line() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            thunk_md: None,
+        };
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        assert!(result.contains("Runtime owns control flow"));
+    }
+
+    #[test]
+    fn recency_field_answer_only_renders_none_tools() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            thunk_md: None,
+        };
+        let result = recency_field_message(&config, ToolSurface::AnswerOnly).unwrap();
+        assert!(result.contains("Tools: none"));
     }
 }
