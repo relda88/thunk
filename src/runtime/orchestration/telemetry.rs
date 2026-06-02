@@ -344,8 +344,19 @@ pub(crate) fn tool_input_activity(input: Option<&ToolInput>) -> Activity {
         Some(ToolInput::WriteFile { path, .. }) => ("write".to_string(), Some(path.clone())),
         Some(ToolInput::Shell { command }) => ("shell".to_string(), Some(command.clone())),
         Some(
-            ToolInput::GitStatus | ToolInput::GitDiff | ToolInput::GitLog | ToolInput::GitBranch,
+            ToolInput::GitStatus
+            | ToolInput::GitDiff
+            | ToolInput::GitLog
+            | ToolInput::GitBranch
+            | ToolInput::GitDiffStaged,
         ) => ("git".to_string(), None),
+        Some(ToolInput::GitBranchCreate { name, .. }) => {
+            ("git_branch_create".to_string(), Some(name.clone()))
+        }
+        Some(ToolInput::GitBranchSwitch { name }) => {
+            ("git_branch_switch".to_string(), Some(name.clone()))
+        }
+        Some(ToolInput::GitCommit { .. }) => ("git_commit".to_string(), None),
         Some(ToolInput::LspDefinition { path, .. }) => ("lsp".to_string(), Some(path.clone())),
         None => ("tool".to_string(), None),
     };

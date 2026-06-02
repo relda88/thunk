@@ -45,6 +45,7 @@ pub(crate) enum SurfaceTool {
     GitDiff,
     GitLog,
     GitBranch,
+    GitDiffStaged,
     LspDefinition,
 }
 
@@ -59,6 +60,7 @@ const GIT_READ_ONLY_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::GitDiff,
     SurfaceTool::GitLog,
     SurfaceTool::GitBranch,
+    SurfaceTool::GitDiffStaged,
 ];
 const ANSWER_ONLY_TOOLS: &[SurfaceTool] = &[];
 // MutationEnabled has the same read tools as RetrievalFirst. Approval-required tools
@@ -102,9 +104,13 @@ impl SurfaceTool {
             ToolInput::GitDiff => Some(Self::GitDiff),
             ToolInput::GitLog => Some(Self::GitLog),
             ToolInput::GitBranch => Some(Self::GitBranch),
-            ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } | ToolInput::Shell { .. } => {
-                None
-            }
+            ToolInput::GitDiffStaged => Some(Self::GitDiffStaged),
+            ToolInput::EditFile { .. }
+            | ToolInput::WriteFile { .. }
+            | ToolInput::Shell { .. }
+            | ToolInput::GitBranchCreate { .. }
+            | ToolInput::GitBranchSwitch { .. }
+            | ToolInput::GitCommit { .. } => None,
             ToolInput::LspDefinition { .. } => Some(Self::LspDefinition),
         }
     }
@@ -118,6 +124,7 @@ impl SurfaceTool {
             Self::GitDiff => "git_diff",
             Self::GitLog => "git_log",
             Self::GitBranch => "git_branch",
+            Self::GitDiffStaged => "git_diff_staged",
             Self::LspDefinition => "lsp_definition",
         }
     }

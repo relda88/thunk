@@ -99,6 +99,19 @@ pub fn resolve(
         ToolInput::GitDiff => Ok(ResolvedToolInput::GitDiff { path: None }),
         ToolInput::GitLog => Ok(ResolvedToolInput::GitLog),
         ToolInput::GitBranch => Ok(ResolvedToolInput::GitBranch),
+        ToolInput::GitBranchCreate { name, start_point } => {
+            Ok(ResolvedToolInput::GitBranchCreate {
+                name: name.clone(),
+                start_point: start_point.clone(),
+            })
+        }
+        ToolInput::GitBranchSwitch { name } => {
+            Ok(ResolvedToolInput::GitBranchSwitch { name: name.clone() })
+        }
+        ToolInput::GitCommit { message } => Ok(ResolvedToolInput::GitCommit {
+            message: message.clone(),
+        }),
+        ToolInput::GitDiffStaged => Ok(ResolvedToolInput::GitDiffStaged),
         ToolInput::LspDefinition { path, line, col } => {
             let resolved = resolve_read_path(root, path)?;
             Ok(ResolvedToolInput::LspDefinition {

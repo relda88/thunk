@@ -94,6 +94,10 @@ fn call_fingerprint(input: &ToolInput) -> String {
         ToolInput::GitDiff => "git_diff".to_string(),
         ToolInput::GitLog => "git_log".to_string(),
         ToolInput::GitBranch => "git_branch".to_string(),
+        ToolInput::GitBranchCreate { name, .. } => format!("git_branch_create\x00{name}"),
+        ToolInput::GitBranchSwitch { name } => format!("git_branch_switch\x00{name}"),
+        ToolInput::GitCommit { message } => format!("git_commit\x00{message}"),
+        ToolInput::GitDiffStaged => "git_diff_staged".to_string(),
         ToolInput::EditFile {
             path,
             search,
@@ -114,7 +118,12 @@ fn call_fingerprint(input: &ToolInput) -> String {
 fn is_mutating_tool(input: &ToolInput) -> bool {
     matches!(
         input,
-        ToolInput::EditFile { .. } | ToolInput::WriteFile { .. } | ToolInput::Shell { .. }
+        ToolInput::EditFile { .. }
+            | ToolInput::WriteFile { .. }
+            | ToolInput::Shell { .. }
+            | ToolInput::GitBranchCreate { .. }
+            | ToolInput::GitBranchSwitch { .. }
+            | ToolInput::GitCommit { .. }
     )
 }
 

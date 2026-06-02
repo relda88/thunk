@@ -27,6 +27,17 @@ pub enum ToolInput {
     GitDiff,
     GitLog,
     GitBranch,
+    GitBranchCreate {
+        name: String,
+        start_point: Option<String>,
+    },
+    GitBranchSwitch {
+        name: String,
+    },
+    GitCommit {
+        message: String,
+    },
+    GitDiffStaged,
     EditFile {
         /// Path relative to the project root, or absolute.
         path: String,
@@ -65,6 +76,10 @@ impl ToolInput {
             ToolInput::GitDiff => "git_diff",
             ToolInput::GitLog => "git_log",
             ToolInput::GitBranch => "git_branch",
+            ToolInput::GitBranchCreate { .. } => "git_branch_create",
+            ToolInput::GitBranchSwitch { .. } => "git_branch_switch",
+            ToolInput::GitCommit { .. } => "git_commit",
+            ToolInput::GitDiffStaged => "git_diff_staged",
             ToolInput::EditFile { .. } => "edit_file",
             ToolInput::WriteFile { .. } => "write_file",
             ToolInput::Shell { .. } => "shell",
@@ -86,6 +101,10 @@ pub enum ToolOutput {
     GitDiff(GitDiffOutput),
     GitLog(GitLogOutput),
     GitBranch(GitBranchOutput),
+    GitBranchCreate(GitBranchCreateOutput),
+    GitBranchSwitch(GitBranchSwitchOutput),
+    GitCommit(GitCommitOutput),
+    GitDiffStaged(GitDiffStagedOutput),
     EditFile(EditFileOutput),
     WriteFile(WriteFileOutput),
     Shell(ShellOutput),
@@ -187,6 +206,31 @@ pub struct GitLogEntry {
 pub struct GitBranchOutput {
     pub current: String,
     pub branches: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitBranchCreateOutput {
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitBranchSwitchOutput {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitCommitOutput {
+    pub hash: String,
+    pub subject: String,
+    pub files_committed: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct GitDiffStagedOutput {
+    pub patch: String,
+    pub bytes_shown: usize,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone)]

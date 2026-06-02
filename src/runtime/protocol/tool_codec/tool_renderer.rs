@@ -87,6 +87,23 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
                 format!("git branch: {}", b.current)
             }
         }
+        ToolOutput::GitBranchCreate(o) => format!("created branch {}", o.name),
+        ToolOutput::GitBranchSwitch(o) => {
+            format!("switched from {} to {}", o.from, o.to)
+        }
+        ToolOutput::GitCommit(o) => format!(
+            "committed {} file(s): {} ({})",
+            o.files_committed, o.subject, o.hash
+        ),
+        ToolOutput::GitDiffStaged(d) => {
+            if d.bytes_shown == 0 {
+                "staged diff empty".to_string()
+            } else if d.truncated {
+                format!("staged diff ({} bytes, truncated)", d.bytes_shown)
+            } else {
+                format!("staged diff ({} bytes)", d.bytes_shown)
+            }
+        }
         ToolOutput::EditFile(e) => {
             format!("replaced {} line(s) in {}", e.lines_replaced, e.path)
         }
@@ -518,8 +535,12 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
         }
         ToolOutput::GitStatus(g) => render_git_status(g),
         ToolOutput::GitDiff(d) => render_git_diff(d),
+        ToolOutput::GitDiffStaged(d) => render_git_diff_staged(d),
         ToolOutput::GitLog(g) => render_git_log(g),
         ToolOutput::GitBranch(b) => render_git_branch(b),
+        ToolOutput::GitBranchCreate(o) => render_git_branch_create(o),
+        ToolOutput::GitBranchSwitch(o) => render_git_branch_switch(o),
+        ToolOutput::GitCommit(o) => render_git_commit(o),
         ToolOutput::EditFile(e) => {
             format!("replaced {} line(s) in {}", e.lines_replaced, e.path)
         }
@@ -545,6 +566,36 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
         }
         ToolOutput::LspDefinition(d) => render_lsp_definition(d),
     }
+}
+
+fn render_git_diff_staged(d: &crate::tools::types::GitDiffStagedOutput) -> String {
+    if d.patch.is_empty() {
+        return "No staged changes.".to_string();
+    }
+
+    if d.truncated {
+        format!(
+            "[showing first {} bytes of staged diff]\n{}\n[truncated]",
+            d.bytes_shown, d.patch
+        )
+    } else {
+        d.patch.clone()
+    }
+}
+
+fn render_git_branch_create(o: &crate::tools::types::GitBranchCreateOutput) -> String {
+    format!("branch {} created", o.name)
+}
+
+fn render_git_branch_switch(o: &crate::tools::types::GitBranchSwitchOutput) -> String {
+    format!("switched to branch {} (was {})", o.to, o.from)
+}
+
+fn render_git_commit(o: &crate::tools::types::GitCommitOutput) -> String {
+    format!(
+        "{} {}\n{} file(s) committed",
+        o.hash, o.subject, o.files_committed
+    )
 }
 
 fn render_lsp_definition(d: &LspDefinitionOutput) -> String {
@@ -596,6 +647,9 @@ Show git working tree status:
 
 Show unstaged git working tree diff:
 [git_diff]
+
+Show staged git diff (index vs HEAD):
+[git_diff_staged]
 
 Show recent git commit history:
 [git_log]
@@ -1194,6 +1248,7 @@ mod tests {
         assert!(instructions.contains("[search_code:"));
         assert!(instructions.contains("[git_status]"));
         assert!(instructions.contains("[git_diff]"));
+        assert!(instructions.contains("[git_diff_staged]"));
         assert!(instructions.contains("[git_log]"));
         assert!(instructions.contains("[lsp_definition]"));
         assert!(instructions.contains("[edit_file]"));

@@ -1,6 +1,10 @@
 mod edit_file;
 mod git_branch;
+mod git_branch_create;
+mod git_branch_switch;
+mod git_commit;
 mod git_diff;
+mod git_diff_staged;
 mod git_log;
 mod git_status;
 mod list_dir;

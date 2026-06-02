@@ -39,6 +39,17 @@ pub enum ResolvedToolInput {
     },
     GitLog,
     GitBranch,
+    GitBranchCreate {
+        name: String,
+        start_point: Option<String>,
+    },
+    GitBranchSwitch {
+        name: String,
+    },
+    GitCommit {
+        message: String,
+    },
+    GitDiffStaged,
     LspDefinition {
         path: String,
         line: u32,
@@ -59,6 +70,10 @@ impl ResolvedToolInput {
             Self::GitDiff { .. } => "git_diff",
             Self::GitLog => "git_log",
             Self::GitBranch => "git_branch",
+            Self::GitBranchCreate { .. } => "git_branch_create",
+            Self::GitBranchSwitch { .. } => "git_branch_switch",
+            Self::GitCommit { .. } => "git_commit",
+            Self::GitDiffStaged => "git_diff_staged",
             Self::LspDefinition { .. } => "lsp_definition",
         }
     }
@@ -102,6 +117,12 @@ impl From<ResolvedToolInput> for ToolInput {
             ResolvedToolInput::GitDiff { .. } => ToolInput::GitDiff,
             ResolvedToolInput::GitLog => ToolInput::GitLog,
             ResolvedToolInput::GitBranch => ToolInput::GitBranch,
+            ResolvedToolInput::GitBranchCreate { name, start_point } => {
+                ToolInput::GitBranchCreate { name, start_point }
+            }
+            ResolvedToolInput::GitBranchSwitch { name } => ToolInput::GitBranchSwitch { name },
+            ResolvedToolInput::GitCommit { message } => ToolInput::GitCommit { message },
+            ResolvedToolInput::GitDiffStaged => ToolInput::GitDiffStaged,
             ResolvedToolInput::LspDefinition { path, line, col } => {
                 ToolInput::LspDefinition { path, line, col }
             }

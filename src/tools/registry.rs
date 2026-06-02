@@ -5,7 +5,11 @@ use crate::runtime::ResolvedToolInput;
 
 use super::edit_file::EditFileTool;
 use super::git_branch::GitBranchTool;
+use super::git_branch_create::GitBranchCreateTool;
+use super::git_branch_switch::GitBranchSwitchTool;
+use super::git_commit::GitCommitTool;
 use super::git_diff::GitDiffTool;
+use super::git_diff_staged::GitDiffStagedTool;
 use super::git_log::GitLogTool;
 use super::git_status::GitStatusTool;
 use super::pending::PendingAction;
@@ -41,8 +45,12 @@ impl ToolRegistry {
         self.register(SearchCodeTool::new(root.clone()));
         self.register(GitStatusTool::new(root.clone()));
         self.register(GitDiffTool::new(root.clone()));
+        self.register(GitDiffStagedTool::new(root.clone()));
         self.register(GitLogTool::new(root.clone()));
         self.register(GitBranchTool::new(root.clone()));
+        self.register(GitBranchCreateTool::new(root.clone()));
+        self.register(GitBranchSwitchTool::new(root.clone()));
+        self.register(GitCommitTool::new(root.clone()));
         self.register(EditFileTool::new(root.clone()));
         self.register(WriteFileTool::new(root.clone()));
         self.register(ShellTool::new(root));

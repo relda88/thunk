@@ -121,6 +121,7 @@ fn scan_static_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
     let static_tools: &[(&str, ToolInput)] = &[
         ("[git_status]", ToolInput::GitStatus),
         ("[git_diff]", ToolInput::GitDiff),
+        ("[git_diff_staged]", ToolInput::GitDiffStaged),
         ("[git_log]", ToolInput::GitLog),
         ("[git_branch]", ToolInput::GitBranch),
     ];
