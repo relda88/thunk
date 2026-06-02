@@ -506,4 +506,33 @@ impl Runtime {
             }
         }
     }
+
+    pub(super) fn handle_prompt_physics_toggle(
+        &mut self,
+        enabled: Option<bool>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match enabled {
+            Some(true) => {
+                self.prompt_physics.enabled = true;
+                on_event(RuntimeEvent::SystemMessage(
+                    "prompt physics: enabled".to_string(),
+                ));
+            }
+            Some(false) => {
+                self.prompt_physics.enabled = false;
+                on_event(RuntimeEvent::SystemMessage(
+                    "prompt physics: disabled".to_string(),
+                ));
+            }
+            None => {
+                let status = if self.prompt_physics.enabled {
+                    "prompt physics: enabled"
+                } else {
+                    "prompt physics: disabled"
+                };
+                on_event(RuntimeEvent::SystemMessage(status.to_string()));
+            }
+        }
+    }
 }

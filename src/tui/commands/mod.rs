@@ -32,6 +32,7 @@ pub enum Command {
     IndexStatus,
     ContextStats,
     Compact,
+    PromptPhysics(Option<bool>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -122,6 +123,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             _ => Some(Err(ParseError::UnknownCommand)),
         },
         "/compact" => Some(Ok(Command::Compact)),
+        "/prompt-physics" => match arg {
+            Some("on") => Some(Ok(Command::PromptPhysics(Some(true)))),
+            Some("off") => Some(Ok(Command::PromptPhysics(Some(false)))),
+            Some("status") | None => Some(Ok(Command::PromptPhysics(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -152,6 +159,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/last",
         "/ls",
         "/lsp",
+        "/prompt-physics",
         "/providers",
         "/quit",
         "/read",
@@ -223,6 +231,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/lsp",
             description: "show LSP server status",
+        },
+        LauncherCommand {
+            name: "/prompt-physics",
+            description: "enable, disable, or check prompt physics",
         },
         LauncherCommand {
             name: "/providers",
@@ -519,5 +531,37 @@ mod tests {
     #[test]
     fn parses_compact() {
         assert_eq!(parse("/compact"), Some(Ok(Command::Compact)));
+    }
+
+    #[test]
+    fn parses_prompt_physics_on() {
+        assert_eq!(
+            parse("/prompt-physics on"),
+            Some(Ok(Command::PromptPhysics(Some(true))))
+        );
+    }
+
+    #[test]
+    fn parses_prompt_physics_off() {
+        assert_eq!(
+            parse("/prompt-physics off"),
+            Some(Ok(Command::PromptPhysics(Some(false))))
+        );
+    }
+
+    #[test]
+    fn parses_prompt_physics_status() {
+        assert_eq!(
+            parse("/prompt-physics status"),
+            Some(Ok(Command::PromptPhysics(None)))
+        );
+    }
+
+    #[test]
+    fn parses_prompt_physics_bare() {
+        assert_eq!(
+            parse("/prompt-physics"),
+            Some(Ok(Command::PromptPhysics(None)))
+        );
     }
 }

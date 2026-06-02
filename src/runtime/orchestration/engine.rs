@@ -101,7 +101,6 @@ pub struct Runtime {
     /// Set to true after the 75% context warning fires. Cleared on reset so the
     /// warning re-arms for the next session.
     pub(super) context_75_warned: bool,
-    #[allow(dead_code)]
     prompt_physics: PromptPhysicsConfig,
 }
 
@@ -115,7 +114,7 @@ impl Runtime {
     ) -> Self {
         let specs = registry.specs();
         let prompt_physics = PromptPhysicsConfig {
-            enabled: false,
+            enabled: config.prompt_physics.enabled,
             thunk_md,
         };
         let system_prompt = prompt::build_system_prompt(
@@ -246,6 +245,9 @@ impl Runtime {
             RuntimeRequest::IndexStatus => self.handle_index_status(on_event),
             RuntimeRequest::ContextStats => self.handle_context_stats(on_event),
             RuntimeRequest::Compact => self.handle_compact(on_event),
+            RuntimeRequest::PromptPhysicsToggle { enabled } => {
+                self.handle_prompt_physics_toggle(enabled, on_event)
+            }
         }
     }
 

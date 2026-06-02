@@ -159,6 +159,11 @@ pub enum RuntimeRequest {
     /// same heuristic as `pruned_snapshot()`.  Emits a SystemMessage with the count
     /// of pruned results.  Does not trigger session save.
     Compact,
+    /// Session-scoped prompt physics toggle. `Some(true)` enables, `Some(false)` disables,
+    /// `None` queries current status. Does not mutate conversation or trigger session save.
+    PromptPhysicsToggle {
+        enabled: Option<bool>,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

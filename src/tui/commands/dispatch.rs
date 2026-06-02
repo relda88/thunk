@@ -74,6 +74,9 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::IndexStatus => CommandAction::Runtime(RuntimeRequest::IndexStatus),
         Command::ContextStats => CommandAction::Runtime(RuntimeRequest::ContextStats),
         Command::Compact => CommandAction::Runtime(RuntimeRequest::Compact),
+        Command::PromptPhysics(enabled) => {
+            CommandAction::Runtime(RuntimeRequest::PromptPhysicsToggle { enabled })
+        }
     }
 }
 
@@ -85,7 +88,7 @@ pub(crate) fn handle_command(
     match resolve_command(cmd) {
         CommandAction::ShowHelp => {
             state.add_system_message(
-                "Commands:\n\n  Navigation\n    /read <path>          read a file\n    /search <query>       search code\n    /last                 show last response\n    /anchors              show anchor state\n    /history              conversation history\n\n  Git\n    /git status           git status\n    /git diff             git diff\n    /git log              git log\n    /git branch           current branch\n\n  Session\n    /sessions             list project sessions\n    /session clear        delete sessions and start fresh\n    /clear                clear transcript history\n\n  Actions\n    /approve              confirm pending action\n    /reject               cancel pending action\n    /undo                 revert last mutation\n\n  Providers\n    /providers list       list available providers\n    /providers use <name> switch provider (session-only)\n\n  Index\n    /index status         symbol count and last build time\n    /index build          build symbol index\n    /index build --large  build without file-count guard\n\n  General\n    /help                 show this message\n    /quit                 exit",
+                "Commands:\n\n  Navigation\n    /read <path>          read a file\n    /search <query>       search code\n    /last                 show last response\n    /anchors              show anchor state\n    /history              conversation history\n\n  Git\n    /git status           git status\n    /git diff             git diff\n    /git log              git log\n    /git branch           current branch\n\n  Session\n    /sessions             list project sessions\n    /session clear        delete sessions and start fresh\n    /clear                clear transcript history\n\n  Actions\n    /approve              confirm pending action\n    /reject               cancel pending action\n    /undo                 revert last mutation\n\n  Providers\n    /providers list       list available providers\n    /providers use <name> switch provider (session-only)\n\n  Index\n    /index status         symbol count and last build time\n    /index build          build symbol index\n    /index build --large  build without file-count guard\n\n  Runtime\n    /prompt-physics on|off|status  toggle prompt physics injection\n\n  General\n    /help                 show this message\n    /quit                 exit",
             );
         }
         CommandAction::Quit => {

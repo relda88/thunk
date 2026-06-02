@@ -159,6 +159,20 @@ impl Default for LspConfig {
     }
 }
 
+/// Prompt physics injection settings.
+/// Enabled by default — set `[prompt_physics]\nenabled = false` to opt out.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PromptPhysicsSettings {
+    pub enabled: bool,
+}
+
+impl Default for PromptPhysicsSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Main configuration struct for the application
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -174,6 +188,7 @@ pub struct Config {
     pub lsp: LspConfig,
     pub commands: HashMap<String, CustomCommandDef>,
     pub project: ProjectConfig,
+    pub prompt_physics: PromptPhysicsSettings,
 }
 
 /// Application configuration for the app

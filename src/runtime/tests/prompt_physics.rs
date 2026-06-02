@@ -28,6 +28,13 @@ fn periodic_refresh_message_injected_when_enabled() {
 #[test]
 fn periodic_refresh_message_absent_when_disabled() {
     let (mut rt, requests) = make_runtime_with_recorded_requests(vec!["Done."]);
+    // Default is now enabled=true; explicitly disable for this test via the toggle.
+    collect_events(
+        &mut rt,
+        RuntimeRequest::PromptPhysicsToggle {
+            enabled: Some(false),
+        },
+    );
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {

@@ -179,6 +179,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::IndexStatus => "index_status",
         RuntimeRequest::ContextStats => "context_stats",
         RuntimeRequest::Compact => "compact",
+        RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",
     }
 }
 
