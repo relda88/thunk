@@ -26,11 +26,15 @@ Inspect `InvestigationState::record_search_results()`, `InvestigationState::reco
 
 ## Mutation Problems
 
-Inspect the full path: `resolve()` → tool `run()` → `PendingAction` payload → `execute_approved()` → `handle_approve()`. Path rejection lives in `resolver.rs`; proposal validation lives in the tool; approval success or failure branching lives in `engine.rs`. For shell commands, verify `is_permitted_shell_command()` returns true for the command in `prompt_analysis.rs`. Code: `src/runtime/project/resolver.rs`, `src/tools/edit_file.rs`, `src/tools/write_file.rs`, `src/tools/shell.rs`, `src/runtime/orchestration/engine.rs`.
+Inspect the full path: `resolve()` → tool `run()` → `PendingAction` payload → `PendingApprovalStage` / `PendingTransaction` → `execute_approved()` → `handle_approve()`. Path rejection lives in `resolver.rs`; proposal validation lives in the tool; approval staging, LSP pre-check, verification, correction, and transaction rollback live in `engine.rs`. For shell commands, verify `is_permitted_shell_command()` returns true for the command in `prompt_analysis.rs`. Code: `src/runtime/project/resolver.rs`, `src/tools/pending.rs`, `src/tools/edit_file.rs`, `src/tools/write_file.rs`, `src/tools/shell.rs`, `src/runtime/orchestration/engine.rs`.
+
+If a verified mutation loops unexpectedly, inspect `verify_command`, `correction_attempts`, and `max_correction_attempts` in `Runtime`. Corrective prompts use a `[runtime:correction]` prefix so intent classification does not reopen the full turn policy.
+
+If grouped approval behaves unexpectedly, inspect `TransactionRequired` collection in `run_tool_round()` and `execute_transaction()` rollback behavior in `engine.rs`.
 
 ## Session and Restore Issues
 
-Session data lives at `<thunk-data-dir>/data/sessions.db`. Schema is v3. `ActiveSession::open_or_restore()` loads the most recent session matching the current `project_root`. Restored anchor state (`last_read_file`, `last_search_query`, `last_search_scope`) comes from the `sessions` table. Code: `src/app/session.rs`, `src/storage/session/store.rs`, `src/storage/session/schema.rs`.
+Session data lives at `<thunk-data-dir>/data/sessions.db`. Schema is v5. `ActiveSession::open_or_restore()` loads the most recent session matching the current `project_root`. Restored anchor state (`last_read_file`, `last_search_query`, `last_search_scope`) comes from the `sessions` table. Code: `src/app/session.rs`, `src/storage/session/store.rs`, `src/storage/session/schema.rs`.
 
 ## TUI Key and Render Issues
 

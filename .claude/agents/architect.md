@@ -29,6 +29,7 @@ You are a strict architectural reviewer for the `thunk` codebase. Your job is to
 - All mutating tools must return `ToolRunResult::Approval(PendingAction)` — never `Immediate`
 - No new paths to `execute_approved()` outside `ToolRegistry`
 - Mutation tools never appear in system prompt — only in ephemeral per-turn hint
+- Grouped mutations must stay inside `PendingTransaction` / `PendingApprovalStage` and preserve atomic rollback behavior
 
 **Coupling**
 - No tight coupling between orchestration layers — changes to one file should not require cascading changes across 5+ files

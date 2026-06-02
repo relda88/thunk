@@ -4,7 +4,7 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 996 passing via `just verify`
+Test baseline: 1030 passing via `just verify`
 Never make commits — user commits manually.
 
 ## Current Phase State
@@ -12,7 +12,8 @@ Never make commits — user commits manually.
 - Phase 30: COMPLETE — persistent symbol/import index backed by SQLite
 - Phase 31: COMPLETE — context window intelligence; Slice 31.5 summarization deferred
 - Phase 32: COMPLETE — TUI overhaul
-- Phase 33: ACTIVE
+- Phase 33: COMPLETE — prompt physics, THUNK.md bootstrap, `/prompt-physics`
+- Phase 34: COMPLETE — staged approvals, verification, correction loop, transactions
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model
@@ -24,13 +25,15 @@ Never make commits — user commits manually.
 - Lower layers never depend on higher layers
 
 ## Non-Negotiable Invariants
-- Mutations require explicit approval — PendingAction → execute_approved() only
+- Mutations require explicit approval — PendingAction/PendingTransaction → execute_approved() only
 - Evidence gates are never weakened
 - System prompt never persisted — always rebuilt from config on restore
 - Shell allowlist: cargo only
 - Mutation tools excluded from system prompt on RetrievalFirst and GitReadOnly surfaces
 - Provider switching is session-only
 - All shared types imported from src/core/ — never from app/
+- Prompt physics is request-local/session-scoped; THUNK.md may anchor prompts but is never persisted as conversation state
+- Post-mutation verification is runtime-initiated via configurable `project.verify_command`
 
 ## Key Files
 | Task | File |
@@ -40,8 +43,12 @@ Never make commits — user commits manually.
 | Surface enforcement | src/runtime/investigation/tool_surface.rs |
 | Evidence gates | src/runtime/investigation/investigation.rs |
 | System prompt | src/runtime/protocol/prompt.rs |
+| Prompt physics | src/runtime/protocol/prompt_physics.rs |
+| Approval stages / transactions | src/tools/pending.rs |
 | Turn loop | src/runtime/orchestration/engine.rs |
 | Tool dispatch | src/runtime/orchestration/tool_round.rs |
+| Runtime config knobs | src/core/config.rs |
+| Approval rendering | src/tui/renderer/mod.rs |
 | Shared types | src/core/ |
 
 ## TUI Module Structure

@@ -46,10 +46,10 @@ failure happening before dispatch. Check resolver or surface enforcement.
 - Then: answer-guard branches in `run_turns_with_initial_reads()`
 
 **Mutation problems:**
-- Full path: `resolve()` → tool `run()` → `PendingAction` → `execute_approved()` → `handle_approve()`
+- Full path: `resolve()` → tool `run()` → `PendingAction` → `PendingApprovalStage` / `PendingTransaction` → `execute_approved()` → `handle_approve()`
 - Path rejection: `resolver.rs`
 - Proposal validation: the tool itself
-- Approval branching: `engine.rs`
+- Approval branching, LSP pre-check, verify/correction, and transaction rollback: `engine.rs`
 
 **Session/restore problems:**
 - Session store: `src/storage/session/store.rs`

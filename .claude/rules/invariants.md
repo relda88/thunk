@@ -2,29 +2,40 @@
 
 ## Mutation Approval Gate
 `ShellTool`, `EditFileTool`, `WriteFileTool` always return `ToolRunResult::Approval(PendingAction)`.
-The only materialization path is `ToolRegistry::execute_approved()` in `src/tools/registry.rs`.
+The only materialization path is `ToolRegistry::execute_approved()` at `src/tools/registry.rs:64`.
+Single approvals and grouped approvals are wrapped in `PendingApprovalStage` / `PendingTransaction` at `src/tools/pending.rs`.
 There is no bypass. Never add one.
 
 ## Shell Allowlist
-`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs` — matches only `"cargo"`.
-Enforced in `TurnContext` construction in `engine.rs` (~line 1535): non-permitted commands suppress shell seeding.
+`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs:260` — matches only `"cargo"`.
+Enforced in `TurnContext` construction in `engine.rs`: non-permitted commands suppress shell seeding.
 Shell seeding is suppressed entirely on `GitReadOnly` turns.
 
 ## Surface Enforcement
-`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs`.
+`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs:247`.
 Surfaces and tool sets defined in `TOOL_SURFACE_DEFINITIONS` (static registry).
 `RetrievalFirst` includes `lsp_definition`. `GitReadOnly` includes `git_branch`.
 Mutation tools (`edit_file`, `write_file`, `shell`) return `None` from `SurfaceTool::from_input()` — they bypass surface enforcement and go through the approval path only.
 
 ## Evidence Gates
 Eight named gates (plus sub-gates 5.5, 6a) in `InvestigationState::record_read_result()` in `investigation.rs`.
-`evidence_ready()` at `investigation.rs:617` — requires `search_produced_results && useful_accepted_candidate_reads >= useful_candidate_reads_target`.
+`evidence_ready()` at `src/runtime/investigation/investigation.rs:622` — requires `search_produced_results && useful_accepted_candidate_reads >= useful_candidate_reads_target`.
 Gates are never weakened. Never add a bypass.
 
 ## System Prompt
 Always built fresh via `build_system_prompt()` from config — never persisted to SQLite.
-Always called with `include_mutation_tools: false` (`engine.rs:105`).
+Always called with `include_mutation_tools: false` (`src/runtime/orchestration/engine.rs:133`).
 Mutation tools appear only in the ephemeral per-turn hint for `MutationEnabled` turns.
+
+## Prompt Physics
+Prompt physics is enabled by default via `[prompt_physics].enabled`.
+`THUNK.md` is read during app bootstrap and passed to `PromptPhysicsConfig` as an optional primacy anchor.
+Periodic refresh and recency-field messages are appended per generation in `src/runtime/orchestration/generation.rs`; they are request-local and must not be persisted as conversation history.
+
+## Verification and Correction
+`project.verify_command` is a language-agnostic runtime verification command run after approved `edit_file` / `write_file` mutations.
+`project.max_correction_attempts` bounds self-correction attempts after verify failure; `correction_attempts` is runtime state and must reset on success or terminal failure.
+Transactions run `verify_command` after all edits, but intentionally skip the self-correction loop.
 
 ## Session Scoping
 All tool inputs confined via `resolve()` in `src/runtime/project/resolver.rs`.
@@ -34,6 +45,7 @@ All tool inputs confined via `resolve()` in `src/runtime/project/resolver.rs`.
 `LspManager` errors produce an empty `LspDefinitionOutput`, not a terminal answer.
 The runtime must not depend on LSP availability for correctness. LSP results update `InvestigationGraph` only; graph candidates are advisory fallbacks, not primary candidates.
 `LspManager` is dispatched in `tool_round.rs` before `registry.dispatch()` because it requires `&mut self`; it is not registered in `ToolRegistry`.
+Pre-edit and post-edit diagnostic checks are skipped for files whose extension is not in `LspConfig.extensions`.
 
 ## InvestigationGraph Is Advisory
 `InvestigationGraph` (petgraph) owned by `InvestigationState.graph` records import edges and LSP definition edges.

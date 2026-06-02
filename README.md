@@ -4,8 +4,8 @@ Local-first, personal AI coding assistant CLI focused on local-first workflows, 
 
 > Version 0.19.64
 
-Current phase: Phase 32 COMPLETE, Phase 33 ACTIVE.
-Test baseline: 996 passing via `just verify`.
+Current phase: Phase 34 COMPLETE.
+Test baseline: 1030 passing via `just verify`.
 
 ---
 
@@ -41,10 +41,15 @@ The project is structured to keep model generation, tool execution, persistence,
 - Supports scrollable output, collapsible tool summaries, viewport-aware collapsible focus, and expandable file reads.
 - Supports multiple model backends: `llama_cpp`, `openai`, `ollama`, `openrouter`, `groq`.
 - Builds a system prompt from the app name, project root, and registered tool specs.
+- Bootstraps project rules from `THUNK.md` when present.
+- Injects prompt-physics guardrails: a primacy anchor, periodic refresh, and per-turn recency field.
 - Streams assistant output into the conversation while emitting UI-facing runtime events.
 - Parses tool calls centrally in `src/runtime/protocol/tool_codec/`.
 - Executes read-only tools immediately and pauses for approval before mutating files.
 - Shows a before/after diff at mutation approval time.
+- Runs an LSP pre-edit safety check for configured file extensions before approved single-file mutations.
+- Can run a configurable post-mutation `project.verify_command`, then request bounded self-correction attempts on failure.
+- Groups consecutive file mutations into multi-edit transactions and rolls back prior edits if one action fails.
 - Re-enters model generation after tool results so the assistant can synthesize a grounded same-turn answer.
 - Uses runtime-owned terminal answers when the runtime already knows the outcome, such as rejected mutations or failed file reads.
 - Enforces bounded per-turn `search_code` behavior at runtime instead of relying only on prompt wording.
@@ -64,6 +69,8 @@ Current built-in tools:
 - `git_status`
 - `git_diff`
 - `git_log`
+- `git_branch`
+- `lsp_definition` (runtime-dispatched, not registered in `ToolRegistry`)
 
 Current control commands:
 
@@ -89,9 +96,13 @@ Current control commands:
 - `/git log` — show git log
 - `/lsp status` — show LSP status
 - `/index build` — build the symbol/import index
+- `/index build --large` — build the index without the file-count guard
 - `/index status` — show symbol/import index status
 - `/context stats` — show context window statistics
 - `/compact` — prune stale tool results from live context
+- `/prompt-physics on|off|status` — toggle prompt-physics injection for the session
+- `/verify <command>|off|status` — set or inspect the post-mutation verify command
+- `/transaction` — show pending transaction state
 
 ---
 
@@ -137,11 +148,15 @@ At a high level:
 4. Tool calls are dispatched in document order.
 5. Immediate tool results are injected back into the conversation as runtime-owned result blocks.
 6. The runtime normally re-enters generation with those results so the model can answer from actual tool output.
-7. If a mutating tool proposes a change, the runtime stores a single `PendingAction` and waits for `/approve` or `/reject`.
+7. If a mutating tool proposes a change, the runtime stores a staged `PendingAction` or grouped `PendingTransaction` and waits for `/approve` or `/reject`.
 
 Some outcomes are deliberately terminal and runtime-owned: rejecting a pending mutation produces a cancellation answer without asking the model to summarize, and a failed `read_file` can end cleanly without retrying in a loop.
 
 `search_code` is a literal substring search. The runtime simplifies model-generated search phrases into a single literal keyword and enforces a per-turn budget: one search is allowed, a second search is allowed only when the first returned no matches, and later search attempts are blocked with a correction so the model must answer cleanly.
+
+Prompt physics is enabled by default. At bootstrap, `THUNK.md` is read as a project-rule primacy anchor when present; every generation may also receive a short refresh message and a recency field naming the current tool surface and allowed tools. `/prompt-physics` toggles this session-local injection without changing config.
+
+Mutation approval has stages. Single-file edits can run an LSP pre-check before execution when `[lsp].enabled = true` and the file extension is listed in `[lsp].extensions`. After a successful file mutation, `project.verify_command` can run a language-agnostic verification command; failures can trigger up to `project.max_correction_attempts` corrective edit proposals. Consecutive edit/write calls are approved as a transaction and execute atomically with best-effort rollback.
 
 ---
 
@@ -177,7 +192,7 @@ Key architectural rules reflected in the code:
 
 - parsing of raw tool syntax lives in `runtime/protocol/tool_codec/`
 - tools operate on typed `ToolInput` / `ToolOutput`, not raw model text
-- mutating tools separate `run()` from `execute_approved()`
+- mutating tools separate `run()` from `execute_approved()` and can be wrapped in staged pending transactions
 - the runtime does not depend on the TUI or SQLite directly
 - the TUI renders events but does not execute tools
 - all shared types (AppError, Config) are imported from `src/core/` — never from `app/`
@@ -189,7 +204,7 @@ Key architectural rules reflected in the code:
 - Shell allowlist is restricted to `cargo` only — broader shell access not yet supported.
 - No advanced memory system.
 - Summarization-based compaction is deferred; current context control uses estimation, warnings, and tool-result pruning.
-- Pending approvals are not persisted across restarts.
+- Pending approvals and transactions are not persisted across restarts.
 - Restored session history is loaded into the runtime, but not replayed into the visible TUI transcript.
 - No prompt caching or summarization-based context compression yet.
 - Windows support is functional but ongoing — search_code path handling on Windows is an open item.
@@ -216,7 +231,7 @@ cd /your/project
 thunk
 ```
 
-thunk walks upward from the current directory to find `config.toml` and `.git`. Copy `config.toml.example` to your project root and configure your preferred provider.
+thunk walks upward from the current directory to find `config.toml` and `.git`. Copy `config.example.toml` to your project root as `config.toml` and configure your preferred provider.
 
 ---
 
@@ -245,10 +260,10 @@ cargo run --release --no-default-features
 
 Run tests:
 ```bash
-cargo test
+cargo test --no-default-features
 ```
 
-Configuration lives in `config.toml`. See `config.toml.example` for all available options.
+Configuration lives in `config.toml`. See `config.example.toml` for the sample shape. Current project-level knobs include `test_command`, `verify_command`, and `max_correction_attempts`; LSP diagnostics are guarded by `[lsp].enabled` and `[lsp].extensions`; prompt physics is controlled by `[prompt_physics].enabled`.
 
 Provider API keys go in `.env` at the project root:
 ```

@@ -3,12 +3,12 @@
 Dependency order (bottom → top): `core/` → `storage/` / `tools/` → `runtime/` → `app/` → `tui/`
 
 ## src/core/
-Owns `AppError`, `Result`, `Config` and all sub-configs (`LlmConfig`, `LspConfig`, `GroqConfig`, `OllamaConfig`, `OpenRouterConfig`, `CustomCommandDef`, etc.), and `load()`.
+Owns `AppError`, `Result`, `Config` and all sub-configs (`LlmConfig`, `ProjectConfig`, `LspConfig`, `PromptPhysicsSettings`, provider configs, `CustomCommandDef`, etc.), and `load()`.
 Also the known exception: `error.rs` imports `ToolError` from `tools/` for the `From<ToolError>` impl — tracked as tech debt.
 Key files: `src/core/config.rs`, `src/core/error.rs`, `src/core/mod.rs`
 
 ## src/tools/
-Owns concrete filesystem and Git actions, registration, approval contracts, and the `PendingAction`/`RiskLevel` types.
+Owns concrete filesystem and Git actions, registration, approval contracts, and the `PendingAction` / `PendingTransaction` / `PendingApprovalStage` / `RiskLevel` types.
 Must not parse assistant text, own conversation mutations, or decide investigation correctness.
 `default_registry()` registers only `read_file` and `list_dir`.
 `ToolRegistry::with_project_root()` adds `search_code`, `git_status`, `git_diff`, `git_log`, `git_branch`, `edit_file`, `write_file`, `shell`.
@@ -34,9 +34,9 @@ Key files: `src/runtime/investigation/investigation.rs`, `src/runtime/investigat
 Owns request dispatch, the turn loop, tool round execution, generation, and context management.
 Split across multiple files — no file owns more than one concern.
 Key files:
-- `engine.rs` — `Runtime::handle()`, submit/approve/reject dispatch, turn loop
-- `tool_round.rs` — `run_tool_round()`, search budget, non-candidate enforcement, LSP intercept
-- `generation.rs` — `run_generate_turn()`, snapshot hint injection
+- `engine.rs` — `Runtime::handle()`, submit/approve/reject dispatch, turn loop, `execute_and_handle()`, `execute_transaction()`, verification/correction loop
+- `tool_round.rs` — `run_tool_round()`, search budget, non-candidate enforcement, LSP intercept, transaction collection
+- `generation.rs` — `run_generate_turn()`, snapshot hint injection, prompt-physics refresh/recency injection
 - `command_handlers.rs` — `CommandTool` allowlist for slash-command dispatch
 - `turn_state.rs` — `TurnContext`, `TurnState`, `AnswerPhaseKind`, `PendingRuntimeCall`
 - `engine_guards.rs` — `usage_lookup_is_broad()`, `extract_claimed_paths()`
@@ -49,7 +49,7 @@ Key files:
 Owns the wire protocol between model text and typed tool inputs/results.
 `tool_codec/` is a module (not a single file): `tool_parser.rs`, `tool_renderer.rs`, `tool_detector.rs`.
 Must not dispatch tools, resolve paths, enforce surfaces, or decide answer admissibility.
-Key files: `src/runtime/protocol/tool_codec/mod.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/response_text.rs`
+Key files: `src/runtime/protocol/tool_codec/mod.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/prompt_physics.rs`, `src/runtime/protocol/response_text.rs`
 
 ## src/runtime/project/
 Owns path confinement types: `ProjectRoot`, `ProjectPath`, `ProjectScope`, `ResolvedToolInput`, `resolve()`.
@@ -72,6 +72,7 @@ Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src
 Owns bootstrap, config loading, path discovery, backend construction, tool-registry construction, session restore, autosave, event logging.
 `AppContext` wraps `Runtime` + `ActiveSession` + optional `SessionLog`; TUI works through `AppContext::handle()`.
 `ActiveSession` (`app/session.rs`) is the only layer that converts between runtime `Message` and stored records.
+Bootstrap reads optional project `THUNK.md` and passes it into runtime prompt physics config; it does not persist `THUNK.md` content into sessions.
 Must not implement runtime policy or parse tool syntax.
 Key files: `src/app/mod.rs`, `src/app/context.rs`, `src/app/session.rs`, `src/app/paths.rs`, `src/app/config.rs`
 

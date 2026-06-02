@@ -42,7 +42,10 @@
 3. Approval-time revalidation is required in `execute_approved()`:
    - `EditFileTool`: recheck that the search text still exists in the current file contents.
    - `WriteFileTool`: recheck path validity and parent existence.
-4. After a successful mutation, `handle_approve()` must commit the tool result, invalidate the project snapshot cache, and end with `mutation_complete_final_answer()`. Do not re-enter the backend.
-5. After a rejected mutation, `handle_reject()` must inject a tool error and end with `rejection_final_answer()`. Do not re-enter the backend.
-6. If a new tool can affect project structure, add snapshot cache invalidation in the approval success branch of `engine.rs`.
-7. Shell commands are gated by `is_permitted_shell_command()` — only `cargo` is permitted. Do not weaken this allowlist without updating the invariant documentation.
+4. Preserve `PendingApprovalStage`: fresh approvals start as `AwaitingPreCheck`; after an LSP pre-edit warning is surfaced, the same action must continue as `PreCheckComplete`.
+5. Preserve grouped transaction behavior: consecutive edit/write approvals can become a `PendingTransaction`; `execute_transaction()` must roll back already-applied edits on failure.
+6. After a successful single mutation, `execute_and_handle()` must commit the tool result, invalidate the project snapshot cache, optionally run LSP diagnostics and `verify_command`, then end with a runtime-authored answer unless verification requests a corrective edit.
+7. After a rejected mutation or transaction, `handle_reject()` must inject tool errors and end with `rejection_final_answer()`. Do not re-enter the backend.
+8. If a new tool can affect project structure, add snapshot cache invalidation in the approval success branch of `engine.rs`.
+9. Shell commands are gated by `is_permitted_shell_command()` — only `cargo` is permitted. Do not weaken this allowlist without updating the invariant documentation.
+10. Verification is language-agnostic. Do not hard-code Rust-only checks; use `project.verify_command`, `project.max_correction_attempts`, and `[lsp].extensions` where applicable.

@@ -11,7 +11,7 @@ core/ → tools/ → runtime/ → app/ → tui/
 
 ## What src/core/ Exports
 - AppError, Result (error.rs)
-- Config, GroqConfig, OllamaConfig, and all sub-configs + load() (config.rs)
+- Config and all sub-configs + load() (config.rs), including `ProjectConfig`, `LspConfig`, provider configs, custom commands, and `PromptPhysicsSettings`
 
 ## Known Exception
 src/core/error.rs imports ToolError from src/tools/ for the From<ToolError> for AppError impl.

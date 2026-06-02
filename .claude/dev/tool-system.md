@@ -24,7 +24,7 @@ Surface enforcement applies only to read-only tool families. `tool_allowed_for_s
 
 ## Execution Kinds
 
-Tools have two execution kinds. `ExecutionKind::Immediate` returns a `ToolOutput` in the current round. `ExecutionKind::RequiresApproval` returns a `PendingAction` and suspends the turn. Code: `src/tools/types.rs`.
+Tools have two execution kinds. `ExecutionKind::Immediate` returns a `ToolOutput` in the current round. `ExecutionKind::RequiresApproval` returns a `PendingAction` and suspends the turn. The runtime stores approvals as `PendingApprovalStage`; consecutive edit/write approvals can be collected into a `PendingTransaction`. Code: `src/tools/types.rs`, `src/tools/pending.rs`.
 
 ## Individual Tools
 
@@ -38,11 +38,19 @@ Tools have two execution kinds. `ExecutionKind::Immediate` returns a `ToolOutput
 - **`edit_file`**: exact-match, first-occurrence only. `run()` validates the search text exists in current file contents, returns `PendingAction`. `execute_approved()` rechecks path validity and search-text staleness before writing. Code: `src/tools/edit_file.rs`.
 - **`write_file`**: proposes create or overwrite, sets risk based on current existence. `execute_approved()` refuses to create missing parent directories. Code: `src/tools/write_file.rs`.
 - **`shell`**: runs an arbitrary command inside the project root with a 60-second timeout and 8 KB output cap. Only `cargo` commands are permitted (`is_permitted_shell_command()`). Always `RequiresApproval`. Code: `src/tools/shell.rs`, `src/runtime/investigation/prompt_analysis.rs`.
-- **`lsp_definition`**: block-format tool. Dispatched in `tool_round.rs` before `registry.dispatch()` because `LspManager::query_definition()` requires `&mut self`. Returns the definition location of a symbol at `(path, line, col)`. On success, records a definition edge in `InvestigationGraph`. On LSP error, returns an empty `LspDefinitionOutput` — never a terminal answer. Requires `[lsp].enabled = true` in config. Code: `src/runtime/orchestration/tool_round.rs`, `src/runtime/lsp/manager.rs`, `src/core/config.rs`.
+- **`lsp_definition`**: block-format tool. Dispatched in `tool_round.rs` before `registry.dispatch()` because `LspManager::query_definition()` requires `&mut self`. Returns the definition location of a symbol at `(path, line, col)`. On success, records a definition edge in `InvestigationGraph`. On LSP error, returns an empty `LspDefinitionOutput` — never a terminal answer. Requires `[lsp].enabled = true` in config; diagnostics/pre-checks only run for `[lsp].extensions`. Code: `src/runtime/orchestration/tool_round.rs`, `src/runtime/lsp/manager.rs`, `src/core/config.rs`.
 
 ## Approval Flow
 
-Approval flow is runtime-owned. `run_tool_round()` returns `ApprovalRequired`, `Runtime` stores the `PendingAction`, and `handle_approve()` or `handle_reject()` resolves it. Successful approval commits the tool result and ends with a runtime-authored answer; rejection injects a tool error and ends with a runtime-authored cancellation answer. Code: `src/runtime/orchestration/tool_round.rs`, `src/runtime/orchestration/engine.rs`, `src/runtime/protocol/response_text.rs`.
+Approval flow is runtime-owned. `run_tool_round()` returns `ApprovalRequired` for one action or `TransactionRequired` for consecutive edit/write actions. `Runtime` stores the pending work as `PendingApprovalStage::AwaitingPreCheck`; single-file mutations can advance to `PreCheckComplete` after an LSP pre-edit safety check. Successful approval commits tool results and ends with a runtime-authored answer; rejection injects tool errors and ends with a runtime-authored cancellation answer. Code: `src/runtime/orchestration/tool_round.rs`, `src/runtime/orchestration/engine.rs`, `src/tools/pending.rs`, `src/runtime/protocol/response_text.rs`.
+
+## Verification Flow
+
+After approved `edit_file` or `write_file`, the runtime may run `project.verify_command` directly from `execute_and_handle()`. This command is language-agnostic and not routed through `ShellTool` because it is a runtime verification step. On failure, the runtime can inject a `[runtime:correction]` prompt and request another approved edit until `project.max_correction_attempts` is reached. Transactions run `verify_command` after all edits but skip self-correction. `/verify <command>|off|status` changes the session-scoped command. Code: `src/runtime/orchestration/engine.rs`, `src/runtime/orchestration/command_handlers.rs`, `src/core/config.rs`.
+
+## Prompt Physics
+
+Prompt physics is owned by `src/runtime/protocol/prompt_physics.rs`. `THUNK.md` is loaded at app bootstrap for the primacy anchor, `run_generate_turn()` appends refresh and recency messages per generation, and `/prompt-physics on|off|status` toggles the session-local config. None of these injected messages are persisted into conversation history. Code: `src/app/mod.rs`, `src/runtime/orchestration/generation.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/prompt_physics.rs`.
 
 ## Custom Commands
 
