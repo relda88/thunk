@@ -1,25 +1,28 @@
-use std::env;
 use std::io::BufRead;
 
 use serde_json::{json, Value};
 
-use crate::app::config::OpenAiConfig;
-use crate::app::{AppError, Result};
+use crate::core::config::OpenAiConfig;
+use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
     BackendCapabilities, BackendEvent, BackendStatus, GenerateRequest, ModelBackend,
 };
 
+const DEFAULT_CONTEXT_WINDOW: u32 = 128_000;
+
 pub struct OpenAiBackend {
     config: OpenAiConfig,
     display_name: String,
+    api_key: String,
 }
 
 impl OpenAiBackend {
-    pub fn new(config: OpenAiConfig) -> Self {
+    pub fn new(config: OpenAiConfig, api_key: String) -> Self {
         let display_name = format!("openai/{}", config.model);
         Self {
             config,
             display_name,
+            api_key,
         }
     }
 }
@@ -31,7 +34,11 @@ impl ModelBackend for OpenAiBackend {
 
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
-            context_window_tokens: None,
+            context_window_tokens: Some(
+                self.config
+                    .context_window_tokens
+                    .unwrap_or(DEFAULT_CONTEXT_WINDOW),
+            ),
             max_output_tokens: Some(self.config.max_tokens),
         }
     }
@@ -41,16 +48,6 @@ impl ModelBackend for OpenAiBackend {
         request: GenerateRequest,
         on_event: &mut dyn FnMut(BackendEvent),
     ) -> Result<()> {
-        if self.config.model.is_empty() {
-            return Err(AppError::Config(
-                "openai.model must not be empty".to_string(),
-            ));
-        }
-
-        let api_key = env::var("OPENAI_API_KEY").map_err(|_| {
-            AppError::Config("OPENAI_API_KEY environment variable is not set".to_string())
-        })?;
-
         let messages: Vec<Value> = request
             .messages
             .iter()
@@ -63,12 +60,13 @@ impl ModelBackend for OpenAiBackend {
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
             "stream": true,
+            "stream_options": {"include_usage": true},
         });
 
         let url = format!("{}/chat/completions", self.config.base_url);
 
         let response = ureq::post(&url)
-            .set("Authorization", &format!("Bearer {api_key}"))
+            .set("Authorization", &format!("Bearer {}", self.api_key))
             .set("Content-Type", "application/json")
             .send_string(&body.to_string())
             .map_err(|e| AppError::Runtime(format!("OpenAI request failed: {e}")))?;
@@ -95,6 +93,16 @@ impl ModelBackend for OpenAiBackend {
                 if !content.is_empty() {
                     on_event(BackendEvent::TextDelta(content.to_string()));
                 }
+            }
+
+            // Usage chunk arrives as a final SSE event with empty choices before [DONE].
+            // Only present when stream_options.include_usage is accepted by the API.
+            if let Some(prompt) = val["usage"]["prompt_tokens"].as_u64() {
+                let completion = val["usage"]["completion_tokens"].as_u64().unwrap_or(0);
+                on_event(BackendEvent::TokenCounts {
+                    prompt: prompt as u32,
+                    completion: completion as u32,
+                });
             }
         }
 

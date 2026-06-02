@@ -1,5 +1,5 @@
-pub mod context;
 mod edit_file;
+mod git_branch;
 mod git_diff;
 mod git_log;
 mod git_status;
@@ -8,22 +8,16 @@ mod pending;
 mod read_file;
 mod registry;
 mod search_code;
+mod shell;
 pub mod types;
 mod write_file;
 
-use std::path::PathBuf;
+use crate::runtime::ResolvedToolInput;
 
-use edit_file::EditFileTool;
-use git_diff::GitDiffTool;
-use git_log::GitLogTool;
-use git_status::GitStatusTool;
 use list_dir::ListDirTool;
 use read_file::ReadFileTool;
-use search_code::SearchCodeTool;
-use write_file::WriteFileTool;
 
-pub use context::ToolContext;
-pub use pending::{PendingAction, RiskLevel};
+pub use pending::{PendingAction, PendingApprovalStage, PendingTransaction, RiskLevel};
 pub use registry::ToolRegistry;
 pub use types::{
     EntryKind, ExecutionKind, ToolError, ToolInput, ToolOutput, ToolRunResult, ToolSpec,
@@ -39,7 +33,7 @@ pub trait Tool: Send + Sync {
 
     /// Phase 1 of execution: validate input and return either an immediate result
     /// or a PendingAction describing the proposed mutation.
-    fn run(&self, input: &ToolInput) -> Result<ToolRunResult, ToolError>;
+    fn run(&self, input: &ResolvedToolInput) -> Result<ToolRunResult, ToolError>;
 
     /// Phase 2 of execution: apply a previously approved mutation and return the
     /// result. Only mutating tools implement this — read-only tools never produce
@@ -52,18 +46,13 @@ pub trait Tool: Send + Sync {
     }
 }
 
-/// Builds a ToolRegistry pre-loaded with all tools.
-/// Each tool receives a ToolContext so it can resolve relative paths against
-/// the project root rather than the process working directory.
-pub fn default_registry(root: PathBuf) -> ToolRegistry {
+/// Builds a ToolRegistry with the tools that do not require a project root.
+///
+/// Call `ToolRegistry::with_project_root()` to add the root-aware tools that
+/// need the runtime-owned project root for execution or approval validation.
+pub fn default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
-    registry.register(ReadFileTool::new(ToolContext::new(root.clone())));
-    registry.register(ListDirTool::new(ToolContext::new(root.clone())));
-    registry.register(SearchCodeTool::new(ToolContext::new(root.clone())));
-    registry.register(GitStatusTool::new(ToolContext::new(root.clone())));
-    registry.register(GitDiffTool::new(ToolContext::new(root.clone())));
-    registry.register(GitLogTool::new(ToolContext::new(root.clone())));
-    registry.register(EditFileTool::new(ToolContext::new(root.clone())));
-    registry.register(WriteFileTool::new(ToolContext::new(root)));
+    registry.register(ReadFileTool::new());
+    registry.register(ListDirTool::new());
     registry
 }

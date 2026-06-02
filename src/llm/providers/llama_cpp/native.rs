@@ -2,22 +2,35 @@ use std::num::NonZeroU32;
 use std::path::Path;
 
 use llama_cpp_2::{
-    context::params::{KvCacheType, LlamaContextParams},
+    context::{
+        params::{KvCacheType, LlamaContextParams},
+        LlamaContext,
+    },
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
     model::{params::LlamaModelParams, AddBos, LlamaModel},
     sampling::LlamaSampler,
+    token::LlamaToken,
     TokenToStringError,
 };
 
-use crate::app::config::LlamaCppConfig;
-use crate::app::{AppError, Result};
-use crate::llm::backend::BackendEvent;
+use crate::core::config::LlamaCppConfig;
+use crate::core::error::{AppError, Result};
+use crate::llm::backend::{BackendEvent, BackendStatus, BackendTimingStage};
 
 pub(super) struct LoadedLlama {
-    pub(super) model: LlamaModel,
+    // ctx is declared first: Rust drops fields top-to-bottom, so ctx is released
+    // before model. The 'static lifetime is manually upheld — the Box keeps the
+    // model address stable across any moves of LoadedLlama.
+    ctx: LlamaContext<'static>,
+    pub(super) model: Box<LlamaModel>,
     pub(super) backend: LlamaBackend,
+    pub(super) last_prefill_token_count: usize,
 }
+
+// SAFETY: LlamaContext wraps NonNull<llama_cpp_sys_2::llama_context> which is !Send.
+// LoadedLlama has single-threaded exclusive ownership across all generate() calls.
+unsafe impl Send for LoadedLlama {}
 
 // RAII guard: redirects stderr (fd 2) to /dev/null on construction, restores on drop.
 // Needed because native llama.cpp code (repack, sched_reserve, etc.) writes directly to
@@ -56,6 +69,12 @@ impl Drop for StderrSuppress {
 }
 
 pub(super) fn load_model(config: &LlamaCppConfig, model_path: &Path) -> Result<LoadedLlama> {
+    if config.batch_tokens == 0 {
+        return Err(AppError::Config(
+            "llama.cpp requires `batch_tokens` to be greater than zero.".to_string(),
+        ));
+    }
+
     let mut backend = LlamaBackend::init().map_err(map_llama_error)?;
     if !config.show_native_logs {
         backend.void_logs();
@@ -73,16 +92,48 @@ pub(super) fn load_model(config: &LlamaCppConfig, model_path: &Path) -> Result<L
     }
 
     let model_params = LlamaModelParams::default().with_n_gpu_layers(config.gpu_layers);
-    let model = {
+    let model = Box::new({
         // Native output (repack tensor messages, backend init prints) writes directly to
         // stderr via fprintf, bypassing log callbacks. Always suppress fd 2 here — the TUI
         // shares the terminal with stderr and must never receive raw native bytes regardless
         // of the show_native_logs setting.
         let _suppress = StderrSuppress::new();
         LlamaModel::load_from_file(&backend, model_path, &model_params).map_err(map_llama_error)?
+    });
+
+    // n_ubatch must be <= n_batch. Pin n_ubatch = n_batch to keep them consistent.
+    let ctx_params = LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(config.context_tokens))
+        .with_n_batch(config.batch_tokens)
+        .with_n_ubatch(config.batch_tokens)
+        .with_type_k(KvCacheType::F16)
+        .with_type_v(KvCacheType::F16)
+        .with_offload_kqv(false);
+
+    let ctx = {
+        let _suppress = StderrSuppress::new();
+        let raw_ctx = model.new_context(&backend, ctx_params).map_err(|error| {
+            AppError::Runtime(format!(
+                "{} (context_tokens={}, batch_tokens={}, n_ubatch={}, trained_context={})",
+                error,
+                config.context_tokens,
+                config.batch_tokens,
+                config.batch_tokens,
+                model.n_ctx_train()
+            ))
+        })?;
+        // SAFETY: model is heap-allocated (Box), so its address is stable across moves of
+        // LoadedLlama. ctx is declared before model in the struct, ensuring it is dropped
+        // first. The 'static lifetime is manually upheld by these two invariants.
+        unsafe { std::mem::transmute::<LlamaContext<'_>, LlamaContext<'static>>(raw_ctx) }
     };
 
-    Ok(LoadedLlama { model, backend })
+    Ok(LoadedLlama {
+        ctx,
+        model,
+        backend,
+        last_prefill_token_count: 0,
+    })
 }
 
 pub(super) fn run_generation(
@@ -98,58 +149,14 @@ pub(super) fn run_generation(
     let max_tokens = config.max_tokens;
     let temperature = config.temperature;
 
-    if batch_tokens == 0 {
-        return Err(AppError::Config(
-            "llama.cpp requires `batch_tokens` to be greater than zero.".to_string(),
-        ));
-    }
-
-    // n_ubatch must be <= n_batch. The crate default is n_ubatch=512, n_batch=2048, so
-    // any batch_tokens < 512 leaves n_ubatch > n_batch and native context creation fails.
-    // Pin n_ubatch = n_batch to keep them consistent at whatever batch size is configured.
-    //
-    // Intentionally omit with_op_offload(false) and with_flash_attention_policy(0) — those
-    // disabled CPU-level SIMD/BLAS and attention optimizations that the old project relied on
-    // via defaults. Let llama.cpp choose the optimal strategy.
-    let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(context_tokens))
-        .with_n_batch(batch_tokens)
-        .with_n_ubatch(batch_tokens)
-        .with_type_k(KvCacheType::F16)
-        .with_type_v(KvCacheType::F16)
-        .with_offload_kqv(false);
-
-    let t_ctx_start = Instant::now();
-    let mut ctx = {
-        // Context creation prints sched_reserve / kv_cache / graph_reserve lines directly to
-        // stderr. Always suppress — same reasoning as load_from_file above.
-        let _suppress = StderrSuppress::new();
-        loaded
-            .model
-            .new_context(&loaded.backend, ctx_params)
-            .map_err(|error| {
-                AppError::Runtime(format!(
-                    "{} (context_tokens={}, batch_tokens={}, n_ubatch={}, trained_context={})",
-                    error,
-                    context_tokens,
-                    batch_tokens,
-                    batch_tokens,
-                    loaded.model.n_ctx_train()
-                ))
-            })?
-    };
-    on_event(BackendEvent::Timing {
-        stage: "ctx_create",
-        elapsed_ms: t_ctx_start.elapsed().as_millis() as u64,
-    });
-
+    on_event(BackendEvent::StatusChanged(BackendStatus::Tokenizing));
     let t_tok_start = Instant::now();
     let tokens = loaded
         .model
         .str_to_token(prompt, AddBos::Always)
         .map_err(map_llama_error)?;
     on_event(BackendEvent::Timing {
-        stage: "tokenize",
+        stage: BackendTimingStage::Tokenize,
         elapsed_ms: t_tok_start.elapsed().as_millis() as u64,
     });
 
@@ -168,43 +175,55 @@ pub(super) fn run_generation(
     }
 
     on_event(BackendEvent::Timing {
-        stage: "prefill_start",
-        elapsed_ms: t_ctx_start.elapsed().as_millis() as u64,
+        stage: BackendTimingStage::PrefillStart,
+        elapsed_ms: t_tok_start.elapsed().as_millis() as u64,
     });
+    on_event(BackendEvent::StatusChanged(BackendStatus::Prefilling));
     let t_prefill_start = Instant::now();
 
-    let mut batch = LlamaBatch::new(batch_tokens as usize, 1);
-    let mut consumed = 0usize;
-    while consumed < tokens.len() {
-        batch.clear();
-        let end = (consumed + batch_tokens as usize).min(tokens.len());
-        let last_prompt_idx = tokens.len() - 1;
-
-        for (index, token) in tokens[consumed..end].iter().enumerate() {
-            let position = (consumed + index) as i32;
-            batch
-                .add(*token, position, &[0], consumed + index == last_prompt_idx)
-                .map_err(map_llama_error)?;
-        }
-
-        ctx.decode(&mut batch).map_err(map_llama_error)?;
-        consumed = end;
+    if tokens.len() < loaded.last_prefill_token_count {
+        loaded
+            .ctx
+            .clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), None)
+            .ok();
+        loaded.last_prefill_token_count = tokens.len();
     }
+    let new_start = loaded.last_prefill_token_count;
+
+    let mut batch = LlamaBatch::new(batch_tokens as usize, 1);
+    let prefill_result = do_prefill(
+        &mut loaded.ctx,
+        &mut batch,
+        &tokens,
+        new_start,
+        batch_tokens,
+    );
+    let prefill_result = match prefill_result {
+        Err(_) if new_start > 0 => {
+            loaded.ctx.clear_kv_cache();
+            loaded.last_prefill_token_count = 0;
+            do_prefill(&mut loaded.ctx, &mut batch, &tokens, 0, batch_tokens)
+        }
+        other => other,
+    };
+    prefill_result?;
+    loaded.last_prefill_token_count = tokens.len();
 
     on_event(BackendEvent::Timing {
-        stage: "prefill_done",
+        stage: BackendTimingStage::PrefillDone,
         elapsed_ms: t_prefill_start.elapsed().as_millis() as u64,
     });
 
     let mut sampler =
         LlamaSampler::chain_simple([LlamaSampler::temp(temperature), LlamaSampler::dist(0)]);
 
+    on_event(BackendEvent::StatusChanged(BackendStatus::Generating));
     let mut generated = 0usize;
     let mut current_pos = tokens.len() as i32;
     let t_gen_start = Instant::now();
 
     loop {
-        let next_token = sampler.sample(&ctx, batch.n_tokens() - 1);
+        let next_token = sampler.sample(&loaded.ctx, batch.n_tokens() - 1);
 
         if loaded.model.is_eog_token(next_token) {
             break;
@@ -231,14 +250,47 @@ pub(super) fn run_generation(
             break;
         }
 
-        ctx.decode(&mut batch).map_err(map_llama_error)?;
+        loaded.ctx.decode(&mut batch).map_err(map_llama_error)?;
     }
 
+    loaded
+        .ctx
+        .clear_kv_cache_seq(Some(0), Some(tokens.len() as u32), Some(current_pos as u32))
+        .ok();
+    loaded.last_prefill_token_count = tokens.len();
     on_event(BackendEvent::Timing {
-        stage: "generation_done",
+        stage: BackendTimingStage::GenerationDone,
         elapsed_ms: t_gen_start.elapsed().as_millis() as u64,
     });
+    on_event(BackendEvent::TokenCounts {
+        prompt: tokens.len() as u32,
+        completion: generated as u32,
+    });
     on_event(BackendEvent::Finished);
+    Ok(())
+}
+
+fn do_prefill<'a>(
+    ctx: &mut LlamaContext<'a>,
+    batch: &mut LlamaBatch,
+    tokens: &[LlamaToken],
+    start: usize,
+    batch_tokens: u32,
+) -> Result<()> {
+    let mut consumed = start;
+    let last_prompt_idx = tokens.len() - 1;
+    while consumed < tokens.len() {
+        batch.clear();
+        let end = (consumed + batch_tokens as usize).min(tokens.len());
+        for (index, token) in tokens[consumed..end].iter().enumerate() {
+            let position = (consumed + index) as i32;
+            batch
+                .add(*token, position, &[0], consumed + index == last_prompt_idx)
+                .map_err(map_llama_error)?;
+        }
+        ctx.decode(batch).map_err(map_llama_error)?;
+        consumed = end;
+    }
     Ok(())
 }
 

@@ -1,4 +1,6 @@
 pub mod app;
+pub mod core;
+pub(crate) mod dirs;
 pub(crate) mod llm;
 pub(crate) mod logging;
 pub(crate) mod runtime;

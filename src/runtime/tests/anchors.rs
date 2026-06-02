@@ -16,19 +16,8 @@ fn successful_read_file_updates_last_read_file_anchor() {
     )
     .unwrap();
 
-    let expected_path = tmp
-        .path()
-        .join("src/runtime/engine.rs")
-        .to_string_lossy()
-        .into_owned();
-    let mut rt = make_runtime_in(
-        vec![
-            "[read_file: src/runtime/engine.rs]",
-            "Read engine.rs.",
-            "Re-read engine.rs.",
-        ],
-        tmp.path(),
-    );
+    let expected_path = "src/runtime/engine.rs";
+    let mut rt = make_runtime_in(vec!["Re-read engine.rs."], tmp.path());
     let events = collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -66,14 +55,7 @@ fn read_that_file_again_dispatches_one_read_to_anchor() {
     fs::create_dir_all(tmp.path().join("src")).unwrap();
     fs::write(tmp.path().join("src/anchor.rs"), "fn anchor() {}\n").unwrap();
 
-    let mut rt = make_runtime_in(
-        vec![
-            "[read_file: src/anchor.rs]",
-            "First read complete.",
-            "Anchored read complete.",
-        ],
-        tmp.path(),
-    );
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -93,11 +75,7 @@ fn read_that_file_again_dispatches_one_read_to_anchor() {
         .filter(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "read_file"))
         .count();
     assert_eq!(read_starts, 1, "anchor prompt must dispatch one read");
-    let expected_path = tmp
-        .path()
-        .join("src/anchor.rs")
-        .to_string_lossy()
-        .into_owned();
+    let expected_path = "src/anchor.rs";
     assert!(
         events.iter().any(|e| {
             matches!(
@@ -117,7 +95,7 @@ fn read_that_file_again_dispatches_one_read_to_anchor() {
         .rev()
         .find(|m| m.role == crate::llm::backend::Role::Assistant)
         .map(|m| m.content.as_str());
-    assert_eq!(last_assistant, Some("Anchored read complete."));
+    assert_eq!(last_assistant, Some("[1 lines]\nfn anchor() {}"));
 }
 
 #[test]
@@ -129,14 +107,7 @@ fn open_the_last_file_resolves_to_last_read_file_anchor() {
     fs::create_dir_all(tmp.path().join("src")).unwrap();
     fs::write(tmp.path().join("src/last.rs"), "fn last() {}\n").unwrap();
 
-    let mut rt = make_runtime_in(
-        vec![
-            "[read_file: src/last.rs]",
-            "First read complete.",
-            "Opened last file.",
-        ],
-        tmp.path(),
-    );
+    let mut rt = make_runtime_in(vec!["Opened last file."], tmp.path());
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -151,11 +122,7 @@ fn open_the_last_file_resolves_to_last_read_file_anchor() {
         },
     );
 
-    let expected_path = tmp
-        .path()
-        .join("src/last.rs")
-        .to_string_lossy()
-        .into_owned();
+    let expected_path = "src/last.rs";
     assert!(
         events.iter().any(|e| {
             matches!(
@@ -215,21 +182,8 @@ fn failed_read_file_does_not_update_last_read_file_anchor() {
     fs::create_dir_all(tmp.path().join("src")).unwrap();
     fs::write(tmp.path().join("src/good.rs"), "fn good() {}\n").unwrap();
 
-    let good_path = tmp
-        .path()
-        .join("src/good.rs")
-        .to_string_lossy()
-        .into_owned();
-    let mut rt = make_runtime_in(
-        vec![
-            "[read_file: src/good.rs]",
-            "First read complete.",
-            "[read_file: src/missing.rs]",
-            "",
-            "Read good.rs again.",
-        ],
-        tmp.path(),
-    );
+    let good_path = "src/good.rs";
+    let mut rt = make_runtime_in(vec!["Read good.rs again."], tmp.path());
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -319,8 +273,6 @@ fn unsupported_anchor_phrases_do_not_resolve_last_read_file() {
 
     let mut rt = make_runtime_in(
         vec![
-            "[read_file: src/anchor.rs]",
-            "First read complete.",
             "Not an anchor.",
             "Still not an anchor.",
             "Also not an anchor.",
@@ -351,31 +303,15 @@ fn unsupported_anchor_phrases_do_not_resolve_last_read_file() {
 }
 
 #[test]
-fn anchored_read_seeds_reads_this_turn_and_answer_phase_fires_after_model_initiated_read() {
+fn anchored_read_replay_returns_raw_content_without_synthesis() {
     use std::fs;
     use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
-    for file in ["anchor.rs", "b.rs"] {
-        fs::write(
-            tmp.path().join("src").join(file),
-            format!("fn {}() {{}}\n", file.replace(".rs", "")),
-        )
-        .unwrap();
-    }
+    fs::write(tmp.path().join("src/anchor.rs"), "fn anchor() {}\n").unwrap();
 
-    let final_answer = "Read both files.";
-    let mut rt = make_runtime_in(
-        vec![
-            "[read_file: src/anchor.rs]",
-            "First read complete.",
-            "[read_file: src/b.rs]",
-            "[search_code: anchor]",
-            final_answer,
-        ],
-        tmp.path(),
-    );
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
@@ -394,35 +330,39 @@ fn anchored_read_seeds_reads_this_turn_and_answer_phase_fires_after_model_initia
         !has_failed(&events),
         "turn must complete without failure: {events:?}"
     );
-    let snapshot = rt.messages_snapshot();
-    let all_user: String = snapshot
+
+    let read_starts = events
         .iter()
-        .filter(|m| m.role == crate::llm::backend::Role::User)
-        .map(|m| m.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
+        .filter(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "read_file"))
+        .count();
     assert_eq!(
-        all_user.matches("=== tool_result: read_file ===").count(),
-        3,
-        "turn 1 anchor + anchor re-read + one model-initiated read must succeed"
+        read_starts, 1,
+        "anchor replay must dispatch exactly one read"
     );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
     assert!(
-        all_user.contains("The file was already read this turn"),
-        "answer_phase correction must fire after model-initiated read in anchor turn"
-    );
-    assert_eq!(
-        all_user.matches("=== tool_result: search_code ===").count(),
-        0,
-        "post-read search_code must be blocked by answer_phase gate"
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "anchor replay must produce a tool-assisted answer, not a synthesis round: {answer_source:?}"
     );
 
+    let snapshot = rt.messages_snapshot();
     let last_assistant = snapshot
         .iter()
         .rev()
         .find(|m| m.role == crate::llm::backend::Role::Assistant)
         .map(|m| m.content.as_str());
-    assert_eq!(last_assistant, Some(final_answer));
+    assert_eq!(
+        last_assistant,
+        Some("[1 lines]\nfn anchor() {}"),
+        "anchor replay must return raw file contents without model synthesis"
+    );
 }
 
 // Search anchor tests

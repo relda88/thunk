@@ -26,6 +26,7 @@ pub enum ToolInput {
     GitStatus,
     GitDiff,
     GitLog,
+    GitBranch,
     EditFile {
         /// Path relative to the project root, or absolute.
         path: String,
@@ -40,6 +41,16 @@ pub enum ToolInput {
         /// Full content to write.
         content: String,
     },
+    Shell {
+        /// The command to run, e.g. "cargo check" or "cargo test my_test"
+        command: String,
+    },
+    LspDefinition {
+        /// Path relative to the project root, or absolute.
+        path: String,
+        line: u32,
+        col: u32,
+    },
 }
 
 impl ToolInput {
@@ -53,8 +64,11 @@ impl ToolInput {
             ToolInput::GitStatus => "git_status",
             ToolInput::GitDiff => "git_diff",
             ToolInput::GitLog => "git_log",
+            ToolInput::GitBranch => "git_branch",
             ToolInput::EditFile { .. } => "edit_file",
             ToolInput::WriteFile { .. } => "write_file",
+            ToolInput::Shell { .. } => "shell",
+            ToolInput::LspDefinition { .. } => "lsp_definition",
         }
     }
 }
@@ -71,8 +85,11 @@ pub enum ToolOutput {
     GitStatus(GitStatusOutput),
     GitDiff(GitDiffOutput),
     GitLog(GitLogOutput),
+    GitBranch(GitBranchOutput),
     EditFile(EditFileOutput),
     WriteFile(WriteFileOutput),
+    Shell(ShellOutput),
+    LspDefinition(LspDefinitionOutput),
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +107,8 @@ pub struct FileContentsOutput {
 pub struct DirectoryListingOutput {
     pub path: String,
     pub entries: Vec<DirEntry>,
+    pub truncated: bool,
+    pub total_entries: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +184,12 @@ pub struct GitLogEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct GitBranchOutput {
+    pub current: String,
+    pub branches: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct EditFileOutput {
     pub path: String,
     /// Number of lines in the search text that was replaced.
@@ -177,6 +202,23 @@ pub struct WriteFileOutput {
     pub bytes_written: usize,
     /// True when the file was newly created; false when an existing file was overwritten.
     pub created: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShellOutput {
+    pub command: String,
+    pub stdout_stderr: String,
+    pub exit_code: i32,
+    pub truncated: bool,
+    pub total_bytes: usize,
+    pub timed_out: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LspDefinitionOutput {
+    pub source_path: String,
+    pub target_path: String,
+    pub target_line: u32,
 }
 
 // Run result
@@ -225,10 +267,4 @@ pub enum ToolError {
 
     #[error("invalid tool input: {0}")]
     InvalidInput(String),
-}
-
-impl From<ToolError> for crate::app::AppError {
-    fn from(e: ToolError) -> Self {
-        crate::app::AppError::Tool(e.to_string())
-    }
 }

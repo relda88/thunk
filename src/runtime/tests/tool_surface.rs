@@ -1,11 +1,25 @@
-use super::super::prompt;
-use super::super::tool_surface::{
+use super::super::investigation::tool_surface::{
     select_tool_surface, tool_allowed_for_surface, SurfaceTool, ToolSurface,
 };
+use super::super::protocol::prompt;
 use super::*;
 use crate::llm::backend::Role;
 use crate::tools::ToolInput;
 use std::sync::{Arc, Mutex};
+
+fn project_snapshot_hint<'a>(request: &'a crate::llm::backend::GenerateRequest) -> Option<&'a str> {
+    request
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == Role::System && message.content.starts_with("[project snapshot]")
+        })
+        .map(|message| message.content.as_str())
+}
+
+fn has_project_snapshot_hint(request: &crate::llm::backend::GenerateRequest) -> bool {
+    project_snapshot_hint(request).is_some()
+}
 
 #[test]
 fn tool_surface_defaults_to_retrieval_first_for_code_investigation_prompts() {
@@ -182,14 +196,14 @@ fn tool_surface_hint_renders_from_canonical_surface_membership() {
             ToolSurface::RetrievalFirst.as_str(),
             ToolSurface::RetrievalFirst.allowed_tool_names()
         ),
-        "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir."
+        "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir, lsp_definition."
     );
     assert_eq!(
         prompt::render_tool_surface_hint(
             ToolSurface::GitReadOnly.as_str(),
             ToolSurface::GitReadOnly.allowed_tool_names()
         ),
-        "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log."
+        "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log, git_branch."
     );
 }
 
@@ -247,7 +261,8 @@ fn path_qualified_file_prompt_reads_before_first_model_generation() {
             vec!["sandbox/main.py defines main()."],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -267,16 +282,8 @@ fn path_qualified_file_prompt_reads_before_first_model_generation() {
     let requests = requests.lock().unwrap();
     assert_eq!(
         requests.len(),
-        1,
-        "model must not generate before read_file"
-    );
-    let first = requests.first().expect("backend request must be recorded");
-    assert!(
-        first
-            .messages
-            .iter()
-            .any(|m| m.content.contains("=== tool_result: read_file ===")),
-        "first backend request must occur after read_file"
+        0,
+        "direct-read prompt must finalize without any model generation"
     );
 }
 
@@ -302,7 +309,8 @@ fn explicit_directory_prompt_lists_before_first_model_generation() {
             vec!["sandbox contains main.py."],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -348,7 +356,8 @@ fn structural_directory_prompt_lists_before_first_model_generation() {
             vec!["The project root contains main.py."],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -403,7 +412,8 @@ fn investigation_prompt_still_generates_before_first_tool() {
             ],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -508,9 +518,14 @@ fn git_read_only_surface_hint_is_sent_to_model() {
         first.messages.iter().any(|m| {
             m.role == Role::System
                 && m.content
-                    == "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log."
+                    == "Active tool surface: GitReadOnly. Available this turn: git_status, git_diff, git_log, git_branch."
         }),
         "GitReadOnly surface hint must be injected into backend request: {:?}",
+        first.messages
+    );
+    assert!(
+        !has_project_snapshot_hint(first),
+        "GitReadOnly turns must not receive project snapshot hint: {:?}",
         first.messages
     );
 }
@@ -521,7 +536,7 @@ fn tool_surface_hint_is_ephemeral_not_persisted() {
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
-            text: "hello".into(),
+            text: "where is serde used".into(),
         },
     );
 
@@ -531,8 +546,9 @@ fn tool_surface_hint_is_ephemeral_not_persisted() {
                 .starts_with("Active tool surface: RetrievalFirst. Available this turn:")
                 || m.content
                     .starts_with("Active tool surface: GitReadOnly. Available this turn:")
+                || m.content.starts_with("[project snapshot]")
         }),
-        "surface hint must not be persisted in conversation history"
+        "ephemeral hints must not be persisted in conversation history"
     );
 }
 
@@ -564,10 +580,15 @@ fn tool_surface_hint_does_not_replace_original_user_prompt() {
         }),
         "surface hint must be additional system context"
     );
+    assert!(
+        has_project_snapshot_hint(first),
+        "RetrievalFirst generation must include project snapshot hint: {:?}",
+        first.messages
+    );
 }
 
 #[test]
-fn mutation_turn_still_receives_surface_hint() {
+fn mutation_turn_receives_mutation_enabled_surface_hint() {
     let (mut rt, requests) = make_runtime_with_recorded_requests(vec!["Done."]);
     collect_events(
         &mut rt,
@@ -582,10 +603,71 @@ fn mutation_turn_still_receives_surface_hint() {
         first.messages.iter().any(|m| {
             m.role == Role::System
                 && m.content
-                    == "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir."
+                    == "Active tool surface: MutationEnabled. Available this turn: search_code, read_file, list_dir, edit_file, write_file, shell."
         }),
-        "mutation-intent turns still expose active surface hint: {:?}",
+        "mutation-intent turns must expose MutationEnabled hint with all tool names: {:?}",
         first.messages
+    );
+    assert!(
+        has_project_snapshot_hint(first),
+        "MutationEnabled generation must include project snapshot hint: {:?}",
+        first.messages
+    );
+}
+
+#[test]
+fn select_tool_surface_returns_mutation_enabled_for_mutation_prompts() {
+    use crate::runtime::investigation::tool_surface::select_tool_surface;
+    for prompt_text in [
+        "Edit src/main.rs and change hello to hi",
+        "Write a new file called output.txt",
+        "Create a file named demo.txt",
+        "Update the config file",
+        "Delete the old log file",
+        "Modify the README",
+    ] {
+        assert_eq!(
+            select_tool_surface(prompt_text, false, true, false),
+            ToolSurface::MutationEnabled,
+            "mutation prompt should select MutationEnabled: {prompt_text}"
+        );
+    }
+}
+
+#[test]
+fn mutation_enabled_hint_includes_approval_required_tools() {
+    let hint = prompt::render_tool_surface_hint(
+        ToolSurface::MutationEnabled.as_str(),
+        ToolSurface::MutationEnabled.allowed_tool_names().chain(
+            ToolSurface::MutationEnabled
+                .mutation_tool_names()
+                .iter()
+                .copied(),
+        ),
+    );
+    assert!(
+        hint.contains("MutationEnabled"),
+        "hint must name the MutationEnabled surface: {hint}"
+    );
+    assert!(
+        hint.contains("edit_file"),
+        "MutationEnabled hint must list edit_file: {hint}"
+    );
+    assert!(
+        hint.contains("write_file"),
+        "MutationEnabled hint must list write_file: {hint}"
+    );
+    assert!(
+        hint.contains("shell"),
+        "MutationEnabled hint must list shell: {hint}"
+    );
+    assert!(
+        hint.contains("search_code"),
+        "MutationEnabled hint must still list search_code: {hint}"
+    );
+    assert!(
+        hint.contains("read_file"),
+        "MutationEnabled hint must still list read_file: {hint}"
     );
 }
 
@@ -617,9 +699,9 @@ fn answer_only_surface_hint_declares_no_tools() {
 
 #[test]
 fn answer_only_surface_hint_sent_to_model_during_post_read_synthesis() {
-    // Phase 12.0.1: after a successful read the runtime sets answer_phase = PostRead.
-    // The synthesis generation must receive the AnswerOnly surface hint so the model
-    // is not offered any tools — eliminating the post_evidence_tool_call_rejected round.
+    // Phase 12.0.1: after a successful model-initiated read on a non-direct-read turn,
+    // the synthesis generation must receive the AnswerOnly surface hint so the model
+    // is not offered any tools.
     use std::fs;
     use tempfile::TempDir;
 
@@ -634,18 +716,19 @@ fn answer_only_surface_hint_sent_to_model_during_post_read_synthesis() {
         project_root.clone(),
         Box::new(RecordingBackend::new(
             vec![
-                "[read_file: sandbox/main.py]", // round 1: model reads the requested file
+                "[read_file: sandbox/main.py]", // round 1: model reads a file
                 "Here is what I found.",        // round 2: synthesis — must get AnswerOnly hint
             ],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     collect_events(
         &mut rt,
         RuntimeRequest::Submit {
-            text: "Read sandbox/main.py".into(),
+            text: "display the structure".into(),
         },
     );
 
@@ -679,6 +762,62 @@ fn answer_only_surface_hint_sent_to_model_during_post_read_synthesis() {
         "AnswerOnly surface hint must not offer read_file: {}",
         surface_hint.content
     );
+    assert!(
+        !has_project_snapshot_hint(synthesis),
+        "AnswerOnly synthesis must not receive project snapshot hint: {:?}",
+        synthesis.messages
+    );
+}
+
+#[test]
+fn retrieval_first_project_snapshot_hint_is_compact_and_deterministic() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("docs")).unwrap();
+    fs::create_dir_all(tmp.path().join(".git")).unwrap();
+    fs::create_dir_all(tmp.path().join("target")).unwrap();
+    fs::create_dir_all(tmp.path().join("node_modules")).unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\n",
+    )
+    .unwrap();
+    fs::write(tmp.path().join("README.md"), "# Demo\n").unwrap();
+    fs::write(tmp.path().join("config.toml"), "mode = \"dev\"\n").unwrap();
+    fs::write(tmp.path().join("src").join("lib.rs"), "pub fn demo() {}\n").unwrap();
+    fs::write(tmp.path().join("docs").join("guide.md"), "# Guide\n").unwrap();
+
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let project_root = ProjectRoot::new(tmp.path().to_path_buf()).unwrap();
+    let mut rt = Runtime::new(
+        &Config::default(),
+        project_root.clone(),
+        Box::new(RecordingBackend::new(vec!["Done."], Arc::clone(&requests))),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+    );
+
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "where is demo used".into(),
+        },
+    );
+
+    let requests = requests.lock().unwrap();
+    let first = requests.first().expect("backend request must be recorded");
+    let hint =
+        project_snapshot_hint(first).expect("RetrievalFirst turn must include snapshot hint");
+
+    assert!(hint.contains("Important files: Cargo.toml, README.md, config.toml"));
+    assert!(hint.contains("Top-level dirs: docs, src"));
+    assert!(hint.contains("Top-level files: Cargo.toml, README.md, config.toml"));
+    assert!(hint.contains("Truncated: false"));
+    assert_eq!(hint.lines().count(), 6, "hint must stay short: {hint}");
+    assert!(hint.len() <= 260, "hint must stay compact: {}", hint.len());
 }
 
 #[test]
@@ -719,7 +858,8 @@ fn answer_only_surface_hint_sent_after_second_runtime_owned_usage_read() {
             ],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     collect_events(
@@ -779,7 +919,8 @@ fn seeded_list_dir_synthesis_receives_answer_only_surface() {
             vec!["sandbox/ contains main.py."],
             Arc::clone(&requests),
         )),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -838,7 +979,8 @@ fn seeded_list_dir_blocks_post_listing_search_code() {
             "[search_code: main]",        // model attempts search after listing
             "sandbox/ contains main.py.", // correction causes re-generation
         ])),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(
@@ -874,7 +1016,8 @@ fn seeded_list_dir_blocks_post_listing_read_file() {
             "[read_file: sandbox/main.py]", // model attempts read after listing
             "sandbox/ contains main.py.",   // correction causes re-generation
         ])),
-        default_registry(project_root.as_path_buf()),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
     );
 
     let events = collect_events(

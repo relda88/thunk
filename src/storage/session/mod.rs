@@ -1,4 +1,4 @@
-mod schema;
+pub(crate) mod schema;
 mod store;
 mod types;
 

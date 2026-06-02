@@ -1,10 +1,11 @@
-use std::fs;
-use std::path::Path;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
-use super::context::ToolContext;
+use crate::runtime::{ProjectScope, ResolvedToolInput};
+
 use super::types::{
-    ExecutionKind, SearchMatch, SearchResultsOutput, ToolError, ToolInput, ToolOutput,
-    ToolRunResult, ToolSpec,
+    ExecutionKind, SearchMatch, SearchResultsOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
 use super::Tool;
 
@@ -23,8 +24,7 @@ const MAX_RESULTS_SHOWN: usize = 15;
 /// alphabetically late in the walk are then reached and promoted by the sort step.
 const MAX_LINES_COLLECTED_PER_FILE: usize = 3;
 
-/// Directory names that are always skipped during the recursive walk.
-const SKIP_DIRS: &[&str] = &["target", "node_modules", ".git", ".hg", "dist", "build"];
+use crate::dirs::DEFAULT_SKIP_DIRS;
 
 /// File extensions treated as text. Everything else is skipped as likely binary.
 const TEXT_EXTENSIONS: &[&str] = &[
@@ -60,12 +60,22 @@ const TEXT_EXTENSIONS: &[&str] = &[
 ];
 
 pub struct SearchCodeTool {
-    context: ToolContext,
+    root: PathBuf,
 }
 
 impl SearchCodeTool {
-    pub fn new(context: ToolContext) -> Self {
-        Self { context }
+    pub fn new(root: PathBuf) -> Self {
+        let root = root.canonicalize().unwrap_or(root);
+        #[cfg(target_os = "windows")]
+        let root = {
+            let s = root.to_string_lossy();
+            if s.starts_with(r"\\?\") {
+                PathBuf::from(&s[4..])
+            } else {
+                root
+            }
+        };
+        Self { root }
     }
 }
 
@@ -80,8 +90,8 @@ impl Tool for SearchCodeTool {
         }
     }
 
-    fn run(&self, input: &ToolInput) -> Result<ToolRunResult, ToolError> {
-        let ToolInput::SearchCode { query, path } = input else {
+    fn run(&self, input: &ResolvedToolInput) -> Result<ToolRunResult, ToolError> {
+        let ResolvedToolInput::SearchCode { query, scope } = input else {
             return Err(ToolError::InvalidInput(
                 "search_code received wrong input variant".into(),
             ));
@@ -93,14 +103,12 @@ impl Tool for SearchCodeTool {
             ));
         }
 
-        let root = match path.as_deref() {
-            Some(p) => self.context.resolve(p),
-            None => self.context.root.clone(),
-        };
-        let root = root.as_path();
+        let scope_root = scope
+            .as_ref()
+            .map(ProjectScope::absolute)
+            .unwrap_or(self.root.as_path());
 
-        let mut matches = Vec::new();
-        walk_and_search(root, query, &mut matches)?;
+        let matches = search_with_rg(self.root.as_path(), scope_root, query)?;
         let mut matches = sort_by_file_group_priority(matches, query);
 
         let total_matches = matches.len();
@@ -118,71 +126,151 @@ impl Tool for SearchCodeTool {
     }
 }
 
-fn walk_and_search(
-    dir: &Path,
+fn search_with_rg(
+    project_root: &Path,
+    scope_root: &Path,
     query: &str,
-    matches: &mut Vec<SearchMatch>,
-) -> Result<(), ToolError> {
-    if matches.len() >= MAX_COLLECT {
-        return Ok(());
+) -> Result<Vec<SearchMatch>, ToolError> {
+    let scope_prefix = project_relative_display(scope_root, project_root);
+    let mut command = Command::new("rg");
+    command
+        .current_dir(scope_root)
+        .arg("--fixed-strings")
+        .arg("--line-number")
+        .arg("--with-filename")
+        .arg("--no-heading")
+        .arg("--color")
+        .arg("never")
+        .arg("--hidden")
+        .arg("--no-ignore")
+        .arg("--max-count")
+        .arg(MAX_LINES_COLLECTED_PER_FILE.to_string())
+        .arg("--sort")
+        .arg("path");
+
+    for pattern in ripgrep_globs() {
+        command.arg("--glob").arg(pattern);
     }
 
-    let read = match fs::read_dir(dir) {
-        Ok(r) => r,
-        Err(_) => return Ok(()), // skip unreadable dirs silently
-    };
+    command
+        .arg("-e")
+        .arg(query)
+        .arg(".")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
-    let mut entries: Vec<_> = read.filter_map(|e| e.ok()).collect();
-    // Sort for deterministic ordering across platforms.
-    entries.sort_by_key(|e| e.file_name());
+    let mut child = command.spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ToolError::Io(std::io::Error::other("failed to capture ripgrep stdout")))?;
 
-    for entry in entries {
-        if matches.len() >= MAX_COLLECT {
+    let mut reader = BufReader::new(stdout);
+    let mut matches = Vec::new();
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line)?;
+        if read == 0 {
             break;
         }
-
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        if path.is_dir() {
-            if !name_str.starts_with('.') && !SKIP_DIRS.contains(&name_str.as_ref()) {
-                walk_and_search(&path, query, matches)?;
+        if let Some(search_match) = parse_rg_match_line(&line, scope_prefix.as_deref()) {
+            matches.push(search_match);
+            if matches.len() >= MAX_COLLECT {
+                let _ = child.kill();
+                break;
             }
-        } else if is_text_file(&path) {
-            search_in_file(&path, query, matches);
         }
     }
 
-    Ok(())
-}
+    drop(reader);
+    let hit_collect_cap = matches.len() >= MAX_COLLECT;
+    let output = child.wait_with_output()?;
 
-fn search_in_file(path: &Path, query: &str, matches: &mut Vec<SearchMatch>) {
-    let Ok(contents) = fs::read_to_string(path) else {
-        return; // skip binary or unreadable files silently
-    };
-
-    let mut from_this_file = 0;
-    for (idx, line) in contents.lines().enumerate() {
-        if matches.len() >= MAX_COLLECT || from_this_file >= MAX_LINES_COLLECTED_PER_FILE {
-            break;
-        }
-        if line.contains(query) {
-            matches.push(SearchMatch {
-                file: path.to_string_lossy().into_owned(),
-                line_number: idx + 1,
-                line: line.to_string(),
-            });
-            from_this_file += 1;
+    if !hit_collect_cap {
+        match output.status.code() {
+            Some(0) => {}
+            Some(1) => return Ok(Vec::new()),
+            _ => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let message = if stderr.is_empty() {
+                    format!("ripgrep search failed with status {}", output.status)
+                } else {
+                    format!("ripgrep search failed: {stderr}")
+                };
+                return Err(ToolError::Io(std::io::Error::other(message)));
+            }
         }
     }
+
+    matches.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then_with(|| a.line_number.cmp(&b.line_number))
+    });
+    Ok(matches)
 }
 
-fn is_text_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| TEXT_EXTENSIONS.contains(&ext))
-        .unwrap_or(false)
+fn project_relative_display(path: &Path, root: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    Some(
+        relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/"),
+    )
+}
+
+fn ripgrep_globs() -> Vec<String> {
+    let mut globs = Vec::new();
+
+    for ext in TEXT_EXTENSIONS {
+        globs.push(match *ext {
+            "gitignore" => "*.gitignore".to_string(),
+            _ => format!("*.{ext}"),
+        });
+    }
+
+    globs.push("!**/.*/**".to_string());
+
+    for dir in DEFAULT_SKIP_DIRS {
+        globs.push(format!("!**/{dir}/**"));
+    }
+
+    globs
+}
+
+fn parse_rg_match_line(raw: &str, scope_prefix: Option<&str>) -> Option<SearchMatch> {
+    let raw = raw.trim_end_matches(['\r', '\n']);
+    for (path_end, _) in raw.match_indices(':') {
+        let rest = &raw[path_end + 1..];
+        let Some(line_sep) = rest.find(':') else {
+            return None;
+        };
+        let line_number = &rest[..line_sep];
+        if !line_number.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
+        let relative_path = raw[..path_end].replace('\\', "/");
+        let relative_path = relative_path.trim_start_matches("./");
+        let file = match scope_prefix {
+            Some(prefix) if !prefix.is_empty() && prefix != "." => {
+                format!("{prefix}/{relative_path}")
+            }
+            _ => relative_path.to_string(),
+        };
+        let line = rest[line_sep + 1..].to_string();
+        return Some(SearchMatch {
+            file,
+            line_number: line_number.parse().ok()?,
+            line,
+        });
+    }
+
+    None
 }
 
 /// Groups matches by file and stable-sorts the groups so definition-containing source files
@@ -303,16 +391,30 @@ fn file_class_priority(path: &str) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use crate::runtime::{ProjectPath, ProjectScope};
     use std::fs;
     use tempfile::TempDir;
 
-    fn search(query: &str, path: &str) -> Result<ToolRunResult, ToolError> {
-        SearchCodeTool::new(ToolContext::new(PathBuf::from("."))).run(&ToolInput::SearchCode {
+    fn resolved_scope(root: &TempDir, relative: &str) -> ProjectScope {
+        let root_absolute = root.path().canonicalize().unwrap();
+        let absolute = if relative == "." {
+            root_absolute
+        } else {
+            root_absolute.join(relative)
+        };
+        let path = ProjectPath::from_trusted(absolute, relative.to_string());
+        ProjectScope::from_trusted_path(path)
+    }
+
+    fn search(
+        root: &TempDir,
+        query: &str,
+        scope: Option<&str>,
+    ) -> Result<ToolRunResult, ToolError> {
+        SearchCodeTool::new(root.path().to_path_buf()).run(&ResolvedToolInput::SearchCode {
             query: query.to_string(),
-            path: Some(path.to_string()),
+            scope: scope.map(|relative| resolved_scope(root, relative)),
         })
     }
 
@@ -321,14 +423,35 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join("lib.rs"), "fn foo() {}\nfn bar() {}\n").unwrap();
 
-        let out = search("fn foo", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "fn foo", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
 
         assert_eq!(sr.matches.len(), 1);
+        assert_eq!(sr.matches[0].file, "lib.rs");
         assert_eq!(sr.matches[0].line_number, 1);
         assert!(sr.matches[0].line.contains("fn foo"));
+    }
+
+    #[test]
+    fn fixed_string_search_matches_literal_text_not_regex_like_variants() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("task_service.py"),
+            "task.status = 'done'\ntaskXstatus = 'wrong'\n",
+        )
+        .unwrap();
+
+        let out = search(&tmp, "task.status", Some(".")).unwrap();
+        let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
+            panic!("expected Immediate(SearchResults)")
+        };
+
+        assert_eq!(sr.matches.len(), 1);
+        assert_eq!(sr.matches[0].file, "task_service.py");
+        assert_eq!(sr.matches[0].line_number, 1);
+        assert_eq!(sr.matches[0].line, "task.status = 'done'");
     }
 
     #[test]
@@ -339,7 +462,7 @@ mod tests {
         fs::write(target.join("output.rs"), "needle in target").unwrap();
         fs::write(tmp.path().join("main.rs"), "no match here").unwrap();
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -348,10 +471,11 @@ mod tests {
 
     #[test]
     fn returns_error_on_empty_query() {
-        let err = SearchCodeTool::new(ToolContext::new(PathBuf::from(".")))
-            .run(&ToolInput::SearchCode {
+        let root = TempDir::new().unwrap();
+        let err = SearchCodeTool::new(root.path().to_path_buf())
+            .run(&ResolvedToolInput::SearchCode {
                 query: "".into(),
-                path: None,
+                scope: None,
             })
             .unwrap_err();
         assert!(matches!(err, ToolError::InvalidInput(_)));
@@ -368,7 +492,7 @@ mod tests {
             fs::write(tmp.path().join(format!("file_{i}.rs")), content).unwrap();
         }
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -395,11 +519,37 @@ mod tests {
         fs::create_dir(&sub).unwrap();
         fs::write(sub.join("mod.rs"), "pub fn deep_fn() {}").unwrap();
 
-        let out = search("deep_fn", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "deep_fn", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
         assert_eq!(sr.matches.len(), 1);
+    }
+
+    #[test]
+    fn nested_match_paths_are_exact_project_relative_strings() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join("src").join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            nested.join("worker.rs"),
+            "pub fn worker() {}\nconst NEEDLE: &str = \"needle\";\n",
+        )
+        .unwrap();
+
+        let out = search(&tmp, "needle", Some(".")).unwrap();
+        let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
+            panic!("expected Immediate(SearchResults)")
+        };
+
+        let root_display = tmp.path().canonicalize().unwrap().display().to_string();
+        assert_eq!(sr.matches.len(), 1);
+        assert_eq!(sr.matches[0].file, "src/nested/worker.rs");
+        assert!(
+            !sr.matches[0].file.contains(&root_display),
+            "search match path must not contain absolute root: {}",
+            sr.matches[0].file
+        );
     }
 
     #[test]
@@ -409,7 +559,7 @@ mod tests {
         fs::write(tmp.path().join("README.md"), "needle in docs").unwrap();
         fs::write(tmp.path().join("lib.rs"), "fn needle() {}").unwrap();
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -433,7 +583,7 @@ mod tests {
         fs::write(tmp.path().join("Cargo.toml"), "needle = true").unwrap();
         fs::write(tmp.path().join("lib.rs"), "fn needle() {}").unwrap();
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -458,7 +608,7 @@ mod tests {
         fs::write(tmp.path().join("a.rs"), "fn needle() {}").unwrap();
         fs::write(tmp.path().join("b.rs"), "fn needle() {}").unwrap();
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -478,7 +628,7 @@ mod tests {
         fs::write(tmp.path().join("README.md"), "needle in readme").unwrap();
         fs::write(tmp.path().join("NOTES.md"), "needle in notes").unwrap();
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -567,7 +717,7 @@ mod tests {
         fs::write(tmp.path().join("alpha.py"), "class TaskStatus:\n    pass\n").unwrap();
         fs::write(tmp.path().join("omega.py"), "class Task:\n    pass\n").unwrap();
 
-        let out = search("Task", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "Task", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -592,7 +742,7 @@ mod tests {
         // omega.py alphabetically later; has a definition line
         fs::write(tmp.path().join("omega.py"), "class Task:\n    pass\n").unwrap();
 
-        let out = search("Task", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "Task", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -612,7 +762,7 @@ mod tests {
         fs::write(tmp.path().join("alpha.py"), "x = Task()\n").unwrap();
         fs::write(tmp.path().join("beta.py"), "y = Task.run()\n").unwrap();
 
-        let out = search("Task", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "Task", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -633,7 +783,7 @@ mod tests {
         // config tier, happens to contain a definition-keyword line ("fn = ...")
         fs::write(tmp.path().join("beta.toml"), "fn = \"needle\"\n").unwrap();
 
-        let out = search("needle", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "needle", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -668,7 +818,7 @@ mod tests {
         // zzz.py: the definition — alphabetically last, must survive the cap via sort promotion
         fs::write(tmp.path().join("zzz.py"), "class Task:\n    pass\n").unwrap();
 
-        let out = search("Task", tmp.path().to_str().unwrap()).unwrap();
+        let out = search(&tmp, "Task", Some(".")).unwrap();
         let ToolRunResult::Immediate(ToolOutput::SearchResults(sr)) = out else {
             panic!("expected Immediate(SearchResults)")
         };
@@ -688,5 +838,27 @@ mod tests {
             zzz_count, 1,
             "definition match must be within the shown cap"
         );
+    }
+
+    #[test]
+    fn backslash_separators_in_rg_output_are_normalized_to_forward_slashes() {
+        let m = parse_rg_match_line("sandbox\\models\\task.py:10:def foo()", None)
+            .expect("should parse");
+        assert_eq!(m.file, "sandbox/models/task.py");
+        assert_eq!(m.line_number, 10);
+    }
+
+    #[test]
+    fn windows_dotslash_prefix_with_backslashes_and_scope_prefix_produces_correct_path() {
+        // On Windows, rg outputs .\-prefixed backslash paths when run inside a scoped
+        // directory. The backslash normalization must happen before ./ stripping so the
+        // .\\ prefix is converted to ./ before trim_start_matches sees it.
+        let m = parse_rg_match_line(
+            ".\\init_validation\\z_init_target.py:1:def foo()",
+            Some("sandbox"),
+        )
+        .expect("should parse");
+        assert_eq!(m.file, "sandbox/init_validation/z_init_target.py");
+        assert_eq!(m.line_number, 1);
     }
 }

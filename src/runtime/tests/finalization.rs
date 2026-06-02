@@ -1,5 +1,25 @@
 use super::*;
+use crate::core::config::Config;
+use crate::llm::backend::GenerateRequest;
 use crate::runtime::types::RuntimeTerminalReason;
+use crate::tools::default_registry;
+use std::sync::{Arc, Mutex};
+
+fn make_runtime_in_with_recorded_requests(
+    responses: Vec<impl Into<String>>,
+    root: &std::path::Path,
+) -> (Runtime, Arc<Mutex<Vec<GenerateRequest>>>) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let project_root = ProjectRoot::new(root.to_path_buf()).unwrap();
+    let runtime = Runtime::new(
+        &Config::default(),
+        project_root.clone(),
+        Box::new(RecordingBackend::new(responses, Arc::clone(&requests))),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+    );
+    (runtime, requests)
+}
 
 #[test]
 fn definition_lookup_extra_tool_after_evidence_ready_enters_answer_only_mode() {
@@ -109,7 +129,6 @@ fn initialization_recovery_extra_tool_after_evidence_ready_enters_answer_only_mo
         vec![
             "[search_code: logging]",
             "[read_file: sandbox/services/logging_usage.py]",
-            "[read_file: sandbox/services/logging_init.py]",
             "[read_file: sandbox/services/logging_usage.py]",
             final_answer,
         ],
@@ -138,10 +157,6 @@ fn initialization_recovery_extra_tool_after_evidence_ready_enters_answer_only_mo
         all_user.matches("=== tool_result: read_file ===").count(),
         2,
         "only the wrong first read and accepted recovery read should dispatch"
-    );
-    assert!(
-        all_user.contains("This is an initialization lookup"),
-        "initialization recovery must still be issued before evidence is ready"
     );
     assert!(
         all_user.contains("Evidence is already ready"),
@@ -258,60 +273,159 @@ fn repeated_post_evidence_tool_use_terminates_before_search_budget_failure() {
     );
 }
 
-// Phase 11.2.1 — Runtime Turn Finalization (Stage 1)
-
+// Slice 16.3.1 — Read-Set Answer Guard
 #[test]
-fn direct_read_blocks_post_read_tool_call_with_answer_phase_correction() {
-    // Non-investigation direct read: after read_file succeeds, answer_phase = true.
-    // A subsequent tool call must be blocked. The model then produces the final answer.
+fn answer_citing_unread_path_triggers_insufficient_evidence() {
     use std::fs;
     use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
-    fs::write(tmp.path().join("foo.rs"), "fn foo() {}\n").unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/router.rs"),
+        "pub fn route_request() {}\n",
+    )
+    .unwrap();
+    // handlers.rs does NOT define route_request, so it is never a search candidate.
+    // The guard must not dispatch a read for a non-candidate path — instead it injects
+    // a text correction, then InsufficientEvidence on the second hallucination.
+    fs::write(
+        tmp.path().join("src/handlers.rs"),
+        "pub fn handle_request() {}\n",
+    )
+    .unwrap();
 
-    let final_answer = "foo.rs defines a single function.";
-    let mut rt = make_runtime_in(vec!["[search_code: foo]", final_answer], tmp.path());
+    // Model: search → read one candidate (evidence ready) → answer citing the unread
+    // non-candidate twice. First rejection triggers a text-only retry; second is terminal.
+    let hallucinated = "route_request is defined in src/handlers.rs.";
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: route_request]",
+            "[read_file: src/router.rs]",
+            hallucinated, // attempt 1 — guard rejects, retry issued (no tool dispatch)
+            hallucinated, // attempt 2 — guard rejects, terminal
+        ],
+        tmp.path(),
+    );
 
     let events = collect_events(
         &mut rt,
         RuntimeRequest::Submit {
-            text: "read foo.rs".into(),
+            text: "Where is route_request defined in src/".into(),
         },
     );
 
-    assert!(!has_failed(&events), "must not fail: {events:?}");
+    assert!(
+        !has_failed(&events),
+        "guard must terminate cleanly: {events:?}"
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "answer citing unread path must terminate with InsufficientEvidence: {answer_source:?}"
+    );
 
     let snapshot = rt.messages_snapshot();
-    let all_user: String = snapshot
-        .iter()
-        .filter(|m| m.role == crate::llm::backend::Role::User)
-        .map(|m| m.content.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    assert_eq!(
-        all_user.matches("=== tool_result: read_file ===").count(),
-        1,
-        "read_file must have executed exactly once"
-    );
-    assert_eq!(
-        all_user.matches("=== tool_result: search_code ===").count(),
-        0,
-        "search_code after read must be blocked by answer_phase gate"
-    );
-    assert!(
-        all_user.contains("[runtime:correction]") && all_user.contains("already read this turn"),
-        "answer_phase correction must be injected after blocked search"
-    );
-
     let last_assistant = snapshot
         .iter()
         .rev()
         .find(|m| m.role == crate::llm::backend::Role::Assistant)
         .map(|m| m.content.as_str());
-    assert_eq!(last_assistant, Some(final_answer));
+    assert!(
+        !matches!(last_assistant, Some(s) if s.contains("route_request is defined in src/handlers.rs")),
+        "hallucinated sentence must not be emitted as final answer: {last_assistant:?}"
+    );
 }
+
+// Phase 18.2 — Answer-Guard Retry on EvidenceReady: recovery success
+#[test]
+fn answer_guard_retry_succeeds_when_second_answer_is_correct() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/router.rs"),
+        "pub fn route_request() {}\n",
+    )
+    .unwrap();
+    // handlers.rs is also a search candidate (contains the query term).
+    fs::write(
+        tmp.path().join("src/handlers.rs"),
+        "pub fn route_request() {}\n",
+    )
+    .unwrap();
+
+    // Model: search → read router.rs (evidence ready) → first answer cites the unread
+    // handlers.rs (guard rejects, retry issued, no tool dispatch) → second answer cites
+    // only the read file (passes guard) → ToolAssisted.
+    let hallucinated = "route_request is defined in src/handlers.rs.";
+    let correct = "route_request is defined in src/router.rs.";
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: route_request]",
+            "[read_file: src/router.rs]",
+            hallucinated, // attempt 1 — guard rejects, retry issued
+            correct,      // attempt 2 — cites only the read file, admitted
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is route_request defined in src/".into(),
+        },
+    );
+
+    assert!(
+        !has_failed(&events),
+        "retry must not produce a runtime failure: {events:?}"
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "correct second answer must be admitted as ToolAssisted: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert!(
+        matches!(last_assistant, Some(s) if s.contains("src/router.rs")),
+        "correct answer must be the final assistant message: {last_assistant:?}"
+    );
+    assert!(
+        !matches!(last_assistant, Some(s) if s.contains("src/handlers.rs")),
+        "hallucinated sentence must not survive into the final answer: {last_assistant:?}"
+    );
+}
+
+// Phase 11.2.1 — Runtime Turn Finalization (Stage 1)
 
 #[test]
 fn general_retrieval_blocks_post_read_search_with_answer_phase_correction() {
@@ -379,23 +493,27 @@ fn general_retrieval_blocks_post_read_search_with_answer_phase_correction() {
     assert_eq!(last_assistant, Some(final_answer));
 }
 
+// ── Regression: Fix 1 ─────────────────────────────────────────────────────────
+// When a seeded direct read succeeds, the runtime must finalize immediately with
+// the file contents rather than entering post-read answer-phase synthesis.
 #[test]
-fn repeated_tool_after_answer_phase_terminates_before_search_budget_failure() {
-    // Non-investigation: after read, answer_phase = true.
-    // First post-read tool call → answer_phase correction.
-    // Second post-read tool call → RepeatedToolAfterAnswerPhase terminal.
+fn direct_read_finalizes_immediately_with_file_contents() {
     use std::fs;
     use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
-    fs::write(tmp.path().join("bar.rs"), "fn bar() {}\n").unwrap();
+    fs::create_dir_all(tmp.path().join("sandbox")).unwrap();
+    fs::write(
+        tmp.path().join("sandbox/main.py"),
+        "def main():\n    return 'ok'\n",
+    )
+    .unwrap();
 
-    let mut rt = make_runtime_in(
+    let (mut rt, requests) = make_runtime_in_with_recorded_requests(
         vec![
-            "[read_file: bar.rs]",
-            "[search_code: bar]",
-            "[search_code: bar]",
-            "This response must not be consumed.",
+            "[read_file: sandbox/main.py]",
+            "[search_code: main]",
+            "This must not be consumed.",
         ],
         tmp.path(),
     );
@@ -403,7 +521,211 @@ fn repeated_tool_after_answer_phase_terminates_before_search_budget_failure() {
     let events = collect_events(
         &mut rt,
         RuntimeRequest::Submit {
-            text: "read bar.rs".into(),
+            text: "Read sandbox/main.py".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must terminate cleanly: {events:?}");
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::ToolAssisted { rounds: 1 })
+        ),
+        "direct read must finalize as a single tool-assisted turn: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+
+    // The fallback must contain the actual file content, not a failure message.
+    assert!(
+        matches!(last_assistant, Some(s) if s.contains("def main()")),
+        "fallback answer must contain file contents: {last_assistant:?}"
+    );
+    for forbidden in [
+        "=== tool_result",
+        "=== /tool_result",
+        "=== end_tool_result",
+        "[tool_result:",
+        "[/tool_result]",
+    ] {
+        assert!(
+            !matches!(last_assistant, Some(s) if s.contains(forbidden)),
+            "fallback answer must not contain protocol wrapper `{forbidden}`: {last_assistant:?}"
+        );
+    }
+    assert!(
+        !matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::RepeatedToolAfterAnswerPhase,
+                ..
+            })
+        ),
+        "direct read must not end as RepeatedToolAfterAnswerPhase: {answer_source:?}"
+    );
+    assert!(
+        requests.lock().unwrap().is_empty(),
+        "direct read must not perform any model generation"
+    );
+}
+
+// ── Regression: Fix 2 ─────────────────────────────────────────────────────────
+// When the model emits a block opening tag without the matching close tag
+// (e.g. `[write_file] path: foo ---content--- bar`), the runtime must detect it
+// as malformed and inject a correction rather than accepting it as a direct answer.
+#[test]
+fn malformed_write_open_without_close_triggers_correction() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("test.txt"), "hello world\n").unwrap();
+
+    // First response: malformed block (open tag, inline content, no close tag).
+    // Second response: proper tool call after correction.
+    let malformed = "[write_file] path: test.txt\n---content---\nhello thunk";
+    let proper_call = "[write_file]\npath: test.txt\n---content---\nhello thunk\n[/write_file]";
+    let mut rt = make_runtime_in(vec![malformed, proper_call], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Update test.txt by replacing hello world with hello thunk".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must not fail: {events:?}");
+
+    let snapshot = rt.messages_snapshot();
+    let all_user: String = snapshot
+        .iter()
+        .filter(|m| m.role == crate::llm::backend::Role::User)
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // The malformed block must trigger the specialized write_file correction, not the generic one.
+    assert!(
+        all_user.contains("[runtime:correction]")
+            && all_user.contains("write_file block is malformed"),
+        "runtime must inject specialized write_file correction for open-without-close: {all_user}"
+    );
+
+    // The malformed string must NOT appear verbatim as an assistant message.
+    let assistant_messages: Vec<&str> = snapshot
+        .iter()
+        .filter(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str())
+        .collect();
+    assert!(
+        !assistant_messages
+            .iter()
+            .any(|m| m.contains("[write_file] path: test.txt")),
+        "malformed tool syntax must never surface as a final answer: {assistant_messages:?}"
+    );
+}
+
+#[test]
+fn repeated_malformed_write_syntax_terminals_deterministically() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("test.txt"), "hello world\n").unwrap();
+
+    let malformed = "[write_file] path: test.txt\n---content---\nhello thunk";
+    let mut rt = make_runtime_in(
+        vec![
+            malformed,
+            malformed,
+            "This response should not be consumed.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Update test.txt by replacing hello world with hello thunk".into(),
+        },
+    );
+
+    assert!(
+        !has_failed(&events),
+        "repeated malformed tool syntax must terminate cleanly: {events:?}"
+    );
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::RepeatedMalformedToolSyntax,
+                ..
+            })
+        ),
+        "second malformed block must use a deterministic runtime terminal: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let assistant_messages: Vec<&str> = snapshot
+        .iter()
+        .filter(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str())
+        .collect();
+    assert!(
+        !assistant_messages
+            .iter()
+            .any(|m| m.contains("[write_file] path: test.txt")),
+        "malformed write syntax must not surface as a final assistant answer: {assistant_messages:?}"
+    );
+    let last_assistant = assistant_messages.last().copied();
+    assert!(
+        matches!(last_assistant, Some(s) if s.contains("malformed tool block syntax")),
+        "last assistant message must be the runtime malformed-syntax terminal: {last_assistant:?}"
+    );
+}
+
+// ── Regression: Fix 3 ─────────────────────────────────────────────────────────
+// When the resolver rejects a mutation tool call (path escapes project root),
+// the runtime must terminate immediately with MutationFailed rather than
+// continuing into more tool rounds (e.g. falling back to search_code).
+#[test]
+fn mutation_resolver_failure_terminates_immediately() {
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+
+    // Model tries to write outside the project root, then would search if allowed to continue.
+    let outside_write = format!(
+        "[write_file]\npath: {}/outside.txt\n---content---\nhello\n[/write_file]",
+        tmp.path().parent().unwrap().display()
+    );
+    let would_search = "[search_code: hello]".to_string();
+    let mut rt = make_runtime_in(vec![outside_write, would_search], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Write /tmp/outside.txt with content hello".into(),
         },
     );
 
@@ -420,11 +742,11 @@ fn repeated_tool_after_answer_phase_terminates_before_search_budget_failure() {
         matches!(
             answer_source,
             Some(AnswerSource::RuntimeTerminal {
-                reason: RuntimeTerminalReason::RepeatedToolAfterAnswerPhase,
+                reason: RuntimeTerminalReason::MutationFailed,
                 ..
             })
         ),
-        "second post-read tool attempt must use RepeatedToolAfterAnswerPhase: {answer_source:?}"
+        "resolver-rejected mutation must terminate with MutationFailed: {answer_source:?}"
     );
 
     let snapshot = rt.messages_snapshot();
@@ -434,24 +756,143 @@ fn repeated_tool_after_answer_phase_terminates_before_search_budget_failure() {
         .map(|m| m.content.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-
     assert_eq!(
         all_user.matches("=== tool_result: search_code ===").count(),
         0,
-        "post-read search_code attempts must not dispatch"
+        "runtime must not fall back into retrieval after a mutation resolver failure"
     );
-    assert!(
-        all_user.contains("[runtime:correction]") && all_user.contains("already read this turn"),
-        "first post-read tool attempt must receive answer_phase correction"
+}
+
+#[test]
+fn usage_lookup_definition_only_reads_produce_insufficient_evidence() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("widget.rs"), "fn target_fn() {}\n").unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: target_fn]",
+            "[read_file: widget.rs]",
+            "target_fn is defined in widget.rs.",
+        ],
+        tmp.path(),
     );
 
-    let last_assistant = snapshot
-        .iter()
-        .rev()
-        .find(|m| m.role == crate::llm::backend::Role::Assistant)
-        .map(|m| m.content.as_str());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is target_fn used?".into(),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+
     assert!(
-        matches!(last_assistant, Some(s) if s.contains("model kept calling tools after the file was already read")),
-        "last assistant must be the repeated-answer-phase terminal: {last_assistant:?}"
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "UsageLookup with definition-only reads must produce InsufficientEvidence, got: {answer_source:?}"
+    );
+}
+
+#[test]
+fn usage_lookup_dispatches_definition_site_candidate_after_usage_exhausted() {
+    // Scenario: broad UsageLookup with two pure-usage callers (target=2) plus one
+    // mixed file that is a definition_site_candidate but NOT definition_only_candidate
+    // (it has both a definition line and a usage line for the queried symbol).
+    // The two callers rank higher by non_definition_match_count and are dispatched
+    // first. After they are exhausted (count=2=target), the runtime should dispatch
+    // the definition_site file via first_definition_site_candidate. Gate 1 must NOT
+    // fire for this dispatch because the file is not definition_only.
+    use crate::runtime::types::RuntimeEvent;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    // caller_a.rs: three usage lines → highest non_def_count, preferred candidate
+    fs::write(
+        tmp.path().join("caller_a.rs"),
+        "target_fn();\ntarget_fn();\ntarget_fn();\n",
+    )
+    .unwrap();
+    // caller_b.rs: two usage lines → second-highest non_def_count, next candidate
+    fs::write(
+        tmp.path().join("caller_b.rs"),
+        "target_fn();\ntarget_fn();\n",
+    )
+    .unwrap();
+    // impl.rs: one definition line + one usage line → definition_site (not def_only),
+    // non_def_count=1 so ranks below both callers and is not dispatched as a usage
+    // candidate. The new code should dispatch it after usage candidates are exhausted.
+    fs::write(
+        tmp.path().join("impl.rs"),
+        "pub fn target_fn() { init(); }\ntarget_fn();\n",
+    )
+    .unwrap();
+
+    let final_answer = "target_fn is defined in impl.rs and called in caller_a.rs and caller_b.rs.";
+    let mut rt = make_runtime_in(vec!["[search_code: target_fn]", final_answer], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is target_fn used?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must terminate cleanly: {events:?}");
+
+    let successful_reads: Vec<_> = events
+        .iter()
+        .filter_map(|e| {
+            if let RuntimeEvent::ToolCallFinished {
+                name,
+                summary: Some(s),
+            } = e
+            {
+                if name == "read_file" {
+                    return Some(s.as_str());
+                }
+            }
+            None
+        })
+        .collect();
+
+    assert!(
+        successful_reads.iter().any(|s| s.contains("caller_a.rs")),
+        "preferred usage candidate must be read: {events:?}"
+    );
+    assert!(
+        successful_reads.iter().any(|s| s.contains("caller_b.rs")),
+        "second usage candidate must be read: {events:?}"
+    );
+    assert!(
+        successful_reads.iter().any(|s| s.contains("impl.rs")),
+        "definition_site candidate must be dispatched after usage exhausted: {events:?}"
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "turn must complete with a model answer after all reads: {answer_source:?}"
     );
 }

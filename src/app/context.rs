@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use crate::logging::SessionLog;
 use crate::runtime::{ProjectRoot, Runtime, RuntimeEvent, RuntimeRequest};
+use crate::storage::session::SessionMeta;
 use crate::tools::ToolRegistry;
 
 use super::config::Config;
@@ -94,7 +95,9 @@ impl AppContext {
         self.log = log;
 
         if should_save {
-            self.session.save(&self.runtime.messages_snapshot())?;
+            let anchors = self.runtime.anchors_snapshot();
+            self.session
+                .save(&self.runtime.messages_snapshot(), anchors)?;
         }
         Ok(())
     }
@@ -107,7 +110,19 @@ impl AppContext {
         Ok(())
     }
 
-    /// Initializes the AppContext by building a Runtime and loading the session history.
+    /// Returns metadata for all sessions belonging to the current project, newest first.
+    pub fn list_sessions(&self) -> Result<Vec<SessionMeta>> {
+        self.session.list_for_project()
+    }
+
+    /// Deletes all sessions for the current project, resets the runtime, and starts fresh.
+    /// The TUI handles its own message-list clearing separately.
+    pub fn clear_sessions(&mut self) -> Result<()> {
+        self.runtime.handle(RuntimeRequest::Reset, &mut |_| {});
+        self.session.clear_for_project()
+    }
+
+    /// Initializes the AppContext by building a Runtime and loading the session history and anchors.
     pub fn build(
         config: &Config,
         project_root: ProjectRoot,
@@ -115,11 +130,21 @@ impl AppContext {
         registry: ToolRegistry,
         session: ActiveSession,
         history: Vec<crate::llm::backend::Message>,
+        anchors: (Option<String>, Option<String>, Option<String>),
         log: Option<SessionLog>,
+        db_path: Option<&std::path::Path>,
+        thunk_md: Option<String>,
     ) -> Result<Self> {
-        let mut runtime = Runtime::new(config, project_root, backend, registry);
+        let mut runtime = Runtime::new(config, project_root, backend, registry, thunk_md);
+        if let Some(path) = db_path {
+            runtime = runtime.with_symbol_store(path);
+        }
         if !history.is_empty() {
             runtime.load_history(history);
+        }
+        let (lrf, lsq, lss) = anchors;
+        if lrf.is_some() || lsq.is_some() {
+            runtime.restore_anchors(lrf, lsq, lss);
         }
         Ok(Self {
             runtime,
@@ -141,17 +166,40 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::QueryHistory => "query_history",
         RuntimeRequest::ReadFile { .. } => "read_file",
         RuntimeRequest::SearchCode { .. } => "search_code",
+        RuntimeRequest::Undo => "undo",
+        RuntimeRequest::ProvidersList => "providers_list",
+        RuntimeRequest::ProvidersUse { .. } => "providers_use",
+        RuntimeRequest::GitBranch => "git_branch",
+        RuntimeRequest::GitStatus => "git_status",
+        RuntimeRequest::GitDiff => "git_diff",
+        RuntimeRequest::GitLog => "git_log",
+        RuntimeRequest::ListDir { .. } => "list_dir",
+        RuntimeRequest::LspStatus => "lsp_status",
+        RuntimeRequest::IndexBuild { .. } => "index_build",
+        RuntimeRequest::IndexStatus => "index_status",
+        RuntimeRequest::ContextStats => "context_stats",
+        RuntimeRequest::Compact => "compact",
+        RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",
+        RuntimeRequest::VerifyMutationToggle { .. } => "verify_mutation_toggle",
+        RuntimeRequest::TransactionStatus => "transaction_status",
     }
 }
 
 /// Labels for events that are not already handled with timing in handle().
 fn event_label(event: &RuntimeEvent) -> Option<String> {
     match event {
-        RuntimeEvent::ActivityChanged(a) => Some(format!("activity: {}", a.label())),
+        RuntimeEvent::ActivityChanged(a) => Some(format!("activity: {}", a.clone().label())),
         RuntimeEvent::AnswerReady(source) => Some(format!("answer ready: {source:?}")),
         RuntimeEvent::Failed { message } => Some(format!("failed: {message}")),
-        RuntimeEvent::ApprovalRequired(p) => Some(format!("approval required: {}", p.summary)),
+        RuntimeEvent::ApprovalRequired { pending: p, .. } => {
+            Some(format!("approval required: {}", p.summary))
+        }
+        RuntimeEvent::TransactionApprovalRequired { actions, .. } => Some(format!(
+            "transaction approval required: {} action(s)",
+            actions.len()
+        )),
         RuntimeEvent::InfoMessage(text) => Some(format!("info: {text}")),
+        RuntimeEvent::SystemMessage(text) => Some(format!("system: {text}")),
         // Handled with timing in handle():
         RuntimeEvent::AssistantMessageStarted
         | RuntimeEvent::AssistantMessageFinished
@@ -159,6 +207,11 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         | RuntimeEvent::ToolCallFinished { .. }
         | RuntimeEvent::AssistantMessageChunk(_)
         | RuntimeEvent::BackendTiming { .. }
-        | RuntimeEvent::RuntimeTrace(_) => None,
+        | RuntimeEvent::BackendTokenCounts { .. }
+        | RuntimeEvent::RuntimeTrace(_)
+        | RuntimeEvent::PromptAssembled(_)
+        | RuntimeEvent::FileReadFinished { .. }
+        | RuntimeEvent::DirectReadCompleted
+        | RuntimeEvent::ContextUsage { .. } => None,
     }
 }

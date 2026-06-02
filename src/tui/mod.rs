@@ -1,8 +1,14 @@
 mod app;
+pub(crate) mod collapsible;
 pub mod commands;
+mod cursor;
+mod events;
+mod format;
 mod input;
-mod render;
+mod keybindings;
+mod renderer;
 mod state;
+mod worker;
 
 use std::io::{self, IsTerminal};
 
@@ -19,10 +25,10 @@ use crossterm::{
 use crate::app::config::Config;
 use crate::app::context::AppContext;
 use crate::app::paths::AppPaths;
-use crate::app::{AppError, Result};
+use crate::core::error::{AppError, Result};
 
 /// Main entry point for the TUI, handling terminal setup and teardown
-pub fn run(config: &Config, paths: &AppPaths, mut app: AppContext) -> Result<()> {
+pub fn run(config: &Config, paths: &AppPaths, app: AppContext) -> Result<()> {
     if !io::stdout().is_terminal() {
         return Err(AppError::Tui(
             "The TUI requires an interactive terminal (stdout is not a TTY).".to_string(),
@@ -48,7 +54,7 @@ pub fn run(config: &Config, paths: &AppPaths, mut app: AppContext) -> Result<()>
     )?;
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        app::run_app(&mut stdout, config, paths, &mut app)
+        app::run_app(&mut stdout, config, paths, app)
     }));
 
     disable_raw_mode()?;

@@ -80,7 +80,7 @@ fn mutating_tool_is_blocked_on_informational_turn() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired(_))),
+            .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. })),
         "read-only informational turn must not create a pending mutation"
     );
     assert!(
@@ -161,19 +161,11 @@ fn initialization_lookup_non_initialization_read_triggers_recovery() {
     );
 
     let snapshot = rt.messages_snapshot();
-    let canonical_root = std::fs::canonicalize(tmp.path()).unwrap();
-    let expected_recovery_path = canonical_root
-        .join("services")
-        .join("logging_setup.py")
-        .to_string_lossy()
-        .into_owned();
     assert!(
-        snapshot.iter().any(|m| {
-            m.content.contains("This is an initialization lookup")
-                && m.content
-                    .contains(&format!("[read_file: {expected_recovery_path}]"))
-        }),
-        "runtime must inject bounded initialization recovery"
+        snapshot
+            .iter()
+            .any(|m| m.content.contains("basicConfig")),
+        "runtime must dispatch recovery read of the initialization file (logging_setup.py content must appear in conversation)"
     );
     let last_assistant = snapshot
         .iter()
@@ -183,6 +175,61 @@ fn initialization_lookup_non_initialization_read_triggers_recovery() {
     assert_eq!(
         last_assistant,
         Some("Logging is initialized in services/logging_setup.py.")
+    );
+}
+
+#[test]
+fn edit_search_not_found_emits_answer_ready_with_read_hint() {
+    use crate::runtime::types::RuntimeTerminalReason;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("target.txt"), "fn existing() {}\n").unwrap();
+
+    // Model emits an edit_file where the search text is not present in the file.
+    let bad_edit = "[edit_file]\npath: target.txt\n---search---\nNOT_PRESENT_TEXT\n---replace---\nfixed\n[/edit_file]";
+    let mut rt = make_runtime_in(vec![bad_edit], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            // "modify" triggers mutation_allowed but not simple_edit seeding.
+            text: "modify target.txt to fix the function".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must not emit Failed: {events:?}");
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::MutationFailed,
+                ..
+            })
+        ),
+        "expected RuntimeTerminal(MutationFailed), got: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert!(
+        last_assistant
+            .map(|s| s.contains("Read the file first"))
+            .unwrap_or(false),
+        "answer must instruct the model to read the file first: {last_assistant:?}"
     );
 }
 

@@ -7,9 +7,13 @@ pub type SessionId = String;
 #[derive(Debug, Clone)]
 pub struct SessionMeta {
     pub id: SessionId,
+    pub project_root: Option<String>,
     pub created_at: u64,
     pub updated_at: u64,
     pub message_count: usize,
+    pub last_read_file: Option<String>,
+    pub last_search_query: Option<String>,
+    pub last_search_scope: Option<String>,
 }
 
 /// A single message as stored on disk. Uses String for role to stay decoupled from the

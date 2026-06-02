@@ -4,17 +4,17 @@ fmt:
 check:
     cargo check --all-targets
 
-test:
-    cargo test
-
 clippy:
     cargo clippy --all-targets
+
+test:
+    cargo test --no-default-features
 
 verify:
     cargo fmt --all --check
     cargo check --all-targets
     cargo clippy --all-targets
-    cargo test
+    cargo test --no-default-features
 
 run:
     cargo run --release
@@ -28,3 +28,9 @@ fresh:
 trace-fresh:
     just fresh
     just trace
+
+install:
+    cargo install --path .
+
+clean-logs:
+    rm -f logs/*

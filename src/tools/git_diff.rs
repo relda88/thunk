@@ -1,23 +1,35 @@
 use std::io::{self, Read};
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 
-use super::context::ToolContext;
-use super::types::{
-    ExecutionKind, GitDiffOutput, ToolError, ToolInput, ToolOutput, ToolRunResult, ToolSpec,
-};
+use crate::runtime::ResolvedToolInput;
+
+use super::types::{ExecutionKind, GitDiffOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec};
 use super::Tool;
 
 const MAX_GIT_DIFF_STDOUT_BYTES: usize = 128 * 1024;
 const MAX_GIT_DIFF_STDERR_BYTES: usize = 8 * 1024;
 
 pub struct GitDiffTool {
-    context: ToolContext,
+    root: PathBuf,
 }
 
 impl GitDiffTool {
-    pub fn new(context: ToolContext) -> Self {
-        Self { context }
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+
+    fn run_diff(&self) -> Result<ToolRunResult, ToolError> {
+        let output = run_bounded_git_diff(&self.root)?;
+
+        if !output.status.success() {
+            return Err(git_diff_error(&output.stderr.bytes));
+        }
+
+        Ok(ToolRunResult::Immediate(ToolOutput::GitDiff(
+            git_diff_output(output.stdout),
+        )))
     }
 }
 
@@ -32,22 +44,14 @@ impl Tool for GitDiffTool {
         }
     }
 
-    fn run(&self, input: &ToolInput) -> Result<ToolRunResult, ToolError> {
-        let ToolInput::GitDiff = input else {
+    fn run(&self, input: &ResolvedToolInput) -> Result<ToolRunResult, ToolError> {
+        let ResolvedToolInput::GitDiff { .. } = input else {
             return Err(ToolError::InvalidInput(
                 "git_diff received wrong input variant".into(),
             ));
         };
 
-        let output = run_bounded_git_diff(&self.context.root)?;
-
-        if !output.status.success() {
-            return Err(git_diff_error(&output.stderr.bytes));
-        }
-
-        Ok(ToolRunResult::Immediate(ToolOutput::GitDiff(
-            git_diff_output(output.stdout),
-        )))
+        self.run_diff()
     }
 }
 
@@ -210,12 +214,12 @@ mod tests {
     }
 
     fn run_diff(path: &Path) -> Result<ToolRunResult, ToolError> {
-        GitDiffTool::new(ToolContext::new(PathBuf::from(path))).run(&ToolInput::GitDiff)
+        GitDiffTool::new(PathBuf::from(path)).run(&ResolvedToolInput::GitDiff { path: None })
     }
 
     #[test]
     fn spec_is_immediate() {
-        let tool = GitDiffTool::new(ToolContext::new(PathBuf::from(".")));
+        let tool = GitDiffTool::new(PathBuf::from("."));
         let spec = tool.spec();
         assert_eq!(spec.name, "git_diff");
         assert_eq!(spec.execution_kind, ExecutionKind::Immediate);
@@ -226,9 +230,11 @@ mod tests {
     fn default_registry_dispatches_git_diff() {
         let tmp = TempDir::new().unwrap();
         init_git_repo(tmp.path());
-        let registry = crate::tools::default_registry(tmp.path().to_path_buf());
+        let registry = crate::tools::default_registry().with_project_root(tmp.path().to_path_buf());
 
-        let out = registry.dispatch(ToolInput::GitDiff).unwrap();
+        let out = registry
+            .dispatch(crate::runtime::ResolvedToolInput::GitDiff { path: None })
+            .unwrap();
         assert!(matches!(
             out,
             ToolRunResult::Immediate(ToolOutput::GitDiff(_))

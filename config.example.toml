@@ -27,6 +27,24 @@ base_url = "https://api.openai.com/v1"
 max_tokens = 512
 temperature = 0.2
 
+[ollama]
+model = "qwen2.5-coder:1.5b"
+base_url = "http://localhost:11434"
+max_tokens = 512
+temperature = 0.2
+
+[openrouter]
+model = "anthropic/claude-3-haiku"
+base_url = "https://openrouter.ai/api/v1"
+max_tokens = 512
+temperature = 0.2
+
+[groq]
+model = "llama-3.1-8b-instant"
+base_url = "https://api.groq.com/openai/v1"
+max_tokens = 512
+temperature = 0.2
+
 # Custom command definitions
 [commands.find_def]
 tool = "search_code"
@@ -35,3 +53,12 @@ args = { query = "{input}" }
 [commands.show]
 tool = "read_file"
 args = { path = "{input}" }
+
+[project]
+test_command = "cargo test"
+
+[lsp]
+enabled = true
+
+[prompt_physics]
+enabled = true

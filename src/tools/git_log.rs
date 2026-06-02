@@ -1,11 +1,12 @@
 use std::io::{self, Read};
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 
-use super::context::ToolContext;
+use crate::runtime::ResolvedToolInput;
+
 use super::types::{
-    ExecutionKind, GitLogEntry, GitLogOutput, ToolError, ToolInput, ToolOutput, ToolRunResult,
-    ToolSpec,
+    ExecutionKind, GitLogEntry, GitLogOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
 use super::Tool;
 
@@ -17,34 +18,16 @@ const MAX_GIT_LOG_STDERR_BYTES: usize = 8 * 1024;
 const GIT_LOG_FORMAT: &str = "%H%x1f%h%x1f%ad%x1f%an%x1f%s%x1e";
 
 pub struct GitLogTool {
-    context: ToolContext,
+    root: PathBuf,
 }
 
 impl GitLogTool {
-    pub fn new(context: ToolContext) -> Self {
-        Self { context }
-    }
-}
-
-impl Tool for GitLogTool {
-    fn spec(&self) -> ToolSpec {
-        ToolSpec {
-            name: "git_log",
-            description: "Show read-only recent git commit history for the project.",
-            input_hint: "",
-            execution_kind: ExecutionKind::Immediate,
-            default_risk: None,
-        }
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
     }
 
-    fn run(&self, input: &ToolInput) -> Result<ToolRunResult, ToolError> {
-        let ToolInput::GitLog = input else {
-            return Err(ToolError::InvalidInput(
-                "git_log received wrong input variant".into(),
-            ));
-        };
-
-        let output = run_bounded_git_log(&self.context.root)?;
+    fn run_log(&self) -> Result<ToolRunResult, ToolError> {
+        let output = run_bounded_git_log(&self.root)?;
 
         if !output.status.success() {
             if is_empty_repo_log_error(&output.stderr.bytes) {
@@ -59,6 +42,28 @@ impl Tool for GitLogTool {
         Ok(ToolRunResult::Immediate(ToolOutput::GitLog(
             parse_git_log_output(&stdout, output.stdout.truncated),
         )))
+    }
+}
+
+impl Tool for GitLogTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "git_log",
+            description: "Show read-only recent git commit history for the project.",
+            input_hint: "",
+            execution_kind: ExecutionKind::Immediate,
+            default_risk: None,
+        }
+    }
+
+    fn run(&self, input: &ResolvedToolInput) -> Result<ToolRunResult, ToolError> {
+        let ResolvedToolInput::GitLog = input else {
+            return Err(ToolError::InvalidInput(
+                "git_log received wrong input variant".into(),
+            ));
+        };
+
+        self.run_log()
     }
 }
 
@@ -299,12 +304,12 @@ mod tests {
     }
 
     fn run_log(path: &Path) -> Result<ToolRunResult, ToolError> {
-        GitLogTool::new(ToolContext::new(PathBuf::from(path))).run(&ToolInput::GitLog)
+        GitLogTool::new(PathBuf::from(path)).run(&ResolvedToolInput::GitLog)
     }
 
     #[test]
     fn spec_is_immediate() {
-        let tool = GitLogTool::new(ToolContext::new(PathBuf::from(".")));
+        let tool = GitLogTool::new(PathBuf::from("."));
         let spec = tool.spec();
         assert_eq!(spec.name, "git_log");
         assert_eq!(spec.execution_kind, ExecutionKind::Immediate);
@@ -315,9 +320,11 @@ mod tests {
     fn default_registry_dispatches_git_log() {
         let tmp = TempDir::new().unwrap();
         init_git_repo(tmp.path());
-        let registry = crate::tools::default_registry(tmp.path().to_path_buf());
+        let registry = crate::tools::default_registry().with_project_root(tmp.path().to_path_buf());
 
-        let out = registry.dispatch(ToolInput::GitLog).unwrap();
+        let out = registry
+            .dispatch(crate::runtime::ResolvedToolInput::GitLog)
+            .unwrap();
         assert!(matches!(
             out,
             ToolRunResult::Immediate(ToolOutput::GitLog(_))

@@ -1,19 +1,21 @@
 use std::fs;
 
-use super::context::ToolContext;
+use crate::dirs::DEFAULT_SKIP_DIRS;
+use crate::runtime::ResolvedToolInput;
+
 use super::types::{
-    DirEntry, DirectoryListingOutput, EntryKind, ExecutionKind, ToolError, ToolInput, ToolOutput,
+    DirEntry, DirectoryListingOutput, EntryKind, ExecutionKind, ToolError, ToolOutput,
     ToolRunResult, ToolSpec,
 };
 use super::Tool;
 
-pub struct ListDirTool {
-    context: ToolContext,
-}
+const MAX_ENTRIES: usize = 200;
+
+pub struct ListDirTool;
 
 impl ListDirTool {
-    pub fn new(context: ToolContext) -> Self {
-        Self { context }
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -28,15 +30,14 @@ impl Tool for ListDirTool {
         }
     }
 
-    fn run(&self, input: &ToolInput) -> Result<ToolRunResult, ToolError> {
-        let ToolInput::ListDir { path } = input else {
+    fn run(&self, input: &ResolvedToolInput) -> Result<ToolRunResult, ToolError> {
+        let ResolvedToolInput::ListDir { path } = input else {
             return Err(ToolError::InvalidInput(
                 "list_dir received wrong input variant".into(),
             ));
         };
 
-        let dir = self.context.resolve(path);
-        let read = fs::read_dir(&dir)?;
+        let read = fs::read_dir(path.absolute())?;
 
         let mut entries: Vec<DirEntry> = read
             .filter_map(|entry| entry.ok())
@@ -60,6 +61,7 @@ impl Tool for ListDirTool {
                     size_bytes,
                 }
             })
+            .filter(|e| !(e.kind == EntryKind::Dir && DEFAULT_SKIP_DIRS.contains(&e.name.as_str())))
             .collect();
 
         // Directories first, then files; alphabetical within each group.
@@ -69,10 +71,18 @@ impl Tool for ListDirTool {
             b_is_dir.cmp(&a_is_dir).then_with(|| a.name.cmp(&b.name))
         });
 
+        let total_entries = entries.len();
+        let truncated = total_entries > MAX_ENTRIES;
+        if truncated {
+            entries.truncate(MAX_ENTRIES);
+        }
+
         Ok(ToolRunResult::Immediate(ToolOutput::DirectoryListing(
             DirectoryListingOutput {
-                path: dir.to_string_lossy().into_owned(),
+                path: path.display().to_string(),
                 entries,
+                truncated,
+                total_entries,
             },
         )))
     }
@@ -80,29 +90,40 @@ impl Tool for ListDirTool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use crate::runtime::{ProjectPath, ProjectScope};
     use std::fs;
     use tempfile::TempDir;
 
-    fn list(path: &str) -> Result<ToolRunResult, ToolError> {
-        ListDirTool::new(ToolContext::new(PathBuf::from("."))).run(&ToolInput::ListDir {
-            path: path.to_string(),
+    fn resolved_scope(root: &TempDir, relative: &str) -> ProjectScope {
+        let root_absolute = root.path().canonicalize().unwrap();
+        let absolute = if relative == "." {
+            root_absolute
+        } else {
+            root_absolute.join(relative)
+        };
+        let path = ProjectPath::from_trusted(absolute, relative.to_string());
+        ProjectScope::from_trusted_path(path)
+    }
+
+    fn list(root: &TempDir, relative: &str) -> Result<ToolRunResult, ToolError> {
+        ListDirTool::new().run(&ResolvedToolInput::ListDir {
+            path: resolved_scope(root, relative),
         })
     }
 
     #[test]
     fn lists_files_and_dirs() {
-        let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("a.rs"), "").unwrap();
-        fs::create_dir(tmp.path().join("subdir")).unwrap();
+        let root = TempDir::new().unwrap();
+        fs::write(root.path().join("a.rs"), "").unwrap();
+        fs::create_dir(root.path().join("subdir")).unwrap();
 
-        let result = list(tmp.path().to_str().unwrap()).unwrap();
+        let result = list(&root, ".").unwrap();
         let ToolRunResult::Immediate(ToolOutput::DirectoryListing(dl)) = result else {
             panic!("expected Immediate(DirectoryListing)")
         };
 
+        assert_eq!(dl.path, ".");
         assert_eq!(dl.entries.len(), 2);
         // Directories come first
         assert_eq!(dl.entries[0].name, "subdir");
@@ -113,7 +134,84 @@ mod tests {
 
     #[test]
     fn returns_io_error_for_missing_dir() {
-        let err = list("/nonexistent/path/dir").unwrap_err();
+        let root = TempDir::new().unwrap();
+        let err = list(&root, "missing").unwrap_err();
         assert!(matches!(err, ToolError::Io(_)));
+    }
+
+    #[test]
+    fn small_directory_returns_full_output() {
+        let root = TempDir::new().unwrap();
+        for i in 0..10 {
+            fs::write(root.path().join(format!("file{i}.txt")), "").unwrap();
+        }
+
+        let result = list(&root, ".").unwrap();
+        let ToolRunResult::Immediate(ToolOutput::DirectoryListing(dl)) = result else {
+            panic!("expected Immediate(DirectoryListing)")
+        };
+
+        assert_eq!(dl.entries.len(), 10);
+        assert_eq!(dl.total_entries, 10);
+        assert!(!dl.truncated);
+    }
+
+    #[test]
+    fn large_directory_is_capped_at_max_entries() {
+        let root = TempDir::new().unwrap();
+        for i in 0..=MAX_ENTRIES {
+            fs::write(root.path().join(format!("file{i:04}.txt")), "").unwrap();
+        }
+
+        let result = list(&root, ".").unwrap();
+        let ToolRunResult::Immediate(ToolOutput::DirectoryListing(dl)) = result else {
+            panic!("expected Immediate(DirectoryListing)")
+        };
+
+        assert!(dl.truncated);
+        assert_eq!(dl.entries.len(), MAX_ENTRIES);
+        assert_eq!(dl.total_entries, MAX_ENTRIES + 1);
+    }
+
+    #[test]
+    fn skips_noisy_directories() {
+        let root = TempDir::new().unwrap();
+        fs::create_dir(root.path().join("node_modules")).unwrap();
+        fs::create_dir(root.path().join("target")).unwrap();
+        fs::create_dir(root.path().join("src")).unwrap();
+        fs::write(root.path().join("Cargo.toml"), "").unwrap();
+
+        let result = list(&root, ".").unwrap();
+        let ToolRunResult::Immediate(ToolOutput::DirectoryListing(dl)) = result else {
+            panic!("expected Immediate(DirectoryListing)")
+        };
+
+        let names: Vec<&str> = dl.entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"src"));
+        assert!(names.contains(&"Cargo.toml"));
+        assert!(!names.contains(&"node_modules"));
+        assert!(!names.contains(&"target"));
+    }
+
+    #[test]
+    fn capped_output_is_deterministic() {
+        let root = TempDir::new().unwrap();
+        for i in 0..=MAX_ENTRIES {
+            fs::write(root.path().join(format!("file{i:04}.txt")), "").unwrap();
+        }
+
+        let r1 = list(&root, ".").unwrap();
+        let r2 = list(&root, ".").unwrap();
+
+        let ToolRunResult::Immediate(ToolOutput::DirectoryListing(dl1)) = r1 else {
+            panic!()
+        };
+        let ToolRunResult::Immediate(ToolOutput::DirectoryListing(dl2)) = r2 else {
+            panic!()
+        };
+
+        let names1: Vec<&str> = dl1.entries.iter().map(|e| e.name.as_str()).collect();
+        let names2: Vec<&str> = dl2.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names1, names2);
     }
 }

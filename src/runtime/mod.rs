@@ -1,25 +1,26 @@
-mod anchors;
 mod conversation;
-mod engine;
-mod generation;
+mod index;
 mod investigation;
+pub(crate) mod lsp;
+mod orchestration;
 mod paths;
-mod project_root;
-mod prompt;
-mod prompt_analysis;
-mod response_text;
+pub(crate) mod project;
+mod protocol;
 #[cfg(test)]
 mod scenarios;
-mod search_query;
 #[cfg(test)]
 mod tests;
-mod tool_codec;
-mod tool_round;
-mod tool_surface;
 mod trace;
 mod types;
 
 pub use crate::tools::{PendingAction, RiskLevel};
-pub use engine::Runtime;
-pub use project_root::{ProjectRoot, ProjectRootError};
+pub(crate) use index::{
+    extract_symbols, ExtractedSymbol, ImportEdge, SymbolConfidence, SymbolKind,
+};
+pub use orchestration::Runtime;
+pub use project::ResolvedToolInput;
+#[allow(unused_imports)]
+pub use project::{resolve, PathResolutionError};
+pub use project::{ProjectPath, ProjectScope};
+pub use project::{ProjectRoot, ProjectRootError};
 pub use types::{AnswerSource, RuntimeEvent, RuntimeRequest};
