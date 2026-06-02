@@ -20,9 +20,14 @@ pub fn primacy_anchor_block(config: &PromptPhysicsConfig) -> Option<String> {
     Some(format!("[project rules]\n{content}\n[/project rules]\n"))
 }
 
-#[allow(dead_code)]
-pub fn periodic_refresh_message(_config: &PromptPhysicsConfig) -> Option<String> {
-    None
+pub fn periodic_refresh_message(config: &PromptPhysicsConfig) -> Option<String> {
+    if !config.enabled {
+        return None;
+    }
+    Some(
+        "You are thunk. The runtime owns control flow. Emit tool calls in exact wire format only."
+            .to_string(),
+    )
 }
 
 #[allow(dead_code)]
@@ -50,6 +55,25 @@ mod tests {
             thunk_md: None,
         };
         assert!(primacy_anchor_block(&config).is_none());
+    }
+
+    #[test]
+    fn periodic_refresh_none_when_disabled() {
+        let config = PromptPhysicsConfig {
+            enabled: false,
+            thunk_md: None,
+        };
+        assert!(periodic_refresh_message(&config).is_none());
+    }
+
+    #[test]
+    fn periodic_refresh_some_when_enabled() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            thunk_md: None,
+        };
+        let result = periodic_refresh_message(&config).unwrap();
+        assert!(result.contains("runtime owns control flow"));
     }
 
     #[test]

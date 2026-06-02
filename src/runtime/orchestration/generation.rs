@@ -5,6 +5,7 @@ use super::super::conversation::Conversation;
 use super::super::investigation::investigation::InvestigationMode;
 use super::super::investigation::tool_surface::ToolSurface;
 use super::super::protocol::prompt;
+use super::super::protocol::prompt_physics::{self, PromptPhysicsConfig};
 use super::super::types::{Activity, RuntimeEvent};
 
 /// Runs a single generation turn: sends the current conversation to the backend,
@@ -17,6 +18,7 @@ pub(super) fn run_generate_turn(
     tool_surface: ToolSurface,
     project_snapshot_hint: Option<&str>,
     investigation_mode: InvestigationMode,
+    prompt_physics: &PromptPhysicsConfig,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
     let mut messages = conversation.pruned_snapshot();
@@ -28,6 +30,9 @@ pub(super) fn run_generate_turn(
     )));
     if let Some(hint) = project_snapshot_hint {
         messages.push(Message::system(hint.to_string()));
+    }
+    if let Some(refresh) = prompt_physics::periodic_refresh_message(prompt_physics) {
+        messages.push(Message::system(refresh));
     }
     let request = GenerateRequest::new(messages);
     let mut response = String::new();

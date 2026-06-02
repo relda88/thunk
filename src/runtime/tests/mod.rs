@@ -23,6 +23,7 @@ mod investigation_inline;
 mod investigation_modes;
 mod path_scope;
 mod project_snapshot;
+mod prompt_physics;
 mod read_bounds;
 mod search_budget;
 mod search_guardrails;

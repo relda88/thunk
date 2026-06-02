@@ -155,6 +155,11 @@ impl Runtime {
         self
     }
 
+    pub fn with_prompt_physics_enabled(mut self) -> Self {
+        self.prompt_physics.enabled = true;
+        self
+    }
+
     /// Returns a snapshot of all current conversation messages for persistence.
     pub fn messages_snapshot(&self) -> Vec<crate::llm::backend::Message> {
         self.conversation.snapshot()
@@ -647,6 +652,7 @@ impl Runtime {
                         effective_surface,
                         project_snapshot_hint.as_deref(),
                         ctx.investigation_mode,
+                        &self.prompt_physics,
                         &mut perf_on_event,
                     ) {
                         Ok(Some(r)) => r,
