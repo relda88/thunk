@@ -1,27 +1,16 @@
-mod edit_file;
-mod git_branch;
-mod git_branch_create;
-mod git_branch_switch;
-mod git_commit;
-mod git_diff;
-mod git_diff_staged;
-mod git_log;
-mod git_status;
-mod list_dir;
+pub mod core;
+pub mod git;
 mod pending;
-mod read_file;
 mod registry;
-mod search_code;
-mod shell;
+pub mod search;
 pub mod types;
-mod write_file;
 
 use crate::runtime::ResolvedToolInput;
 
-use list_dir::ListDirTool;
-use read_file::ReadFileTool;
+use core::ListDirTool;
+use core::ReadFileTool;
 
-pub use git_diff::GitDiffTool;
+pub use git::GitDiffTool;
 pub use pending::{PendingAction, PendingApprovalStage, PendingTransaction, RiskLevel};
 pub use registry::ToolRegistry;
 pub use types::{

@@ -5,8 +5,10 @@ use std::thread;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::types::{ExecutionKind, GitDiffOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec};
-use super::Tool;
+use crate::tools::types::{
+    ExecutionKind, GitDiffOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
+};
+use crate::tools::Tool;
 
 const MAX_GIT_DIFF_STDOUT_BYTES: usize = 128 * 1024;
 const MAX_GIT_DIFF_STDERR_BYTES: usize = 8 * 1024;

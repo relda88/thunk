@@ -5,10 +5,10 @@ use std::thread;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::types::{
+use crate::tools::types::{
     ExecutionKind, GitStatusEntry, GitStatusOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 const MAX_STATUS_ENTRIES: usize = 100;
 const MAX_STATUS_PATH_CHARS: usize = 240;

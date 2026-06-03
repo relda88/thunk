@@ -5,11 +5,11 @@ use std::thread;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::pending::{PendingAction, RiskLevel};
-use super::types::{
+use crate::tools::pending::{PendingAction, RiskLevel};
+use crate::tools::types::{
     ExecutionKind, GitCommitOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 const MAX_GIT_COMMIT_STDOUT_BYTES: usize = 16 * 1024;
 const MAX_GIT_COMMIT_STDERR_BYTES: usize = 8 * 1024;

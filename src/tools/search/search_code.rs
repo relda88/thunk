@@ -4,10 +4,10 @@ use std::process::{Command, Stdio};
 
 use crate::runtime::{ProjectScope, ResolvedToolInput};
 
-use super::types::{
+use crate::tools::types::{
     ExecutionKind, SearchMatch, SearchResultsOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 /// Internal upper bound on how many matches the walk collects.
 /// Kept at 50 so total_matches is accurate up to that count without full-walk cost.

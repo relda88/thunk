@@ -5,47 +5,31 @@ use std::thread;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::pending::{PendingAction, RiskLevel};
-use super::types::{
-    ExecutionKind, GitBranchCreateOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
+use crate::tools::pending::{PendingAction, RiskLevel};
+use crate::tools::types::{
+    ExecutionKind, GitBranchSwitchOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
-const MAX_GIT_BRANCH_CREATE_STDOUT_BYTES: usize = 16 * 1024;
-const MAX_GIT_BRANCH_CREATE_STDERR_BYTES: usize = 4 * 1024;
+const MAX_GIT_BRANCH_SWITCH_STDOUT_BYTES: usize = 16 * 1024;
+const MAX_GIT_BRANCH_SWITCH_STDERR_BYTES: usize = 4 * 1024;
 
-// Payload separator: null byte cannot appear in branch names or ref names.
-const SEP: char = '\x00';
-
-pub struct GitBranchCreateTool {
+pub struct GitBranchSwitchTool {
     root: PathBuf,
 }
 
-impl GitBranchCreateTool {
+impl GitBranchSwitchTool {
     pub fn new(root: PathBuf) -> Self {
         Self { root }
     }
 }
 
-fn encode_payload(name: &str, start_point: Option<&str>) -> String {
-    format!("{}{SEP}{}", name, start_point.unwrap_or(""))
-}
-
-fn decode_payload(payload: &str) -> Option<(String, Option<String>)> {
-    let mut parts = payload.splitn(2, SEP);
-    let name = parts.next()?.to_string();
-    if name.is_empty() {
-        return None;
-    }
-    let start_point = parts.next().filter(|s| !s.is_empty()).map(String::from);
-    Some((name, start_point))
-}
-
-impl Tool for GitBranchCreateTool {
+impl Tool for GitBranchSwitchTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
-            name: "git_branch_create",
-            description: "Create a new local git branch. Requires approval before executing.",
+            name: "git_branch_switch",
+            description:
+                "Switch to an existing local git branch. Requires approval before executing.",
             input_hint: "",
             execution_kind: ExecutionKind::RequiresApproval,
             default_risk: Some(RiskLevel::Medium),
@@ -53,68 +37,77 @@ impl Tool for GitBranchCreateTool {
     }
 
     fn run(&self, input: &ResolvedToolInput) -> Result<ToolRunResult, ToolError> {
-        let ResolvedToolInput::GitBranchCreate { name, start_point } = input else {
+        let ResolvedToolInput::GitBranchSwitch { name } = input else {
             return Err(ToolError::InvalidInput(
-                "git_branch_create received wrong input variant".into(),
+                "git_branch_switch received wrong input variant".into(),
             ));
         };
 
         if name.trim().is_empty() {
             return Err(ToolError::InvalidInput(
-                "git_branch_create: branch name must not be empty".into(),
+                "git_branch_switch: branch name must not be empty".into(),
             ));
         }
 
-        let summary = match start_point.as_deref() {
-            Some(sp) => format!("create branch {name} from {sp}"),
-            None => format!("create branch {name}"),
-        };
-
         Ok(ToolRunResult::Approval(PendingAction {
-            tool_name: "git_branch_create".to_string(),
-            summary,
+            tool_name: "git_branch_switch".to_string(),
+            summary: format!("switch to branch {name}"),
             risk: RiskLevel::Medium,
-            payload: encode_payload(name, start_point.as_deref()),
+            payload: name.clone(),
         }))
     }
 
     fn execute_approved(&self, payload: &str) -> Result<ToolOutput, ToolError> {
-        let (name, start_point) = decode_payload(payload)
-            .ok_or_else(|| ToolError::InvalidInput("malformed git_branch_create payload".into()))?;
+        let name = payload;
+        if name.trim().is_empty() {
+            return Err(ToolError::InvalidInput(
+                "git_branch_switch: branch name must not be empty".into(),
+            ));
+        }
 
-        // Revalidation: verify branch does not already exist.
+        // Revalidation: verify branch exists before switching.
         let list_output = run_bounded_git_command(
             &self.root,
-            &["branch", "--list", &name],
-            MAX_GIT_BRANCH_CREATE_STDOUT_BYTES,
-            MAX_GIT_BRANCH_CREATE_STDERR_BYTES,
+            &["branch", "--list", name],
+            MAX_GIT_BRANCH_SWITCH_STDOUT_BYTES,
+            MAX_GIT_BRANCH_SWITCH_STDERR_BYTES,
         )?;
         let list_stdout = String::from_utf8_lossy(&list_output.stdout.bytes);
-        if !list_stdout.trim().is_empty() {
+        if list_stdout.trim().is_empty() {
             return Err(ToolError::InvalidInput(format!(
-                "git_branch_create failed: branch '{name}' already exists"
+                "git_branch_switch failed: branch '{name}' not found"
             )));
         }
 
-        let mut args = vec!["branch", name.as_str()];
-        if let Some(ref sp) = start_point {
-            args.push(sp.as_str());
-        }
-
-        let output = run_bounded_git_command(
+        // Capture current branch before switching for the output record.
+        let current_output = run_bounded_git_command(
             &self.root,
-            &args,
-            MAX_GIT_BRANCH_CREATE_STDOUT_BYTES,
-            MAX_GIT_BRANCH_CREATE_STDERR_BYTES,
+            &["branch", "--show-current"],
+            MAX_GIT_BRANCH_SWITCH_STDOUT_BYTES,
+            MAX_GIT_BRANCH_SWITCH_STDERR_BYTES,
         )?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr.bytes);
+        let from = String::from_utf8_lossy(&current_output.stdout.bytes)
+            .trim()
+            .to_string();
+
+        // Use git checkout for Git < 2.23 compatibility.
+        let checkout_output = run_bounded_git_command(
+            &self.root,
+            &["checkout", name],
+            MAX_GIT_BRANCH_SWITCH_STDOUT_BYTES,
+            MAX_GIT_BRANCH_SWITCH_STDERR_BYTES,
+        )?;
+        if !checkout_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_output.stderr.bytes);
             return Err(ToolError::InvalidInput(format!(
-                "git branch failed: {stderr}"
+                "git checkout failed: {stderr}"
             )));
         }
 
-        Ok(ToolOutput::GitBranchCreate(GitBranchCreateOutput { name }))
+        Ok(ToolOutput::GitBranchSwitch(GitBranchSwitchOutput {
+            from,
+            to: name.to_string(),
+        }))
     }
 }
 
@@ -203,12 +196,12 @@ fn join_capture(
 }
 
 fn output_capture_error() -> ToolError {
-    ToolError::InvalidInput("git_branch_create failed: output capture failed".into())
+    ToolError::InvalidInput("git_branch_switch failed: output capture failed".into())
 }
 
 fn git_command_error(error: io::Error) -> ToolError {
     if error.kind() == io::ErrorKind::NotFound {
-        ToolError::InvalidInput("git_branch_create failed: git executable unavailable".into())
+        ToolError::InvalidInput("git_branch_switch failed: git executable unavailable".into())
     } else {
         ToolError::Io(error)
     }
@@ -263,35 +256,19 @@ mod tests {
         );
     }
 
-    fn branch_exists(path: &Path, name: &str) -> bool {
+    fn current_branch(path: &Path) -> String {
         let output = Command::new("git")
-            .args(["branch", "--list", name])
+            .args(["branch", "--show-current"])
             .current_dir(path)
             .output()
             .unwrap();
-        !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
-    fn run_create(
-        path: &Path,
-        name: &str,
-        start_point: Option<&str>,
-    ) -> Result<ToolRunResult, ToolError> {
-        GitBranchCreateTool::new(PathBuf::from(path)).run(&ResolvedToolInput::GitBranchCreate {
+    fn approve_switch(path: &Path, name: &str) -> Result<ToolOutput, ToolError> {
+        let tool = GitBranchSwitchTool::new(PathBuf::from(path));
+        let result = tool.run(&ResolvedToolInput::GitBranchSwitch {
             name: name.to_string(),
-            start_point: start_point.map(String::from),
-        })
-    }
-
-    fn approve_create(
-        path: &Path,
-        name: &str,
-        start_point: Option<&str>,
-    ) -> Result<ToolOutput, ToolError> {
-        let tool = GitBranchCreateTool::new(PathBuf::from(path));
-        let result = tool.run(&ResolvedToolInput::GitBranchCreate {
-            name: name.to_string(),
-            start_point: start_point.map(String::from),
         })?;
         let ToolRunResult::Approval(pending) = result else {
             panic!("expected Approval");
@@ -301,79 +278,65 @@ mod tests {
 
     #[test]
     fn spec_requires_approval() {
-        let tool = GitBranchCreateTool::new(PathBuf::from("."));
+        let tool = GitBranchSwitchTool::new(PathBuf::from("."));
         let spec = tool.spec();
-        assert_eq!(spec.name, "git_branch_create");
+        assert_eq!(spec.name, "git_branch_switch");
         assert_eq!(spec.execution_kind, ExecutionKind::RequiresApproval);
         assert_eq!(spec.default_risk, Some(RiskLevel::Medium));
     }
 
     #[test]
     fn run_returns_approval_with_correct_fields() {
-        let tmp = TempDir::new().unwrap();
-        init_git_repo(tmp.path());
-        commit_file(tmp.path(), "a.txt", "a\n");
-
-        let result = run_create(tmp.path(), "feat/test", None).unwrap();
+        let result = GitBranchSwitchTool::new(PathBuf::from("."))
+            .run(&ResolvedToolInput::GitBranchSwitch {
+                name: "main".to_string(),
+            })
+            .unwrap();
         let ToolRunResult::Approval(pending) = result else {
             panic!("expected Approval");
         };
-        assert_eq!(pending.tool_name, "git_branch_create");
+        assert_eq!(pending.tool_name, "git_branch_switch");
         assert_eq!(pending.risk, RiskLevel::Medium);
-        assert!(pending.summary.contains("feat/test"));
+        assert!(pending.summary.contains("main"));
+        assert_eq!(pending.payload, "main");
     }
 
     #[test]
-    fn creates_branch() {
+    fn switches_branch() {
         let tmp = TempDir::new().unwrap();
         init_git_repo(tmp.path());
         commit_file(tmp.path(), "a.txt", "a\n");
+        git(tmp.path(), &["branch", "feature"]);
 
-        let out = approve_create(tmp.path(), "feat/test", None).unwrap();
-        let ToolOutput::GitBranchCreate(o) = out else {
-            panic!("expected GitBranchCreate");
+        let starting = current_branch(tmp.path());
+        let out = approve_switch(tmp.path(), "feature").unwrap();
+        let ToolOutput::GitBranchSwitch(o) = out else {
+            panic!("expected GitBranchSwitch");
         };
-        assert_eq!(o.name, "feat/test");
-        assert!(branch_exists(tmp.path(), "feat/test"));
+        assert_eq!(o.from, starting);
+        assert_eq!(o.to, "feature");
+        assert_eq!(current_branch(tmp.path()), "feature");
     }
 
     #[test]
-    fn rejects_existing_branch() {
+    fn rejects_missing_branch() {
         let tmp = TempDir::new().unwrap();
         init_git_repo(tmp.path());
         commit_file(tmp.path(), "a.txt", "a\n");
-        // Create the branch first
-        git(tmp.path(), &["branch", "existing"]);
 
-        let err = approve_create(tmp.path(), "existing", None).unwrap_err();
+        let err = approve_switch(tmp.path(), "nonexistent").unwrap_err();
         assert!(matches!(
             err,
-            ToolError::InvalidInput(ref msg) if msg.contains("already exists")
+            ToolError::InvalidInput(ref msg) if msg.contains("not found")
         ));
     }
 
     #[test]
-    fn rejects_empty_branch_name() {
-        let tmp = TempDir::new().unwrap();
-        init_git_repo(tmp.path());
-
-        let err = run_create(tmp.path(), "", None).unwrap_err();
-        assert!(matches!(err, ToolError::InvalidInput(_)));
-    }
-
-    #[test]
-    fn payload_roundtrip_with_start_point() {
-        let payload = encode_payload("feat/x", Some("main"));
-        let (name, sp) = decode_payload(&payload).unwrap();
-        assert_eq!(name, "feat/x");
-        assert_eq!(sp.as_deref(), Some("main"));
-    }
-
-    #[test]
-    fn payload_roundtrip_without_start_point() {
-        let payload = encode_payload("feat/x", None);
-        let (name, sp) = decode_payload(&payload).unwrap();
-        assert_eq!(name, "feat/x");
-        assert!(sp.is_none());
+    fn rejects_empty_name() {
+        let result =
+            GitBranchSwitchTool::new(PathBuf::from(".")).run(&ResolvedToolInput::GitBranchSwitch {
+                name: "".to_string(),
+            });
+        assert!(matches!(result.unwrap_err(), ToolError::InvalidInput(_)));
     }
 }

@@ -10,9 +10,11 @@ use std::time::Duration;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::pending::{PendingAction, RiskLevel};
-use super::types::{ExecutionKind, ShellOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec};
-use super::Tool;
+use crate::tools::pending::{PendingAction, RiskLevel};
+use crate::tools::types::{
+    ExecutionKind, ShellOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
+};
+use crate::tools::Tool;
 
 const OUTPUT_CAP_BYTES: usize = 8192;
 #[cfg(not(test))]

@@ -3,20 +3,14 @@ use std::path::PathBuf;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::edit_file::EditFileTool;
-use super::git_branch::GitBranchTool;
-use super::git_branch_create::GitBranchCreateTool;
-use super::git_branch_switch::GitBranchSwitchTool;
-use super::git_commit::GitCommitTool;
-use super::git_diff::GitDiffTool;
-use super::git_diff_staged::GitDiffStagedTool;
-use super::git_log::GitLogTool;
-use super::git_status::GitStatusTool;
+use super::core::{EditFileTool, ShellTool, WriteFileTool};
+use super::git::{
+    GitBranchCreateTool, GitBranchSwitchTool, GitBranchTool, GitCommitTool, GitDiffStagedTool,
+    GitDiffTool, GitLogTool, GitStatusTool,
+};
 use super::pending::PendingAction;
-use super::search_code::SearchCodeTool;
-use super::shell::ShellTool;
+use super::search::SearchCodeTool;
 use super::types::{ExecutionKind, ToolError, ToolOutput, ToolRunResult, ToolSpec};
-use super::write_file::WriteFileTool;
 use super::Tool;
 
 /// Owns all registered tools. Responsibilities: registration, spec enumeration, dispatch.
@@ -112,8 +106,8 @@ mod tests {
 
     use super::*;
     use crate::runtime::{ProjectPath, ProjectRoot, ProjectScope};
-    use crate::tools::list_dir::ListDirTool;
-    use crate::tools::read_file::ReadFileTool;
+    use crate::tools::core::ListDirTool;
+    use crate::tools::core::ReadFileTool;
     use crate::tools::types::{ToolOutput, ToolRunResult};
 
     fn resolved_root_path() -> ProjectPath {

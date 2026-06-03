@@ -5,10 +5,10 @@ use std::thread;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::types::{
+use crate::tools::types::{
     ExecutionKind, GitBranchOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 const MAX_GIT_BRANCH_STDOUT_BYTES: usize = 16 * 1024;
 const MAX_GIT_BRANCH_STDERR_BYTES: usize = 4 * 1024;

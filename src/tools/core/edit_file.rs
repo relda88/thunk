@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 
 use crate::runtime::{ProjectPath, ResolvedToolInput};
 
-use super::pending::{PendingAction, RiskLevel};
-use super::types::{EditFileOutput, ExecutionKind, ToolError, ToolOutput, ToolRunResult, ToolSpec};
-use super::Tool;
+use crate::tools::pending::{PendingAction, RiskLevel};
+use crate::tools::types::{
+    EditFileOutput, ExecutionKind, ToolError, ToolOutput, ToolRunResult, ToolSpec,
+};
+use crate::tools::Tool;
 
 pub struct EditFileTool {
     root: PathBuf,

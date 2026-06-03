@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 
 use crate::runtime::{ProjectPath, ResolvedToolInput};
 
-use super::pending::{PendingAction, RiskLevel};
-use super::types::{
+use crate::tools::pending::{PendingAction, RiskLevel};
+use crate::tools::types::{
     ExecutionKind, ToolError, ToolOutput, ToolRunResult, ToolSpec, WriteFileOutput,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 pub struct WriteFileTool {
     root: PathBuf,

@@ -5,10 +5,10 @@ use std::thread;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::types::{
+use crate::tools::types::{
     ExecutionKind, GitLogEntry, GitLogOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 const MAX_LOG_ENTRIES: usize = 20;
 const MAX_LOG_AUTHOR_CHARS: usize = 120;

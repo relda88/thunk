@@ -3,11 +3,11 @@ use std::fs;
 use crate::dirs::DEFAULT_SKIP_DIRS;
 use crate::runtime::ResolvedToolInput;
 
-use super::types::{
+use crate::tools::types::{
     DirEntry, DirectoryListingOutput, EntryKind, ExecutionKind, ToolError, ToolOutput,
     ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 const MAX_ENTRIES: usize = 200;
 

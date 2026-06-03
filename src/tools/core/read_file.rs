@@ -2,10 +2,10 @@ use std::fs;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::types::{
+use crate::tools::types::{
     ExecutionKind, FileContentsOutput, ToolError, ToolOutput, ToolRunResult, ToolSpec,
 };
-use super::Tool;
+use crate::tools::Tool;
 
 /// Maximum lines of file content injected into the conversation per read.
 /// Files with more lines are truncated; the metadata line reports total vs shown.
