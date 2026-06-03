@@ -822,6 +822,7 @@ impl Runtime {
             }
             Some("off") => {
                 self.active_skill = None;
+                self.prompt_physics.active_skill = None;
                 on_event(RuntimeEvent::SystemMessage("skill: cleared".into()));
             }
             Some("list") => {
@@ -835,6 +836,7 @@ impl Runtime {
                 Ok(content) => {
                     let name = content.name.clone();
                     self.active_skill = Some(content);
+                    self.prompt_physics.active_skill = self.active_skill.clone();
                     on_event(RuntimeEvent::SystemMessage(format!("skill: {name}")));
                 }
                 Err(e) => {

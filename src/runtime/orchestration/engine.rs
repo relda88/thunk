@@ -155,6 +155,7 @@ impl Runtime {
             enabled: config.prompt_physics.enabled,
             thunk_md,
             active_ability: None,
+            active_skill: None,
         };
         let system_prompt = prompt::build_system_prompt(
             &config.app.name,
@@ -555,6 +556,7 @@ impl Runtime {
                     self.active_ability = None;
                     self.prompt_physics.active_ability = None;
                     self.active_skill = None;
+                    self.prompt_physics.active_skill = None;
                     self.correction_attempts = 0;
                     self.project_snapshot_cache = ProjectStructureSnapshotCache::default();
                     self.handle_reset(on_event);

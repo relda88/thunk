@@ -1,10 +1,12 @@
 use super::abilities::AbilityContent;
+use super::skills::SkillContent;
 use crate::runtime::investigation::tool_surface::ToolSurface;
 
 pub struct PromptPhysicsConfig {
     pub enabled: bool,
     pub thunk_md: Option<String>,
     pub active_ability: Option<AbilityContent>,
+    pub active_skill: Option<SkillContent>,
 }
 
 impl Default for PromptPhysicsConfig {
@@ -13,6 +15,7 @@ impl Default for PromptPhysicsConfig {
             enabled: false,
             thunk_md: None,
             active_ability: None,
+            active_skill: None,
         }
     }
 }
@@ -46,10 +49,22 @@ pub fn periodic_refresh_message(config: &PromptPhysicsConfig) -> Option<String> 
     if !config.enabled {
         return None;
     }
-    Some(
-        "You are thunk. The runtime owns control flow. Emit tool calls in exact wire format only."
-            .to_string(),
-    )
+    let anchor =
+        "You are thunk. The runtime owns control flow. Emit tool calls in exact wire format only.";
+    let skill_line = config
+        .active_skill
+        .as_ref()
+        .map(|s| {
+            let instructions = s
+                .style_instructions
+                .split(". ")
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(". ");
+            format!("\nStyle: {instructions}")
+        })
+        .unwrap_or_default();
+    Some(format!("{anchor}{skill_line}"))
 }
 
 pub fn recency_field_message(config: &PromptPhysicsConfig, surface: ToolSurface) -> Option<String> {
@@ -213,6 +228,7 @@ mod tests {
                 invariants: "test invariants".into(),
                 ..Default::default()
             }),
+            ..Default::default()
         };
         let result = primacy_anchor_block(&config).unwrap();
         assert!(result.contains("[ability: debug]"));
@@ -230,6 +246,7 @@ mod tests {
                 invariants: "test invariants".into(),
                 ..Default::default()
             }),
+            ..Default::default()
         };
         let result = primacy_anchor_block(&config).unwrap();
         let rules_pos = result.find("[project rules]").unwrap();
@@ -250,6 +267,7 @@ mod tests {
                 invariants: "test invariants".into(),
                 ..Default::default()
             }),
+            ..Default::default()
         };
         assert!(primacy_anchor_block(&config).is_none());
     }
@@ -264,9 +282,88 @@ mod tests {
                 reasoning_effect: "test effect".into(),
                 ..Default::default()
             }),
+            ..Default::default()
         };
         let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
         assert!(result.contains("Ability (debug):"));
         assert!(result.contains("test effect"));
+    }
+
+    #[test]
+    fn periodic_refresh_with_active_skill() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            active_skill: Some(SkillContent {
+                name: "concise".into(),
+                style_instructions: "Answer directly. No padding.".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = periodic_refresh_message(&config).unwrap();
+        assert!(result.contains("Style:"));
+        assert!(result.contains("Answer directly"));
+    }
+
+    #[test]
+    fn periodic_refresh_skill_capped_at_three_sentences() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            active_skill: Some(SkillContent {
+                name: "verbose".into(),
+                style_instructions: "One. Two. Three. Four. Five.".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = periodic_refresh_message(&config).unwrap();
+        assert!(result.contains("One"));
+        assert!(result.contains("Two"));
+        assert!(result.contains("Three"));
+        assert!(
+            !result.contains("Four"),
+            "output must not include the fourth sentence"
+        );
+    }
+
+    #[test]
+    fn periodic_refresh_with_both_ability_and_skill() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            active_ability: Some(AbilityContent {
+                name: "debug".into(),
+                invariants: "test invariants".into(),
+                ..Default::default()
+            }),
+            active_skill: Some(SkillContent {
+                name: "concise".into(),
+                style_instructions: "Answer directly.".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = periodic_refresh_message(&config).unwrap();
+        assert!(
+            result.contains("Style:"),
+            "periodic refresh must carry skill"
+        );
+        assert!(
+            !result.contains("[ability:"),
+            "periodic refresh must not carry ability content"
+        );
+    }
+
+    #[test]
+    fn periodic_refresh_none_when_disabled_with_skill() {
+        let config = PromptPhysicsConfig {
+            enabled: false,
+            active_skill: Some(SkillContent {
+                name: "concise".into(),
+                style_instructions: "Answer directly.".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(periodic_refresh_message(&config).is_none());
     }
 }

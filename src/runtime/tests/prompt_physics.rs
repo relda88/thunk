@@ -211,3 +211,43 @@ fn ability_content_appears_in_generation_request() {
         );
     }
 }
+
+#[test]
+fn skill_content_appears_in_periodic_refresh() {
+    let (mut rt, requests) = make_runtime_with_recorded_requests(vec!["Done."]);
+
+    // Activate the concise skill — syncs into prompt_physics.active_skill.
+    collect_events(
+        &mut rt,
+        RuntimeRequest::SkillToggle {
+            name: Some("concise".into()),
+        },
+    );
+
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "what does main do".into(),
+        },
+    );
+
+    let requests = requests.lock().unwrap();
+    let first = requests.first().expect("backend request must be recorded");
+
+    assert!(
+        first
+            .messages
+            .iter()
+            .any(|m| m.role == Role::System && m.content.contains("Style:")),
+        "skill style instructions must appear in periodic refresh when skill is active: {:?}",
+        first.messages
+    );
+    assert!(
+        !first
+            .messages
+            .iter()
+            .any(|m| m.role == Role::System && m.content.contains("[ability:")),
+        "periodic refresh must not contain ability block when only skill is active: {:?}",
+        first.messages
+    );
+}
