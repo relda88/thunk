@@ -2,7 +2,7 @@
 
 Local-first, personal AI coding assistant CLI focused on local-first workflows, modular architecture, privacy, and real coding actions.
 
-> Version 0.20.64
+> Version 0.21.64
 
 Current phase: Phase 34 COMPLETE.
 Test baseline: 1030 passing via `just verify`.

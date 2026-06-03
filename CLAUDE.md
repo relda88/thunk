@@ -4,16 +4,16 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 1030 passing via `just verify`
+Test baseline: 1124 passing via `just verify`
 Never make commits — user commits manually.
 
 ## Current Phase State
-- Phase 29: COMPLETE
-- Phase 30: COMPLETE — persistent symbol/import index backed by SQLite
-- Phase 31: COMPLETE — context window intelligence; Slice 31.5 summarization deferred
 - Phase 32: COMPLETE — TUI overhaul
-- Phase 33: COMPLETE — prompt physics, THUNK.md bootstrap, `/prompt-physics`
-- Phase 34: COMPLETE — staged approvals, verification, correction loop, transactions
+- Phase 33: COMPLETE — prompt physics, THUNK.md bootstrap, /prompt-physics
+- Phase 34: COMPLETE — LSP pre-check, write-then-verify, self-correction, transactions
+- Phase 35: COMPLETE — git tool layer, /branch, /commit, /diff, tools/ reorganization
+- Phase 36: COMPLETE — .thunk/ migration, abilities, skills, /ability, /skill, prompt physics injection
+- Phase 37: ACTIVE — planning, task workflows, /plan, /task, /agent, web fetch, thinking trace
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model
@@ -23,17 +23,6 @@ Never make commits — user commits manually.
 - Evidence-first retrieval before answer admission
 - No text-as-API between subsystems
 - Lower layers never depend on higher layers
-
-## Non-Negotiable Invariants
-- Mutations require explicit approval — PendingAction/PendingTransaction → execute_approved() only
-- Evidence gates are never weakened
-- System prompt never persisted — always rebuilt from config on restore
-- Shell allowlist: cargo only
-- Mutation tools excluded from system prompt on RetrievalFirst and GitReadOnly surfaces
-- Provider switching is session-only
-- All shared types imported from src/core/ — never from app/
-- Prompt physics is request-local/session-scoped; .thunk/THUNK.md may anchor prompts but is never persisted as conversation state
-- Post-mutation verification is runtime-initiated via configurable `project.verify_command`
 
 ## Key Files
 | Task | File |
@@ -72,33 +61,6 @@ Never make commits — user commits manually.
 
 Note: `src/tui/renderer/transcript.rs` is not present in the current tree; transcript rendering lives in `renderer/mod.rs`.
 
-## TUI Keybindings
-| Key | Behavior |
-| --- | --- |
-| `Ctrl+C`, `Ctrl+Q` | Quit |
-| `Enter` | Submit input, accept launcher, or accept reverse search depending on active mode |
-| `Alt+Enter` | Insert newline |
-| `Backspace` | Delete before cursor, launcher query char, or reverse-search query char depending on active mode |
-| `Alt+Backspace`, `Ctrl+W` | Delete word before cursor |
-| `Left`, `Right` | Move cursor |
-| `Home`, `End` | Move to current logical line start/end |
-| `Ctrl+D` | Dump last assembled prompt to temp file |
-| `Ctrl+P` | Recall previous input |
-| `Ctrl+N` | Reject pending approval, otherwise recall next input |
-| `Ctrl+Y` | Approve pending approval |
-| `Up`, `Down` | Cycle launcher selection when launcher is active; otherwise scroll transcript by 1 |
-| `PageUp`, `PageDown` | Scroll transcript by 10 |
-| `Ctrl+O` | Toggle expanded file-read transcript view |
-| `Ctrl+K` | Open command launcher when not busy |
-| `Ctrl+R` | Start/cycle reverse search |
-| `Esc` | Cancel launcher, autocomplete, or reverse search depending on active mode |
-| `Tab` | Forward slash-command autocomplete when not busy |
-| `Shift+Tab` / `BackTab` | Reverse slash-command autocomplete when not busy |
-| `Alt+[` | Focus previous collapsible block where supported by terminal protocol |
-| `Alt+]` | Focus next collapsible block |
-| `Alt+O` | Toggle focused collapsible block |
-| Printable characters | Insert into input, launcher query, or reverse-search query depending on active mode |
-
 ## Build
 ```bash
 cargo check --all-targets                                    # fast type-check
@@ -120,12 +82,13 @@ THUNK_TRACE_RUNTIME=1 cargo run --release --no-default-features  # debug
 @.claude/rules/invariants.md
 @.claude/rules/architecture.md
 @.claude/rules/slice-discipline.md
-@.claude/rules/safe-modification.md
 
 ## On-Demand Reference — Load Only When Relevant
+- `.claude/rules/safe-modification.md` — checklists for adding tools, changing retrieval gates, or changing mutation behavior. Load when making those structural changes.
 - `.claude/dev/module-map.md` — module ownership and file locations. Read when adding new modules, tracing ownership boundaries, or unsure where a type lives.
 - `.claude/dev/core-loop.md` — runtime loop internals. Read when modifying `engine.rs` or orchestration.
 - `.claude/dev/tool-system.md` — tool inventory and wiring. Read when adding or modifying tools.
 - `.claude/skills/debug-investigation/` — investigation, guards, failure modes. Read when modifying investigation or candidate selection.
 - `.claude/skills/debug-runtime/` — debugging entry points. Read when diagnosing runtime failures.
 - `.claude/skills/investigation-planner/SKILL.md` — evidence-first exploration before any implementation. Read before writing any implementation prompt.
+- `.claude/dev/tui-keybindings.md` — full keybinding reference. Load when working on TUI input or keybinding handling.
