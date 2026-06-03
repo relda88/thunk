@@ -42,6 +42,7 @@ pub enum Command {
     TransactionStatus,
     Ability(Option<String>),
     Skill(Option<String>),
+    Fetch(String),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -176,6 +177,10 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
         "/transaction" => Some(Ok(Command::TransactionStatus)),
         "/ability" => Some(Ok(Command::Ability(arg.map(str::to_string)))),
         "/skill" => Some(Ok(Command::Skill(arg.map(str::to_string)))),
+        "/fetch" => match arg {
+            Some(url) => Some(Ok(Command::Fetch(url.to_string()))),
+            None => Some(Err(ParseError::MissingArgument { command: "/fetch" })),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -203,6 +208,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/diff",
         "/context",
         "/exit",
+        "/fetch",
         "/git",
         "/help",
         "/history",
@@ -274,6 +280,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/exit",
             description: "quit the application",
+        },
+        LauncherCommand {
+            name: "/fetch",
+            description: "fetch a URL and return plain text content",
         },
         LauncherCommand {
             name: "/git",
@@ -789,6 +799,32 @@ mod tests {
             Some(Ok(Command::Commit {
                 message: Some("feat: add foo".to_string()),
             }))
+        );
+    }
+
+    #[test]
+    fn parses_fetch_url() {
+        assert_eq!(
+            parse("/fetch https://example.com"),
+            Some(Ok(Command::Fetch("https://example.com".to_string())))
+        );
+    }
+
+    #[test]
+    fn parses_fetch_missing_arg() {
+        assert_eq!(
+            parse("/fetch"),
+            Some(Err(ParseError::MissingArgument { command: "/fetch" }))
+        );
+    }
+
+    #[test]
+    fn parses_fetch_url_with_path() {
+        assert_eq!(
+            parse("/fetch https://example.com/path?q=1"),
+            Some(Ok(Command::Fetch(
+                "https://example.com/path?q=1".to_string()
+            )))
         );
     }
 }

@@ -120,6 +120,7 @@ pub fn resolve(
                 col: *col,
             })
         }
+        ToolInput::WebFetch { url } => Ok(ResolvedToolInput::WebFetch { url: url.clone() }),
     }
 }
 

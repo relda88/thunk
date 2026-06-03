@@ -1,6 +1,6 @@
 // Outbound: ToolOutput -> conversation text
 
-use crate::tools::types::LspDefinitionOutput;
+use crate::tools::types::{LspDefinitionOutput, WebFetchOutput};
 use crate::tools::{EntryKind, ToolOutput};
 
 /// Returns a compact one-line summary of a tool result for TUI display.
@@ -126,6 +126,10 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
             } else {
                 format!("lsp_definition: {} line {}", d.target_path, d.target_line)
             }
+        }
+        ToolOutput::WebFetch(w) => {
+            let trunc = if w.truncated { " (truncated)" } else { "" };
+            format!("fetched {} — {} bytes{}", w.url, w.bytes_fetched, trunc)
         }
     }
 }
@@ -565,6 +569,7 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
             lines.join("\n")
         }
         ToolOutput::LspDefinition(d) => render_lsp_definition(d),
+        ToolOutput::WebFetch(w) => render_web_fetch(w),
     }
 }
 
@@ -604,6 +609,20 @@ fn render_lsp_definition(d: &LspDefinitionOutput) -> String {
     } else {
         format!("definition found: {} line {}", d.target_path, d.target_line)
     }
+}
+
+fn render_web_fetch(w: &WebFetchOutput) -> String {
+    let mut out = String::new();
+    if !w.title.is_empty() {
+        out.push_str(&format!("# {}\n\n", w.title));
+    }
+    out.push_str(&format!("URL: {}\n", w.url));
+    out.push_str(&format!("Status: {}\n\n", w.status_code));
+    out.push_str(&w.content);
+    if w.truncated {
+        out.push_str("\n\n[content truncated]");
+    }
+    out
 }
 
 // Protocol description

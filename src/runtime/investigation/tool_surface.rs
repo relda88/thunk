@@ -110,7 +110,8 @@ impl SurfaceTool {
             | ToolInput::Shell { .. }
             | ToolInput::GitBranchCreate { .. }
             | ToolInput::GitBranchSwitch { .. }
-            | ToolInput::GitCommit { .. } => None,
+            | ToolInput::GitCommit { .. }
+            | ToolInput::WebFetch { .. } => None,
             ToolInput::LspDefinition { .. } => Some(Self::LspDefinition),
         }
     }

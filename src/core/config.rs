@@ -207,6 +207,19 @@ impl Default for PromptPhysicsSettings {
     }
 }
 
+/// Web fetch configuration. Enabled by default; set `[web_fetch]\nenabled = false` to disable.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WebFetchConfig {
+    pub enabled: bool,
+}
+
+impl Default for WebFetchConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Main configuration struct for the application
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -223,6 +236,7 @@ pub struct Config {
     pub commands: HashMap<String, CustomCommandDef>,
     pub project: ProjectConfig,
     pub prompt_physics: PromptPhysicsSettings,
+    pub web_fetch: WebFetchConfig,
 }
 
 /// Application configuration for the app

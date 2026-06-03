@@ -112,6 +112,7 @@ fn call_fingerprint(input: &ToolInput) -> String {
         ToolInput::LspDefinition { path, line, col } => {
             format!("lsp_definition\x00{path}\x00{line}\x00{col}")
         }
+        ToolInput::WebFetch { url } => format!("web_fetch\x00{url}"),
     }
 }
 

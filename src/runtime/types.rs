@@ -220,6 +220,12 @@ pub enum RuntimeRequest {
     SkillToggle {
         name: Option<String>,
     },
+    /// /fetch <url> — fetch a URL and return its content as plain text.
+    /// Read-only; private/loopback addresses are blocked inside the tool.
+    /// Does not mutate conversation or trigger session save.
+    FetchUrl {
+        url: String,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

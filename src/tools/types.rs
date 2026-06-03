@@ -62,6 +62,9 @@ pub enum ToolInput {
         line: u32,
         col: u32,
     },
+    WebFetch {
+        url: String,
+    },
 }
 
 impl ToolInput {
@@ -84,6 +87,7 @@ impl ToolInput {
             ToolInput::WriteFile { .. } => "write_file",
             ToolInput::Shell { .. } => "shell",
             ToolInput::LspDefinition { .. } => "lsp_definition",
+            ToolInput::WebFetch { .. } => "web_fetch",
         }
     }
 }
@@ -109,6 +113,7 @@ pub enum ToolOutput {
     WriteFile(WriteFileOutput),
     Shell(ShellOutput),
     LspDefinition(LspDefinitionOutput),
+    WebFetch(WebFetchOutput),
 }
 
 #[derive(Debug, Clone)]
@@ -263,6 +268,16 @@ pub struct LspDefinitionOutput {
     pub source_path: String,
     pub target_path: String,
     pub target_line: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct WebFetchOutput {
+    pub url: String,
+    pub title: String,
+    pub content: String,
+    pub status_code: u16,
+    pub truncated: bool,
+    pub bytes_fetched: usize,
 }
 
 // Run result

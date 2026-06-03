@@ -139,6 +139,8 @@ pub struct Runtime {
     active_ability: Option<AbilityContent>,
     /// Active response style skill for this session. Loaded at toggle time; None = no skill set.
     active_skill: Option<SkillContent>,
+    /// Whether /fetch is enabled. Read from config.web_fetch.enabled at startup.
+    web_fetch_enabled: bool,
 }
 
 impl Runtime {
@@ -192,6 +194,7 @@ impl Runtime {
             thunk_dir,
             active_ability: None,
             active_skill: None,
+            web_fetch_enabled: config.web_fetch.enabled,
         }
     }
 
@@ -319,6 +322,7 @@ impl Runtime {
             RuntimeRequest::TransactionStatus => self.handle_transaction_status(on_event),
             RuntimeRequest::AbilityToggle { name } => self.handle_ability_toggle(name, on_event),
             RuntimeRequest::SkillToggle { name } => self.handle_skill_toggle(name, on_event),
+            RuntimeRequest::FetchUrl { url } => self.handle_fetch_url(url, on_event),
         }
     }
 

@@ -55,6 +55,9 @@ pub enum ResolvedToolInput {
         line: u32,
         col: u32,
     },
+    WebFetch {
+        url: String,
+    },
 }
 
 impl ResolvedToolInput {
@@ -75,6 +78,7 @@ impl ResolvedToolInput {
             Self::GitCommit { .. } => "git_commit",
             Self::GitDiffStaged => "git_diff_staged",
             Self::LspDefinition { .. } => "lsp_definition",
+            Self::WebFetch { .. } => "web_fetch",
         }
     }
 }
@@ -126,6 +130,7 @@ impl From<ResolvedToolInput> for ToolInput {
             ResolvedToolInput::LspDefinition { path, line, col } => {
                 ToolInput::LspDefinition { path, line, col }
             }
+            ResolvedToolInput::WebFetch { url } => ToolInput::WebFetch { url },
         }
     }
 }

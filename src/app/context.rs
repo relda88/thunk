@@ -190,6 +190,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::Diff { .. } => "diff",
         RuntimeRequest::AbilityToggle { .. } => "ability_toggle",
         RuntimeRequest::SkillToggle { .. } => "skill_toggle",
+        RuntimeRequest::FetchUrl { .. } => "fetch_url",
     }
 }
 

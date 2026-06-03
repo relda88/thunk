@@ -33,6 +33,7 @@ mod search_budget;
 mod search_guardrails;
 mod tool_round;
 mod tool_surface;
+mod web_fetch;
 
 pub struct TestBackend {
     responses: Vec<String>,

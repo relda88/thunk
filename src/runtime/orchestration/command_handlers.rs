@@ -846,6 +846,27 @@ impl Runtime {
         }
     }
 
+    pub(super) fn handle_fetch_url(&mut self, url: String, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        use crate::runtime::ResolvedToolInput;
+        use crate::tools::core::WebFetchTool;
+        use crate::tools::{Tool, ToolRunResult};
+
+        let tool = WebFetchTool::new(self.web_fetch_enabled);
+        let input = ResolvedToolInput::WebFetch { url };
+        match tool.run(&input) {
+            Ok(ToolRunResult::Immediate(output)) => {
+                on_event(RuntimeEvent::InfoMessage(tool_codec::format_tool_result(
+                    "web_fetch",
+                    &output,
+                )));
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!("fetch: {e}")));
+            }
+            _ => {}
+        }
+    }
+
     pub(super) fn handle_verify_mutation_toggle(
         &mut self,
         command: Option<String>,
