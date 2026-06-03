@@ -72,7 +72,7 @@ Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src
 Owns bootstrap, config loading, path discovery, backend construction, tool-registry construction, session restore, autosave, event logging.
 `AppContext` wraps `Runtime` + `ActiveSession` + optional `SessionLog`; TUI works through `AppContext::handle()`.
 `ActiveSession` (`app/session.rs`) is the only layer that converts between runtime `Message` and stored records.
-Bootstrap reads optional project `THUNK.md` and passes it into runtime prompt physics config; it does not persist `THUNK.md` content into sessions.
+Bootstrap reads optional project `.thunk/THUNK.md` (falling back to `THUNK.md` at project root) and passes it into runtime prompt physics config; it does not persist `THUNK.md` content into sessions.
 Must not implement runtime policy or parse tool syntax.
 Key files: `src/app/mod.rs`, `src/app/context.rs`, `src/app/session.rs`, `src/app/paths.rs`, `src/app/config.rs`
 

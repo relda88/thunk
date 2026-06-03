@@ -32,7 +32,7 @@ Never make commits — user commits manually.
 - Mutation tools excluded from system prompt on RetrievalFirst and GitReadOnly surfaces
 - Provider switching is session-only
 - All shared types imported from src/core/ — never from app/
-- Prompt physics is request-local/session-scoped; THUNK.md may anchor prompts but is never persisted as conversation state
+- Prompt physics is request-local/session-scoped; .thunk/THUNK.md may anchor prompts but is never persisted as conversation state
 - Post-mutation verification is runtime-initiated via configurable `project.verify_command`
 
 ## Key Files

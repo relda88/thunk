@@ -16,6 +16,8 @@ pub struct AppPaths {
     /// Runtime project root: nearest .git ancestor, or cwd as fallback.
     /// This is what ProjectRoot and all runtime tools operate within.
     pub project_root: PathBuf,
+    /// Thunk-specific project config directory: <project_root>/.thunk/
+    pub thunk_dir: PathBuf,
     pub config_file: PathBuf,
     pub data_dir: PathBuf,
     pub logs_dir: PathBuf,
@@ -48,6 +50,7 @@ impl AppPaths {
             data_dir: root_dir.join("data"),
             logs_dir: root_dir.join("logs"),
             session_db: root_dir.join("data").join("sessions.db"),
+            thunk_dir: project_root.join(".thunk"),
             root_dir,
             project_root,
         })
@@ -56,6 +59,7 @@ impl AppPaths {
     pub fn ensure_runtime_dirs(&self) -> Result<()> {
         fs::create_dir_all(&self.data_dir)?;
         fs::create_dir_all(&self.logs_dir)?;
+        fs::create_dir_all(&self.thunk_dir)?;
         Ok(())
     }
 }
@@ -109,6 +113,7 @@ mod tests {
             data_dir: root_dir.join("data"),
             logs_dir: root_dir.join("logs"),
             session_db: root_dir.join("data").join("sessions.db"),
+            thunk_dir: project_root.join(".thunk"),
             root_dir,
             project_root,
         }

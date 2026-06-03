@@ -28,7 +28,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         .map_err(|e| AppError::Config(e.to_string()))?;
     let registry = default_registry().with_project_root(project_root.as_path_buf());
     let log = crate::logging::SessionLog::open(&paths.logs_dir);
-    let thunk_md = std::fs::read_to_string(paths.project_root.join("THUNK.md")).ok();
+    let thunk_md = read_thunk_md(&paths.thunk_dir, &paths.project_root);
 
     let (active_session, history, anchors) =
         session::ActiveSession::open_or_restore(&paths.session_db, &project_root)?;
@@ -46,6 +46,12 @@ pub fn run(cli: cli::Cli) -> Result<()> {
     )?;
 
     tui::run(&config, &paths, app)
+}
+
+fn read_thunk_md(thunk_dir: &std::path::Path, project_root: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(thunk_dir.join("THUNK.md"))
+        .or_else(|_| std::fs::read_to_string(project_root.join("THUNK.md")))
+        .ok()
 }
 
 fn load_dotenv(project_root: &std::path::Path) {
@@ -85,6 +91,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::load_dotenv;
+    use super::read_thunk_md;
 
     #[test]
     fn load_dotenv_parses_key_value_comments_blanks_and_quoted_values() {
@@ -137,5 +144,37 @@ mod tests {
         let dir = tempdir().unwrap();
         // No .env file — should not panic.
         load_dotenv(dir.path());
+    }
+
+    #[test]
+    fn read_thunk_md_prefers_thunk_dir_over_root() {
+        let dir = tempdir().unwrap();
+        let thunk_dir = dir.path().join(".thunk");
+        fs::create_dir_all(&thunk_dir).unwrap();
+        fs::write(thunk_dir.join("THUNK.md"), "from thunk dir").unwrap();
+        fs::write(dir.path().join("THUNK.md"), "from root").unwrap();
+
+        let result = read_thunk_md(&thunk_dir, dir.path());
+        assert_eq!(result.as_deref(), Some("from thunk dir"));
+    }
+
+    #[test]
+    fn read_thunk_md_falls_back_to_project_root() {
+        let dir = tempdir().unwrap();
+        let thunk_dir = dir.path().join(".thunk");
+        fs::create_dir_all(&thunk_dir).unwrap();
+        fs::write(dir.path().join("THUNK.md"), "from root").unwrap();
+
+        let result = read_thunk_md(&thunk_dir, dir.path());
+        assert_eq!(result.as_deref(), Some("from root"));
+    }
+
+    #[test]
+    fn read_thunk_md_absent_returns_none() {
+        let dir = tempdir().unwrap();
+        let thunk_dir = dir.path().join(".thunk");
+
+        let result = read_thunk_md(&thunk_dir, dir.path());
+        assert!(result.is_none());
     }
 }

@@ -29,7 +29,7 @@ Mutation tools appear only in the ephemeral per-turn hint for `MutationEnabled` 
 
 ## Prompt Physics
 Prompt physics is enabled by default via `[prompt_physics].enabled`.
-`THUNK.md` is read during app bootstrap and passed to `PromptPhysicsConfig` as an optional primacy anchor.
+`.thunk/THUNK.md` is read during app bootstrap and passed to `PromptPhysicsConfig` as an optional primacy anchor. Falls back to `THUNK.md` at project root for backward compatibility.
 Periodic refresh and recency-field messages are appended per generation in `src/runtime/orchestration/generation.rs`; they are request-local and must not be persisted as conversation history.
 
 ## Verification and Correction

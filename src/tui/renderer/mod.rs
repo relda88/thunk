@@ -641,6 +641,7 @@ mod tests {
         let paths = AppPaths {
             root_dir: dir.path().to_path_buf(),
             project_root: dir.path().to_path_buf(),
+            thunk_dir: dir.path().join(".thunk"),
             config_file: dir.path().join("config.toml"),
             data_dir: dir.path().join("data"),
             logs_dir: dir.path().join("logs"),

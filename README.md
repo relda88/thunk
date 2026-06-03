@@ -41,7 +41,7 @@ The project is structured to keep model generation, tool execution, persistence,
 - Supports scrollable output, collapsible tool summaries, viewport-aware collapsible focus, and expandable file reads.
 - Supports multiple model backends: `llama_cpp`, `openai`, `ollama`, `openrouter`, `groq`.
 - Builds a system prompt from the app name, project root, and registered tool specs.
-- Bootstraps project rules from `THUNK.md` when present.
+- Bootstraps project rules from `.thunk/THUNK.md` when present (falls back to `THUNK.md` at project root for existing projects).
 - Injects prompt-physics guardrails: a primacy anchor, periodic refresh, and per-turn recency field.
 - Streams assistant output into the conversation while emitting UI-facing runtime events.
 - Parses tool calls centrally in `src/runtime/protocol/tool_codec/`.
@@ -154,7 +154,7 @@ Some outcomes are deliberately terminal and runtime-owned: rejecting a pending m
 
 `search_code` is a literal substring search. The runtime simplifies model-generated search phrases into a single literal keyword and enforces a per-turn budget: one search is allowed, a second search is allowed only when the first returned no matches, and later search attempts are blocked with a correction so the model must answer cleanly.
 
-Prompt physics is enabled by default. At bootstrap, `THUNK.md` is read as a project-rule primacy anchor when present; every generation may also receive a short refresh message and a recency field naming the current tool surface and allowed tools. `/prompt-physics` toggles this session-local injection without changing config.
+Prompt physics is enabled by default. At bootstrap, `.thunk/THUNK.md` is read as a project-rule primacy anchor when present (falls back to `THUNK.md` at project root for existing projects); every generation may also receive a short refresh message and a recency field naming the current tool surface and allowed tools. `/prompt-physics` toggles this session-local injection without changing config.
 
 Mutation approval has stages. Single-file edits can run an LSP pre-check before execution when `[lsp].enabled = true` and the file extension is listed in `[lsp].extensions`. After a successful file mutation, `project.verify_command` can run a language-agnostic verification command; failures can trigger up to `project.max_correction_attempts` corrective edit proposals. Consecutive edit/write calls are approved as a transaction and execute atomically with best-effort rollback.
 
