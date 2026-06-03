@@ -20,8 +20,10 @@ use super::super::paths::{normalize_evidence_path, path_is_within_scope};
 use super::super::project::ProjectRoot;
 use super::super::project::ProjectStructureSnapshot;
 use super::super::project::ProjectStructureSnapshotCache;
+use super::super::protocol::abilities::AbilityContent;
 use super::super::protocol::prompt;
 use super::super::protocol::prompt_physics::PromptPhysicsConfig;
+use super::super::protocol::skills::SkillContent;
 use super::super::protocol::tool_codec;
 use super::super::resolve;
 use super::super::types::{
@@ -130,6 +132,13 @@ pub struct Runtime {
     /// SHA-1 of HEAD at the time this Runtime was constructed.
     /// Used as the baseline for /diff last. Never mutated after new().
     session_start_ref: Option<String>,
+    /// Path to the .thunk/ project directory. Used by AbilityLoader and SkillLoader
+    /// to locate ability/skill files at toggle time.
+    thunk_dir: std::path::PathBuf,
+    /// Active reasoning ability for this session. Loaded at toggle time; None = no ability set.
+    active_ability: Option<AbilityContent>,
+    /// Active response style skill for this session. Loaded at toggle time; None = no skill set.
+    active_skill: Option<SkillContent>,
 }
 
 impl Runtime {
@@ -139,6 +148,7 @@ impl Runtime {
         backend: Box<dyn ModelBackend>,
         registry: ToolRegistry,
         thunk_md: Option<String>,
+        thunk_dir: std::path::PathBuf,
     ) -> Self {
         let specs = registry.specs();
         let prompt_physics = PromptPhysicsConfig {
@@ -177,6 +187,9 @@ impl Runtime {
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
             session_start_ref,
+            thunk_dir,
+            active_ability: None,
+            active_skill: None,
         }
     }
 
@@ -302,6 +315,8 @@ impl Runtime {
                 self.handle_verify_mutation_toggle(command, on_event)
             }
             RuntimeRequest::TransactionStatus => self.handle_transaction_status(on_event),
+            RuntimeRequest::AbilityToggle { name } => self.handle_ability_toggle(name, on_event),
+            RuntimeRequest::SkillToggle { name } => self.handle_skill_toggle(name, on_event),
         }
     }
 
@@ -536,6 +551,8 @@ impl Runtime {
                 // switch with uncommitted conflicting changes, so no pre-check is needed here.
                 if tool_name == "git_branch_switch" {
                     self.undo_stack.clear();
+                    self.active_ability = None;
+                    self.active_skill = None;
                     self.correction_attempts = 0;
                     self.project_snapshot_cache = ProjectStructureSnapshotCache::default();
                     self.handle_reset(on_event);

@@ -3,6 +3,8 @@ use crate::tools::{
     PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolOutput, ToolRunResult,
 };
 
+use super::super::super::protocol::abilities::AbilityLoader;
+use super::super::super::protocol::skills::SkillLoader;
 use super::super::super::protocol::tool_codec;
 use super::super::super::resolve;
 use super::super::super::trace::trace_runtime_decision;
@@ -763,6 +765,80 @@ impl Runtime {
                 };
                 on_event(RuntimeEvent::SystemMessage(status.to_string()));
             }
+        }
+    }
+
+    pub(super) fn handle_ability_toggle(
+        &mut self,
+        name: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match name.as_deref() {
+            None | Some("status") => {
+                let msg = match &self.active_ability {
+                    Some(a) => format!("ability: {}", a.name),
+                    None => "ability: none".into(),
+                };
+                on_event(RuntimeEvent::SystemMessage(msg));
+            }
+            Some("off") => {
+                self.active_ability = None;
+                on_event(RuntimeEvent::SystemMessage("ability: cleared".into()));
+            }
+            Some("list") => {
+                let names = AbilityLoader::list_available(&self.thunk_dir);
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "abilities: {}",
+                    names.join(", ")
+                )));
+            }
+            Some(ability_name) => match AbilityLoader::load(ability_name, &self.thunk_dir) {
+                Ok(content) => {
+                    let name = content.name.clone();
+                    self.active_ability = Some(content);
+                    on_event(RuntimeEvent::SystemMessage(format!("ability: {name}")));
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::SystemMessage(format!("ability error: {e}")));
+                }
+            },
+        }
+    }
+
+    pub(super) fn handle_skill_toggle(
+        &mut self,
+        name: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match name.as_deref() {
+            None | Some("status") => {
+                let msg = match &self.active_skill {
+                    Some(s) => format!("skill: {}", s.name),
+                    None => "skill: none".into(),
+                };
+                on_event(RuntimeEvent::SystemMessage(msg));
+            }
+            Some("off") => {
+                self.active_skill = None;
+                on_event(RuntimeEvent::SystemMessage("skill: cleared".into()));
+            }
+            Some("list") => {
+                let names = SkillLoader::list_available(&self.thunk_dir);
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "skills: {}",
+                    names.join(", ")
+                )));
+            }
+            Some(skill_name) => match SkillLoader::load(skill_name, &self.thunk_dir) {
+                Ok(content) => {
+                    let name = content.name.clone();
+                    self.active_skill = Some(content);
+                    on_event(RuntimeEvent::SystemMessage(format!("skill: {name}")));
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::SystemMessage(format!("skill error: {e}")));
+                }
+            },
         }
     }
 

@@ -6,6 +6,7 @@
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
 
     use tempfile::TempDir;
 
@@ -72,6 +73,7 @@ mod tests {
             Box::new(TestBackend::new(responses)),
             default_registry().with_project_root(project_root.as_path_buf()),
             None,
+            PathBuf::from("/tmp"),
         )
     }
 

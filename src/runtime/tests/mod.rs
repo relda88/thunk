@@ -9,6 +9,7 @@ pub use super::{
     AnswerSource, PendingAction, ProjectRoot, RiskLevel, Runtime, RuntimeEvent, RuntimeRequest,
 };
 
+mod ability_skill;
 mod anchors;
 mod approval;
 mod branch_commands;
@@ -137,6 +138,7 @@ pub fn make_runtime(responses: Vec<impl Into<String>>) -> Runtime {
         Box::new(TestBackend::new(responses)),
         default_registry().with_project_root(root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     )
 }
 
@@ -148,6 +150,7 @@ pub fn make_runtime_in(responses: Vec<impl Into<String>>, root: &std::path::Path
         Box::new(TestBackend::new(responses)),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        root.to_path_buf(),
     )
 }
 
@@ -162,6 +165,7 @@ pub fn make_runtime_with_recorded_requests(
         Box::new(RecordingBackend::new(responses, Arc::clone(&requests))),
         default_registry().with_project_root(root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
     (runtime, requests)
 }
@@ -248,6 +252,7 @@ pub fn make_runtime_with_token_counting_backend(
         )),
         default_registry().with_project_root(root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     )
 }
 

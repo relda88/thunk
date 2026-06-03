@@ -40,6 +40,8 @@ pub enum Command {
     PromptPhysics(Option<bool>),
     VerifyMutation(Option<String>),
     TransactionStatus,
+    Ability(Option<String>),
+    Skill(Option<String>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -172,6 +174,8 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some(cmd) => Some(Ok(Command::VerifyMutation(Some(cmd.to_string())))),
         },
         "/transaction" => Some(Ok(Command::TransactionStatus)),
+        "/ability" => Some(Ok(Command::Ability(arg.map(str::to_string)))),
+        "/skill" => Some(Ok(Command::Skill(arg.map(str::to_string)))),
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -189,6 +193,7 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
 /// Must stay adjacent to parse() so additions to one are reflected in the other.
 pub(crate) fn autocomplete_names() -> &'static [&'static str] {
     &[
+        "/ability",
         "/anchors",
         "/approve",
         "/branch",
@@ -213,6 +218,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/search",
         "/session",
         "/sessions",
+        "/skill",
         "/transaction",
         "/undo",
         "/verify",
@@ -228,6 +234,10 @@ pub(crate) struct LauncherCommand {
 /// Must stay adjacent to autocomplete_names() so additions to one are reflected in the other.
 pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
     &[
+        LauncherCommand {
+            name: "/ability",
+            description: "set reasoning posture: debug, review, refactor, investigate, explain",
+        },
         LauncherCommand {
             name: "/anchors",
             description: "show last-read file and search anchors",
@@ -324,6 +334,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/sessions",
             description: "list saved sessions",
+        },
+        LauncherCommand {
+            name: "/skill",
+            description: "set response style: concise, thorough, educational, critical, creative",
         },
         LauncherCommand {
             name: "/transaction",
@@ -728,6 +742,35 @@ mod tests {
         assert_eq!(
             parse("/diff main"),
             Some(Ok(Command::Diff(DiffMode::Ref("main".to_string()))))
+        );
+    }
+
+    #[test]
+    fn parses_ability_name() {
+        assert_eq!(
+            parse("/ability debug"),
+            Some(Ok(Command::Ability(Some("debug".to_string()))))
+        );
+    }
+
+    #[test]
+    fn parses_ability_off() {
+        assert_eq!(
+            parse("/ability off"),
+            Some(Ok(Command::Ability(Some("off".to_string()))))
+        );
+    }
+
+    #[test]
+    fn parses_ability_bare() {
+        assert_eq!(parse("/ability"), Some(Ok(Command::Ability(None))));
+    }
+
+    #[test]
+    fn parses_skill_name() {
+        assert_eq!(
+            parse("/skill concise"),
+            Some(Ok(Command::Skill(Some("concise".to_string()))))
         );
     }
 

@@ -263,6 +263,7 @@ fn path_qualified_file_prompt_reads_before_first_model_generation() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(
@@ -311,6 +312,7 @@ fn explicit_directory_prompt_lists_before_first_model_generation() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(
@@ -358,6 +360,7 @@ fn structural_directory_prompt_lists_before_first_model_generation() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(
@@ -414,6 +417,7 @@ fn investigation_prompt_still_generates_before_first_tool() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(
@@ -723,6 +727,7 @@ fn answer_only_surface_hint_sent_to_model_during_post_read_synthesis() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     collect_events(
@@ -798,6 +803,7 @@ fn retrieval_first_project_snapshot_hint_is_compact_and_deterministic() {
         Box::new(RecordingBackend::new(vec!["Done."], Arc::clone(&requests))),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     collect_events(
@@ -860,6 +866,7 @@ fn answer_only_surface_hint_sent_after_second_runtime_owned_usage_read() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     collect_events(
@@ -921,6 +928,7 @@ fn seeded_list_dir_synthesis_receives_answer_only_surface() {
         )),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(
@@ -981,6 +989,7 @@ fn seeded_list_dir_blocks_post_listing_search_code() {
         ])),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(
@@ -1018,6 +1027,7 @@ fn seeded_list_dir_blocks_post_listing_read_file() {
         ])),
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
+        PathBuf::from("/tmp"),
     );
 
     let events = collect_events(

@@ -43,6 +43,7 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         log,
         Some(&paths.session_db),
         thunk_md,
+        paths.thunk_dir.clone(),
     )?;
 
     tui::run(&config, &paths, app)

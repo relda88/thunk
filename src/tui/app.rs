@@ -311,6 +311,7 @@ mod tests {
                 None,
                 Some(&paths.session_db),
                 None,
+                paths.thunk_dir.clone(),
             )
             .unwrap();
 

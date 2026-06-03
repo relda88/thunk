@@ -134,8 +134,10 @@ impl AppContext {
         log: Option<SessionLog>,
         db_path: Option<&std::path::Path>,
         thunk_md: Option<String>,
+        thunk_dir: std::path::PathBuf,
     ) -> Result<Self> {
-        let mut runtime = Runtime::new(config, project_root, backend, registry, thunk_md);
+        let mut runtime =
+            Runtime::new(config, project_root, backend, registry, thunk_md, thunk_dir);
         if let Some(path) = db_path {
             runtime = runtime.with_symbol_store(path);
         }
@@ -186,6 +188,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::VerifyMutationToggle { .. } => "verify_mutation_toggle",
         RuntimeRequest::TransactionStatus => "transaction_status",
         RuntimeRequest::Diff { .. } => "diff",
+        RuntimeRequest::AbilityToggle { .. } => "ability_toggle",
+        RuntimeRequest::SkillToggle { .. } => "skill_toggle",
     }
 }
 

@@ -208,6 +208,18 @@ pub enum RuntimeRequest {
     Diff {
         mode: DiffMode,
     },
+    /// /ability — manage the active reasoning ability. Some("name") = activate,
+    /// Some("off") = clear, Some("list") = list, Some("status")/None = status.
+    /// Session-scoped; cleared on branch switch. Does not mutate conversation.
+    AbilityToggle {
+        name: Option<String>,
+    },
+    /// /skill — manage the active response style skill. Some("name") = activate,
+    /// Some("off") = clear, Some("list") = list, Some("status")/None = status.
+    /// Session-scoped; cleared on branch switch. Does not mutate conversation.
+    SkillToggle {
+        name: Option<String>,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
