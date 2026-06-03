@@ -265,6 +265,11 @@ impl Runtime {
             RuntimeRequest::GitStatus => self.handle_git_status(on_event),
             RuntimeRequest::GitDiff => self.handle_git_diff(on_event),
             RuntimeRequest::GitLog => self.handle_git_log(on_event),
+            RuntimeRequest::BranchCreate {
+                name,
+                start_point: _,
+            } => self.handle_branch_create(name, on_event),
+            RuntimeRequest::BranchSwitch { name } => self.handle_branch_switch(name, on_event),
             RuntimeRequest::ListDir { path } => self.handle_list_dir(path, on_event),
             RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
             RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
@@ -506,6 +511,17 @@ impl Runtime {
                 self.commit_tool_results(tool_codec::format_tool_result(&tool_name, &output));
                 self.conversation
                     .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
+                // Git branch switch: skip verify and LSP blocks (not applicable to git ops).
+                // Reset session state — the branch has changed so all path anchors, conversation
+                // history, and mutation tracking are now stale. git checkout itself refuses to
+                // switch with uncommitted conflicting changes, so no pre-check is needed here.
+                if tool_name == "git_branch_switch" {
+                    self.undo_stack.clear();
+                    self.correction_attempts = 0;
+                    self.project_snapshot_cache = ProjectStructureSnapshotCache::default();
+                    self.handle_reset(on_event);
+                    return;
+                }
                 if matches!(tool_name.as_str(), "edit_file" | "write_file") && self.lsp.is_enabled()
                 {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {

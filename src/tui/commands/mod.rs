@@ -26,6 +26,9 @@ pub enum Command {
     GitStatus,
     GitDiff,
     GitLog,
+    BranchCreate(String),
+    BranchList,
+    BranchSwitch(String),
     Ls(String),
     LspStatus,
     IndexBuild { large: bool },
@@ -110,6 +113,28 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("log") => Some(Ok(Command::GitLog)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        // /branch list           — list local branches (reuses git_branch tool)
+        // /branch <name>         — create branch from HEAD
+        // /branch switch <name>  — switch to existing branch
+        // Note: a branch literally named "list" cannot be created via /branch — use git directly.
+        "/branch" => match arg {
+            None | Some("list") => Some(Ok(Command::BranchList)),
+            Some("switch") => Some(Err(ParseError::MissingArgument {
+                command: "/branch switch",
+            })),
+            Some(rest) if rest.starts_with("switch ") => {
+                let name = rest["switch ".len()..].trim().to_string();
+                if name.is_empty() {
+                    Some(Err(ParseError::MissingArgument {
+                        command: "/branch switch",
+                    }))
+                } else {
+                    Some(Ok(Command::BranchSwitch(name)))
+                }
+            }
+            Some(name) if !name.is_empty() => Some(Ok(Command::BranchCreate(name.to_string()))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/lsp" => match arg {
             Some("status") => Some(Ok(Command::LspStatus)),
             _ => Some(Err(ParseError::UnknownCommand)),
@@ -156,6 +181,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
     &[
         "/anchors",
         "/approve",
+        "/branch",
         "/clear",
         "/compact",
         "/context",
@@ -197,6 +223,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/approve",
             description: "approve a pending tool action",
+        },
+        LauncherCommand {
+            name: "/branch",
+            description: "create, switch, or list git branches",
         },
         LauncherCommand {
             name: "/clear",
@@ -491,6 +521,50 @@ mod tests {
     #[test]
     fn parses_git_log() {
         assert_eq!(parse("/git log"), Some(Ok(Command::GitLog)));
+    }
+
+    #[test]
+    fn parses_branch_create() {
+        assert_eq!(
+            parse("/branch feat/x"),
+            Some(Ok(Command::BranchCreate("feat/x".to_string())))
+        );
+    }
+
+    #[test]
+    fn parses_branch_list_explicit() {
+        assert_eq!(parse("/branch list"), Some(Ok(Command::BranchList)));
+    }
+
+    #[test]
+    fn parses_branch_bare_defaults_to_list() {
+        assert_eq!(parse("/branch"), Some(Ok(Command::BranchList)));
+    }
+
+    #[test]
+    fn parses_branch_switch() {
+        assert_eq!(
+            parse("/branch switch main"),
+            Some(Ok(Command::BranchSwitch("main".to_string())))
+        );
+    }
+
+    #[test]
+    fn parses_branch_switch_with_slash_name() {
+        assert_eq!(
+            parse("/branch switch feat/my-feature"),
+            Some(Ok(Command::BranchSwitch("feat/my-feature".to_string())))
+        );
+    }
+
+    #[test]
+    fn parses_branch_switch_missing_name_errors() {
+        assert_eq!(
+            parse("/branch switch"),
+            Some(Err(ParseError::MissingArgument {
+                command: "/branch switch"
+            }))
+        );
     }
 
     #[test]

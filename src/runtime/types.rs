@@ -134,6 +134,18 @@ pub enum RuntimeRequest {
     /// Command-triggered git_log invocation. Goes through CommandTool allowlist.
     /// Does not mutate conversation or trigger session save.
     GitLog,
+    /// Command-triggered git_branch_create invocation. Goes through CommandTool allowlist.
+    /// Requires user approval before executing. Does not trigger session save.
+    BranchCreate {
+        name: String,
+        start_point: Option<String>,
+    },
+    /// Command-triggered git_branch_switch invocation. Goes through CommandTool allowlist.
+    /// Requires user approval before executing. Resets session state on success.
+    /// Does not trigger session save.
+    BranchSwitch {
+        name: String,
+    },
     /// Command-triggered list_dir invocation. Goes through CommandTool allowlist.
     /// Does not mutate conversation or trigger session save.
     ListDir {

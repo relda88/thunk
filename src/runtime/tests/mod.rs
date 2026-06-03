@@ -11,6 +11,7 @@ pub use super::{
 
 mod anchors;
 mod approval;
+mod branch_commands;
 mod context_threshold;
 mod engine;
 mod external_repo_fixtures;

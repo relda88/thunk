@@ -18,13 +18,26 @@ const MAX_MESSAGE_CHARS: usize = 200;
 /// calls registry.dispatch() directly or constructs ToolInput outside this enum.
 /// Mutating tools are excluded by omission; adding one requires an explicit variant.
 pub(super) enum CommandTool {
-    ReadFile { path: String },
-    SearchCode { query: String },
+    ReadFile {
+        path: String,
+    },
+    SearchCode {
+        query: String,
+    },
     GitBranch,
     GitStatus,
     GitDiff,
     GitLog,
-    ListDir { path: String },
+    GitBranchCreate {
+        name: String,
+        start_point: Option<String>,
+    },
+    GitBranchSwitch {
+        name: String,
+    },
+    ListDir {
+        path: String,
+    },
 }
 
 impl CommandTool {
@@ -36,6 +49,10 @@ impl CommandTool {
             Self::GitStatus => ToolInput::GitStatus,
             Self::GitDiff => ToolInput::GitDiff,
             Self::GitLog => ToolInput::GitLog,
+            Self::GitBranchCreate { name, start_point } => {
+                ToolInput::GitBranchCreate { name, start_point }
+            }
+            Self::GitBranchSwitch { name } => ToolInput::GitBranchSwitch { name },
             Self::ListDir { path } => ToolInput::ListDir { path },
         }
     }
@@ -48,6 +65,8 @@ impl CommandTool {
             Self::GitStatus => "git_status",
             Self::GitDiff => "git_diff",
             Self::GitLog => "git_log",
+            Self::GitBranchCreate { .. } => "git_branch_create",
+            Self::GitBranchSwitch { .. } => "git_branch_switch",
             Self::ListDir { .. } => "list_dir",
         }
     }
@@ -139,6 +158,8 @@ impl Runtime {
             | CommandTool::GitStatus
             | CommandTool::GitDiff
             | CommandTool::GitLog
+            | CommandTool::GitBranchCreate { .. }
+            | CommandTool::GitBranchSwitch { .. }
             | CommandTool::ListDir { .. } => None,
         };
         let name = tool.name();
@@ -211,6 +232,30 @@ impl Runtime {
 
     pub(super) fn handle_git_log(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         self.dispatch_command_tool(CommandTool::GitLog, on_event);
+    }
+
+    pub(super) fn handle_branch_create(
+        &mut self,
+        name: String,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        self.dispatch_command_tool(
+            CommandTool::GitBranchCreate {
+                name,
+                start_point: None,
+            },
+            on_event,
+        );
+    }
+
+    pub(super) fn handle_branch_switch(
+        &mut self,
+        name: String,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        // git checkout itself refuses to switch with uncommitted conflicting changes —
+        // no pre-check needed here; errors propagate via the execute_approved failure path.
+        self.dispatch_command_tool(CommandTool::GitBranchSwitch { name }, on_event);
     }
 
     pub(super) fn handle_list_dir(&mut self, path: String, on_event: &mut dyn FnMut(RuntimeEvent)) {

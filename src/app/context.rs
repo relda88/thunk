@@ -173,6 +173,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::GitStatus => "git_status",
         RuntimeRequest::GitDiff => "git_diff",
         RuntimeRequest::GitLog => "git_log",
+        RuntimeRequest::BranchCreate { .. } => "branch_create",
+        RuntimeRequest::BranchSwitch { .. } => "branch_switch",
         RuntimeRequest::ListDir { .. } => "list_dir",
         RuntimeRequest::LspStatus => "lsp_status",
         RuntimeRequest::IndexBuild { .. } => "index_build",
