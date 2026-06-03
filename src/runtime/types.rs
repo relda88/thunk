@@ -146,6 +146,12 @@ pub enum RuntimeRequest {
     BranchSwitch {
         name: String,
     },
+    /// /commit — generate (or use provided) commit message via the model, show approval
+    /// preview, then execute git_commit on approval. Staged only — does not run git add.
+    /// Does not mutate conversation or trigger session save.
+    Commit {
+        message: Option<String>,
+    },
     /// Command-triggered list_dir invocation. Goes through CommandTool allowlist.
     /// Does not mutate conversation or trigger session save.
     ListDir {

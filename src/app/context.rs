@@ -175,6 +175,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::GitLog => "git_log",
         RuntimeRequest::BranchCreate { .. } => "branch_create",
         RuntimeRequest::BranchSwitch { .. } => "branch_switch",
+        RuntimeRequest::Commit { .. } => "commit",
         RuntimeRequest::ListDir { .. } => "list_dir",
         RuntimeRequest::LspStatus => "lsp_status",
         RuntimeRequest::IndexBuild { .. } => "index_build",

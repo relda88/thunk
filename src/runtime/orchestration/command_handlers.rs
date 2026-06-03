@@ -1,5 +1,7 @@
-use crate::llm::backend::Role;
-use crate::tools::{PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolRunResult};
+use crate::llm::backend::{BackendEvent, GenerateRequest, Message, Role};
+use crate::tools::{
+    PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolOutput, ToolRunResult,
+};
 
 use super::super::super::protocol::tool_codec;
 use super::super::super::resolve;
@@ -256,6 +258,145 @@ impl Runtime {
         // git checkout itself refuses to switch with uncommitted conflicting changes —
         // no pre-check needed here; errors propagate via the execute_approved failure path.
         self.dispatch_command_tool(CommandTool::GitBranchSwitch { name }, on_event);
+    }
+
+    /// Generates a conventional commit message via a one-shot backend call.
+    /// Does not touch self.conversation — messages are assembled from a pruned
+    /// snapshot and passed directly to the backend without being stored.
+    fn generate_commit_message(&mut self, diff_context: &str) -> Option<String> {
+        let prompt = format!(
+            "You are generating a git commit message. Respond with \
+             ONLY the commit message text — no explanation, no markdown, no preamble.\n\n\
+             Format: <type>(<scope>): <description>\n\
+             Types: feat, fix, docs, refactor, test, chore\n\
+             Keep the subject line under 72 characters.\n\
+             If needed, add a blank line then a body.\n\n\
+             Staged changes:\n{diff_context}"
+        );
+        let mut messages = self.conversation.pruned_snapshot();
+        messages.push(Message::user(prompt));
+        let request = GenerateRequest::new(messages);
+        let mut result = String::new();
+        if self
+            .backend
+            .generate(request, &mut |event| {
+                if let BackendEvent::TextDelta(chunk) = event {
+                    result.push_str(&chunk);
+                }
+            })
+            .is_err()
+        {
+            return None;
+        }
+        let msg = result.trim().to_string();
+        if msg.is_empty() {
+            None
+        } else {
+            Some(msg)
+        }
+    }
+
+    pub(super) fn handle_commit(
+        &mut self,
+        message: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        if self.pending_action.is_some() {
+            on_event(RuntimeEvent::Failed {
+                message: "cannot commit while a tool approval is pending".to_string(),
+            });
+            return;
+        }
+
+        // Check for staged changes.
+        let status_resolved = match resolve(&self.project_root, &ToolInput::GitStatus) {
+            Ok(r) => r,
+            Err(error) => {
+                let tool_error: ToolError = error.into();
+                on_event(RuntimeEvent::InfoMessage(format!(
+                    "commit: git status failed: {tool_error}"
+                )));
+                return;
+            }
+        };
+        let has_staged = match self.registry.dispatch(status_resolved) {
+            Ok(ToolRunResult::Immediate(ToolOutput::GitStatus(s))) => s.entries.iter().any(|e| {
+                let x = e.xy.chars().next().unwrap_or(' ');
+                x != ' ' && x != '?'
+            }),
+            _ => false,
+        };
+        if !has_staged {
+            on_event(RuntimeEvent::SystemMessage(
+                "nothing to commit (no staged changes)".to_string(),
+            ));
+            return;
+        }
+
+        // Get the staged diff for commit message generation context.
+        let diff_context = match resolve(&self.project_root, &ToolInput::GitDiffStaged).ok() {
+            Some(resolved) => match self.registry.dispatch(resolved) {
+                Ok(ToolRunResult::Immediate(ToolOutput::GitDiffStaged(d)))
+                    if !d.patch.is_empty() =>
+                {
+                    if d.patch.len() > 4000 {
+                        format!("{}... (truncated)", &d.patch[..4000])
+                    } else {
+                        d.patch.clone()
+                    }
+                }
+                _ => "(binary or empty staged diff)".to_string(),
+            },
+            None => "(binary or empty staged diff)".to_string(),
+        };
+
+        // Use provided message or generate via model.
+        let commit_message = match message {
+            Some(m) if !m.trim().is_empty() => m,
+            _ => match self.generate_commit_message(&diff_context) {
+                Some(m) => m,
+                None => {
+                    on_event(RuntimeEvent::SystemMessage(
+                        "commit: failed to generate message \
+                         — use /commit \"your message\" to provide one manually"
+                            .to_string(),
+                    ));
+                    return;
+                }
+            },
+        };
+
+        // Dispatch git_commit to produce the PendingAction, then surface for approval.
+        let commit_resolved = match resolve(
+            &self.project_root,
+            &ToolInput::GitCommit {
+                message: commit_message,
+            },
+        ) {
+            Ok(r) => r,
+            Err(error) => {
+                let tool_error: ToolError = error.into();
+                on_event(RuntimeEvent::InfoMessage(format!("commit: {tool_error}")));
+                return;
+            }
+        };
+        match self.registry.dispatch(commit_resolved) {
+            Ok(ToolRunResult::Approval(pending)) => {
+                self.pending_action = Some(PendingApprovalStage::AwaitingPreCheck(
+                    PendingTransaction::single(pending.clone()),
+                ));
+                on_event(RuntimeEvent::ApprovalRequired {
+                    pending,
+                    evidence: vec![],
+                });
+            }
+            Ok(ToolRunResult::Immediate(_)) => {
+                // git_commit is RequiresApproval — an Immediate result is a bug.
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::InfoMessage(format!("commit: {e}")));
+            }
+        }
     }
 
     pub(super) fn handle_list_dir(&mut self, path: String, on_event: &mut dyn FnMut(RuntimeEvent)) {

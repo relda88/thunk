@@ -29,6 +29,7 @@ pub enum Command {
     BranchCreate(String),
     BranchList,
     BranchSwitch(String),
+    Commit { message: Option<String> },
     Ls(String),
     LspStatus,
     IndexBuild { large: bool },
@@ -117,6 +118,9 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
         // /branch <name>         — create branch from HEAD
         // /branch switch <name>  — switch to existing branch
         // Note: a branch literally named "list" cannot be created via /branch — use git directly.
+        "/commit" => Some(Ok(Command::Commit {
+            message: arg.map(str::to_string),
+        })),
         "/branch" => match arg {
             None | Some("list") => Some(Ok(Command::BranchList)),
             Some("switch") => Some(Err(ParseError::MissingArgument {
@@ -183,6 +187,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/approve",
         "/branch",
         "/clear",
+        "/commit",
         "/compact",
         "/context",
         "/exit",
@@ -231,6 +236,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/clear",
             description: "clear the transcript",
+        },
+        LauncherCommand {
+            name: "/commit",
+            description: "generate and approve a conventional commit message",
         },
         LauncherCommand {
             name: "/compact",
@@ -683,6 +692,24 @@ mod tests {
         assert_eq!(
             parse("/verify cargo check"),
             Some(Ok(Command::VerifyMutation(Some("cargo check".to_string()))))
+        );
+    }
+
+    #[test]
+    fn parses_commit_bare() {
+        assert_eq!(
+            parse("/commit"),
+            Some(Ok(Command::Commit { message: None }))
+        );
+    }
+
+    #[test]
+    fn parses_commit_with_message() {
+        assert_eq!(
+            parse("/commit feat: add foo"),
+            Some(Ok(Command::Commit {
+                message: Some("feat: add foo".to_string()),
+            }))
         );
     }
 }
