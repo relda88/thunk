@@ -154,6 +154,7 @@ impl Runtime {
         let prompt_physics = PromptPhysicsConfig {
             enabled: config.prompt_physics.enabled,
             thunk_md,
+            active_ability: None,
         };
         let system_prompt = prompt::build_system_prompt(
             &config.app.name,
@@ -552,6 +553,7 @@ impl Runtime {
                 if tool_name == "git_branch_switch" {
                     self.undo_stack.clear();
                     self.active_ability = None;
+                    self.prompt_physics.active_ability = None;
                     self.active_skill = None;
                     self.correction_attempts = 0;
                     self.project_snapshot_cache = ProjectStructureSnapshotCache::default();

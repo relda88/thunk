@@ -167,3 +167,47 @@ fn recency_field_appears_after_periodic_refresh() {
         );
     }
 }
+
+#[test]
+fn ability_content_appears_in_generation_request() {
+    let (mut rt, requests) = make_runtime_with_recorded_requests(vec!["Done."]);
+
+    // Activate the debug ability — this syncs into prompt_physics.active_ability.
+    collect_events(
+        &mut rt,
+        RuntimeRequest::AbilityToggle {
+            name: Some("debug".into()),
+        },
+    );
+
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "what does main do".into(),
+        },
+    );
+
+    let requests = requests.lock().unwrap();
+    let first = requests.first().expect("backend request must be recorded");
+
+    let ability_pos = first
+        .messages
+        .iter()
+        .position(|m| m.role == Role::System && m.content.contains("[ability: debug]"));
+    let surface_pos = first
+        .messages
+        .iter()
+        .position(|m| m.role == Role::System && m.content.contains("Active tool surface:"));
+
+    assert!(
+        ability_pos.is_some(),
+        "ability content must appear in backend request when ability is active: {:?}",
+        first.messages
+    );
+    if let (Some(ability), Some(surface)) = (ability_pos, surface_pos) {
+        assert!(
+            ability < surface,
+            "ability primacy block must appear before surface hint (ability={ability}, surface={surface})"
+        );
+    }
+}

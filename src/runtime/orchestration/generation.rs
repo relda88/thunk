@@ -22,6 +22,11 @@ pub(super) fn run_generate_turn(
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
     let mut messages = conversation.pruned_snapshot();
+    // Primacy anchor: ability + thunk_md injected at position 1
+    // (after stored system prompt, before conversation history)
+    if let Some(primacy) = prompt_physics::primacy_anchor_block(prompt_physics) {
+        messages.insert(1, Message::system(primacy));
+    }
     messages.push(Message::system(prompt::render_tool_surface_hint(
         tool_surface.as_str(),
         tool_surface
