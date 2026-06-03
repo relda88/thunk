@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::core::config::Config;
 use crate::llm::backend::ModelBackend;
 use crate::storage::index::SymbolStore;
+use crate::storage::tasks::TaskStore;
 use crate::tools::{
     PendingAction, PendingApprovalStage, PendingTransaction, ToolInput, ToolOutput, ToolRegistry,
     ToolRunResult,
@@ -113,6 +114,8 @@ pub struct Runtime {
     lsp: LspManager,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
+    /// Plan/task store. `None` when no db_path was supplied (e.g. in tests).
+    pub(crate) task_store: Option<TaskStore>,
     /// Set to true after the first on-demand index build attempt this session.
     /// Ensures the trigger fires at most once per session.
     pub(super) index_triggered: bool,
@@ -184,6 +187,7 @@ impl Runtime {
             undo_stack: Vec::new(),
             lsp,
             symbol_store: None,
+            task_store: None,
             index_triggered: false,
             context_75_warned: false,
             prompt_physics,
@@ -202,6 +206,13 @@ impl Runtime {
     /// Silently proceeds without a store if the path cannot be opened.
     pub fn with_symbol_store(mut self, db_path: &std::path::Path) -> Self {
         self.symbol_store = SymbolStore::open(db_path).ok();
+        self
+    }
+
+    /// Attaches a `TaskStore` backed by `db_path`. Returns `self` for chaining.
+    /// Silently proceeds without a store if the path cannot be opened.
+    pub fn with_task_store(mut self, db_path: &std::path::Path) -> Self {
+        self.task_store = TaskStore::open(db_path).ok();
         self
     }
 

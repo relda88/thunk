@@ -140,6 +140,7 @@ impl AppContext {
             Runtime::new(config, project_root, backend, registry, thunk_md, thunk_dir);
         if let Some(path) = db_path {
             runtime = runtime.with_symbol_store(path);
+            runtime = runtime.with_task_store(path);
         }
         if !history.is_empty() {
             runtime.load_history(history);

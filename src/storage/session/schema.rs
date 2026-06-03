@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::core::error::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 5;
+const CURRENT_VERSION: i32 = 6;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
@@ -65,6 +65,30 @@ const SCHEMA: &str = "
         updated_at    TEXT NOT NULL,
         PRIMARY KEY (project_root, file_path)
     );
+
+    CREATE TABLE IF NOT EXISTS plans (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        project_root TEXT NOT NULL,
+        goal         TEXT NOT NULL,
+        status       TEXT NOT NULL DEFAULT 'draft',
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plan_tasks (
+        id             TEXT PRIMARY KEY,
+        plan_id        TEXT NOT NULL REFERENCES plans(id),
+        session_id     TEXT NOT NULL,
+        project_root   TEXT NOT NULL,
+        step_number    INTEGER NOT NULL,
+        title          TEXT NOT NULL,
+        description    TEXT NOT NULL DEFAULT '',
+        status         TEXT NOT NULL DEFAULT 'pending',
+        result_summary TEXT NOT NULL DEFAULT '',
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
 ";
 
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -101,6 +125,10 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
 
     if version < 5 {
         // file_metadata table — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
+    }
+
+    if version < 6 {
+        // plans and plan_tasks tables — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
     }
 
     if version < CURRENT_VERSION {
