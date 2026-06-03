@@ -23,4 +23,4 @@ pub use project::ResolvedToolInput;
 pub use project::{resolve, PathResolutionError};
 pub use project::{ProjectPath, ProjectScope};
 pub use project::{ProjectRoot, ProjectRootError};
-pub use types::{AnswerSource, RuntimeEvent, RuntimeRequest};
+pub use types::{AnswerSource, DiffMode, RuntimeEvent, RuntimeRequest};

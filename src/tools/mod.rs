@@ -21,6 +21,7 @@ use crate::runtime::ResolvedToolInput;
 use list_dir::ListDirTool;
 use read_file::ReadFileTool;
 
+pub use git_diff::GitDiffTool;
 pub use pending::{PendingAction, PendingApprovalStage, PendingTransaction, RiskLevel};
 pub use registry::ToolRegistry;
 pub use types::{

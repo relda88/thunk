@@ -3,6 +3,10 @@ use crate::tui::state::{AppState, MessageKind, Role};
 
 use super::{Renderer, StyledLine};
 
+fn is_diff_content(content: &str) -> bool {
+    content.starts_with("diff --git ") || content.starts_with("[showing first")
+}
+
 impl Renderer {
     pub(super) fn build_transcript_lines(&self, state: &AppState, w: u16) -> Vec<StyledLine> {
         let base = self.theme.base();
@@ -95,34 +99,83 @@ impl Renderer {
             let badge_len = badge_text.chars().count();
             let prefix_w = 2 + badge_len + 2;
             let body_w = (w as usize).saturating_sub(prefix_w).max(8);
-            let body_lines = super::wrap_text(&msg.content, body_w);
 
-            for (li, body_line) in body_lines.into_iter().enumerate() {
-                if li == 0 {
-                    let border_span = if is_focused_collapsible {
-                        ("▶ ".to_string(), self.theme.border_active())
+            if is_diff_content(&msg.content) {
+                let mut visual_line_idx = 0usize;
+                for logical_line in msg.content.lines() {
+                    let line_style = if logical_line.starts_with("+++")
+                        || logical_line.starts_with("---")
+                        || logical_line.starts_with("diff ")
+                        || logical_line.starts_with("index ")
+                        || logical_line.starts_with("@@")
+                    {
+                        dim
+                    } else if logical_line.starts_with('+') {
+                        self.theme.diff_add()
+                    } else if logical_line.starts_with('-') {
+                        self.theme.diff_remove()
                     } else {
-                        ("│ ".to_string(), border)
+                        body_style
                     };
-                    lines.push((
-                        vec![
-                            border_span,
-                            (badge_text.to_string(), badge_style),
-                            ("  ".to_string(), base),
-                            (body_line, body_style),
-                        ],
-                        Some(i),
-                    ));
-                } else {
-                    let indent = " ".repeat(badge_len + 2);
-                    lines.push((
-                        vec![
-                            ("│ ".to_string(), border),
-                            (indent, base),
-                            (body_line, body_style),
-                        ],
-                        Some(i),
-                    ));
+                    for wrapped_piece in super::wrap_text(logical_line, body_w) {
+                        if visual_line_idx == 0 {
+                            let border_span = if is_focused_collapsible {
+                                ("▶ ".to_string(), self.theme.border_active())
+                            } else {
+                                ("│ ".to_string(), border)
+                            };
+                            lines.push((
+                                vec![
+                                    border_span,
+                                    (badge_text.to_string(), badge_style),
+                                    ("  ".to_string(), base),
+                                    (wrapped_piece, line_style),
+                                ],
+                                Some(i),
+                            ));
+                        } else {
+                            let indent = " ".repeat(badge_len + 2);
+                            lines.push((
+                                vec![
+                                    ("│ ".to_string(), border),
+                                    (indent, base),
+                                    (wrapped_piece, line_style),
+                                ],
+                                Some(i),
+                            ));
+                        }
+                        visual_line_idx += 1;
+                    }
+                }
+            } else {
+                let body_lines = super::wrap_text(&msg.content, body_w);
+                for (li, body_line) in body_lines.into_iter().enumerate() {
+                    if li == 0 {
+                        let border_span = if is_focused_collapsible {
+                            ("▶ ".to_string(), self.theme.border_active())
+                        } else {
+                            ("│ ".to_string(), border)
+                        };
+                        lines.push((
+                            vec![
+                                border_span,
+                                (badge_text.to_string(), badge_style),
+                                ("  ".to_string(), base),
+                                (body_line, body_style),
+                            ],
+                            Some(i),
+                        ));
+                    } else {
+                        let indent = " ".repeat(badge_len + 2);
+                        lines.push((
+                            vec![
+                                ("│ ".to_string(), border),
+                                (indent, base),
+                                (body_line, body_style),
+                            ],
+                            Some(i),
+                        ));
+                    }
                 }
             }
             lines.push((vec![], Some(i)));

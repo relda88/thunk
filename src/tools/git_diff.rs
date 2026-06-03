@@ -20,8 +20,16 @@ impl GitDiffTool {
         Self { root }
     }
 
+    pub(crate) fn run_with_ref(&self, base_ref: Option<&str>) -> Result<GitDiffOutput, ToolError> {
+        let output = run_bounded_git_diff(&self.root, base_ref)?;
+        if !output.status.success() {
+            return Err(git_diff_error(&output.stderr.bytes));
+        }
+        Ok(git_diff_output(output.stdout))
+    }
+
     fn run_diff(&self) -> Result<ToolRunResult, ToolError> {
-        let output = run_bounded_git_diff(&self.root)?;
+        let output = run_bounded_git_diff(&self.root, None)?;
 
         if !output.status.success() {
             return Err(git_diff_error(&output.stderr.bytes));
@@ -66,9 +74,17 @@ struct BoundedCapture {
     truncated: bool,
 }
 
-fn run_bounded_git_diff(root: &std::path::Path) -> Result<BoundedGitOutput, ToolError> {
+fn run_bounded_git_diff(
+    root: &std::path::Path,
+    base_ref: Option<&str>,
+) -> Result<BoundedGitOutput, ToolError> {
+    let mut args: Vec<&str> = vec!["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
+    if let Some(r) = base_ref {
+        args.push(r);
+    }
+    args.push("--");
     let mut child = Command::new("git")
-        .args(["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--"])
+        .args(&args)
         .current_dir(root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

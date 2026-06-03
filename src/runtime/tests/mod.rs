@@ -14,6 +14,7 @@ mod approval;
 mod branch_commands;
 mod commit_command;
 mod context_threshold;
+mod diff_command;
 mod engine;
 mod external_repo_fixtures;
 mod finalization;

@@ -1,7 +1,7 @@
 pub(crate) mod dispatch;
 
 use crate::core::config::{AllowedCommandTool, Config};
-use crate::runtime::RuntimeRequest;
+use crate::runtime::{DiffMode, RuntimeRequest};
 
 /// A parsed slash command entered by the user.
 /// Command parsing is a pure transformation — no runtime calls, no side effects.
@@ -30,6 +30,7 @@ pub enum Command {
     BranchList,
     BranchSwitch(String),
     Commit { message: Option<String> },
+    Diff(DiffMode),
     Ls(String),
     LspStatus,
     IndexBuild { large: bool },
@@ -121,6 +122,11 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
         "/commit" => Some(Ok(Command::Commit {
             message: arg.map(str::to_string),
         })),
+        "/diff" => match arg {
+            None => Some(Ok(Command::Diff(DiffMode::WorkingTree))),
+            Some("last") => Some(Ok(Command::Diff(DiffMode::SessionStart))),
+            Some(ref_) => Some(Ok(Command::Diff(DiffMode::Ref(ref_.to_string())))),
+        },
         "/branch" => match arg {
             None | Some("list") => Some(Ok(Command::BranchList)),
             Some("switch") => Some(Err(ParseError::MissingArgument {
@@ -189,6 +195,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/clear",
         "/commit",
         "/compact",
+        "/diff",
         "/context",
         "/exit",
         "/git",
@@ -244,6 +251,11 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/compact",
             description: "summarize and compress conversation context",
+        },
+        LauncherCommand {
+            name: "/diff",
+            description:
+                "show diff: working tree, session delta (/diff last), or vs commit (/diff <ref>)",
         },
         LauncherCommand {
             name: "/context",
@@ -692,6 +704,30 @@ mod tests {
         assert_eq!(
             parse("/verify cargo check"),
             Some(Ok(Command::VerifyMutation(Some("cargo check".to_string()))))
+        );
+    }
+
+    #[test]
+    fn parses_diff_bare() {
+        assert_eq!(
+            parse("/diff"),
+            Some(Ok(Command::Diff(DiffMode::WorkingTree)))
+        );
+    }
+
+    #[test]
+    fn parses_diff_last() {
+        assert_eq!(
+            parse("/diff last"),
+            Some(Ok(Command::Diff(DiffMode::SessionStart)))
+        );
+    }
+
+    #[test]
+    fn parses_diff_ref() {
+        assert_eq!(
+            parse("/diff main"),
+            Some(Ok(Command::Diff(DiffMode::Ref("main".to_string()))))
         );
     }
 

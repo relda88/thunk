@@ -39,6 +39,18 @@ mod anchor_resolution;
 #[path = "command_handlers.rs"]
 mod command_handlers;
 
+fn capture_session_head(root: &std::path::Path) -> Option<String> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Maximum tool rounds per turn. Prevents runaway loops when the model keeps
 /// producing tool calls without reaching a final answer.
 const MAX_TOOL_ROUNDS: usize = 10;
@@ -115,6 +127,9 @@ pub struct Runtime {
     correction_attempts: u32,
     /// Maximum allowed correction attempts per mutation. From config.project.max_correction_attempts.
     max_correction_attempts: u32,
+    /// SHA-1 of HEAD at the time this Runtime was constructed.
+    /// Used as the baseline for /diff last. Never mutated after new().
+    session_start_ref: Option<String>,
 }
 
 impl Runtime {
@@ -139,6 +154,7 @@ impl Runtime {
         );
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
         let lsp = LspManager::new(&config.lsp, project_root.path());
+        let session_start_ref = capture_session_head(project_root.path());
         Self {
             project_root,
             conversation: Conversation::new(system_prompt.clone()),
@@ -160,6 +176,7 @@ impl Runtime {
             verify_command: config.project.verify_command.clone(),
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
+            session_start_ref,
         }
     }
 
@@ -271,6 +288,7 @@ impl Runtime {
             } => self.handle_branch_create(name, on_event),
             RuntimeRequest::BranchSwitch { name } => self.handle_branch_switch(name, on_event),
             RuntimeRequest::Commit { message } => self.handle_commit(message, on_event),
+            RuntimeRequest::Diff { mode } => self.handle_diff(mode, on_event),
             RuntimeRequest::ListDir { path } => self.handle_list_dir(path, on_event),
             RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
             RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
@@ -2182,4 +2200,56 @@ fn last_injected_was_edit_error(conversation: &Conversation) -> bool {
         .last_user_content()
         .map(|c| c.starts_with("=== tool_error: edit_file ==="))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod engine_unit_tests {
+    use super::capture_session_head;
+    use std::process::Command;
+    use std::process::Stdio;
+    use tempfile::TempDir;
+
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} must succeed");
+    }
+
+    #[test]
+    fn capture_session_head_on_empty_repo_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        git(tmp.path(), &["init"]);
+        // No commits — HEAD does not point to a valid object.
+        assert!(capture_session_head(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn capture_session_head_with_commit_returns_hash() {
+        let tmp = TempDir::new().unwrap();
+        git(tmp.path(), &["init"]);
+        git(
+            tmp.path(),
+            &[
+                "-c",
+                "user.email=thunk@example.invalid",
+                "-c",
+                "user.name=thunk",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        );
+        let hash = capture_session_head(tmp.path()).expect("must return a hash after commit");
+        assert_eq!(hash.len(), 40, "SHA-1 must be 40 hex chars");
+        assert!(
+            hash.chars().all(|c| c.is_ascii_hexdigit()),
+            "hash must be hex"
+        );
+    }
 }

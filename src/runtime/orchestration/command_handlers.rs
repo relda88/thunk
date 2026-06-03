@@ -296,6 +296,48 @@ impl Runtime {
         }
     }
 
+    pub(super) fn handle_diff(
+        &mut self,
+        mode: crate::runtime::types::DiffMode,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        use crate::runtime::types::DiffMode;
+
+        let base_ref: Option<String> = match mode {
+            DiffMode::WorkingTree => None,
+            DiffMode::SessionStart => match &self.session_start_ref {
+                Some(r) => Some(r.clone()),
+                None => {
+                    on_event(RuntimeEvent::SystemMessage(
+                        "diff last: no session baseline (no commits at session start)".into(),
+                    ));
+                    return;
+                }
+            },
+            DiffMode::Ref(r) => Some(r),
+        };
+
+        let tool = crate::tools::GitDiffTool::new(self.project_root.as_path_buf());
+        let output = tool.run_with_ref(base_ref.as_deref());
+
+        match output {
+            Ok(diff) => {
+                let rendered =
+                    tool_codec::format_tool_result("git_diff", &ToolOutput::GitDiff(diff.clone()));
+                on_event(RuntimeEvent::InfoMessage(rendered));
+                if diff.truncated {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "diff truncated at {} bytes",
+                        diff.bytes_shown
+                    )));
+                }
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!("diff failed: {e}")));
+            }
+        }
+    }
+
     pub(super) fn handle_commit(
         &mut self,
         message: Option<String>,

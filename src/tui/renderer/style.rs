@@ -121,6 +121,8 @@ pub(crate) struct Theme {
     pub assistant: Rgb,
     pub warning: Rgb,
     pub danger: Rgb,
+    pub diff_add: Rgb,
+    pub diff_remove: Rgb,
 }
 
 impl Default for Theme {
@@ -136,6 +138,8 @@ impl Default for Theme {
             assistant: Rgb::new(223, 104, 184),
             warning: Rgb::new(242, 179, 86),
             danger: Rgb::new(237, 104, 109),
+            diff_add: Rgb::new(87, 201, 120),
+            diff_remove: Rgb::new(237, 104, 109),
         }
     }
 }
@@ -179,6 +183,14 @@ impl Theme {
 
     pub fn border_active(self) -> PackedStyle {
         PackedStyle::new(self.border_active, self.background).with_bold()
+    }
+
+    pub fn diff_add(self) -> PackedStyle {
+        PackedStyle::new(self.diff_add, self.background)
+    }
+
+    pub fn diff_remove(self) -> PackedStyle {
+        PackedStyle::new(self.diff_remove, self.background)
     }
 }
 

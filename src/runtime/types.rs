@@ -82,6 +82,17 @@ pub enum RuntimeTerminalReason {
     InsufficientEvidence,
 }
 
+/// How much of the diff to show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffMode {
+    /// git diff — working tree vs index (unstaged changes)
+    WorkingTree,
+    /// git diff <session_start_ref> — working tree vs session start
+    SessionStart,
+    /// git diff <ref> — working tree vs named ref or commit
+    Ref(String),
+}
+
 /// External inputs the runtime accepts from the app/TUI layer.
 #[derive(Debug, Clone)]
 pub enum RuntimeRequest {
@@ -191,6 +202,12 @@ pub enum RuntimeRequest {
     /// Read-only query: returns the current pending transaction state as a SystemMessage.
     /// Does not mutate conversation state or trigger session save.
     TransactionStatus,
+    /// /diff — shows git diff. WorkingTree shows unstaged changes, SessionStart shows
+    /// all changes since session start, Ref(<ref>) shows changes vs named ref or commit.
+    /// Read-only — no approval required.
+    Diff {
+        mode: DiffMode,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

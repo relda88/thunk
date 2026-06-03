@@ -37,6 +37,17 @@ pub(crate) fn classify_collapsible(content: &str) -> CollapsibleSummary {
         }
     }
 
+    if content.starts_with("diff --git ") {
+        let file_count = content
+            .lines()
+            .filter(|l| l.starts_with("diff --git "))
+            .count();
+        return CollapsibleSummary {
+            summary: format!("git diff: {} file(s) changed", file_count),
+            preview_lines: Vec::new(),
+        };
+    }
+
     if content.starts_with("history:\n") {
         let preview_lines: Vec<String> = content
             .lines()
