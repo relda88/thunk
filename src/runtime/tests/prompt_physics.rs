@@ -76,6 +76,7 @@ fn periodic_refresh_message_appears_after_snapshot_hint() {
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
         PathBuf::from("/tmp"),
+        "test-session".to_string(),
     )
     .with_prompt_physics_enabled();
 
@@ -133,6 +134,7 @@ fn recency_field_appears_after_periodic_refresh() {
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
         PathBuf::from("/tmp"),
+        "test-session".to_string(),
     )
     .with_prompt_physics_enabled();
 

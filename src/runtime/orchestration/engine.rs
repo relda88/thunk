@@ -144,6 +144,11 @@ pub struct Runtime {
     active_skill: Option<SkillContent>,
     /// Whether /fetch is enabled. Read from config.web_fetch.enabled at startup.
     web_fetch_enabled: bool,
+    /// Session identity. Used by plan handlers to key TaskStore queries.
+    session_id: String,
+    /// Parsed plan awaiting user approval. Set by handle_plan_create, consumed by
+    /// handle_plan_approve / handle_plan_abandon. Never persisted; cleared on reset.
+    pending_plan: Option<command_handlers::PendingPlanDraft>,
 }
 
 impl Runtime {
@@ -154,6 +159,7 @@ impl Runtime {
         registry: ToolRegistry,
         thunk_md: Option<String>,
         thunk_dir: std::path::PathBuf,
+        session_id: String,
     ) -> Self {
         let specs = registry.specs();
         let prompt_physics = PromptPhysicsConfig {
@@ -199,6 +205,8 @@ impl Runtime {
             active_ability: None,
             active_skill: None,
             web_fetch_enabled: config.web_fetch.enabled,
+            session_id,
+            pending_plan: None,
         }
     }
 
@@ -334,6 +342,10 @@ impl Runtime {
             RuntimeRequest::AbilityToggle { name } => self.handle_ability_toggle(name, on_event),
             RuntimeRequest::SkillToggle { name } => self.handle_skill_toggle(name, on_event),
             RuntimeRequest::FetchUrl { url } => self.handle_fetch_url(url, on_event),
+            RuntimeRequest::PlanCreate { goal } => self.handle_plan_create(goal, on_event),
+            RuntimeRequest::PlanApprove => self.handle_plan_approve(on_event),
+            RuntimeRequest::PlanAbandon => self.handle_plan_abandon(on_event),
+            RuntimeRequest::PlanStatus => self.handle_plan_status(on_event),
         }
     }
 

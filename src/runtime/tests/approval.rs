@@ -18,6 +18,7 @@ fn make_runtime_in_with_recorded_requests(
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
         PathBuf::from("/tmp"),
+        "test-session".to_string(),
     );
     (runtime, requests)
 }

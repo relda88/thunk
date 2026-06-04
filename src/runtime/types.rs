@@ -226,6 +226,17 @@ pub enum RuntimeRequest {
     FetchUrl {
         url: String,
     },
+    /// /plan <goal> — generate a structured numbered plan via the model, parse it,
+    /// hold it pending user approval. Does not persist to TaskStore until PlanApprove.
+    PlanCreate {
+        goal: String,
+    },
+    /// /plan approve — persist the pending plan to TaskStore and mark it active.
+    PlanApprove,
+    /// /plan abandon — discard any pending or active plan for this session.
+    PlanAbandon,
+    /// /plan status — show the pending plan or active plan task list.
+    PlanStatus,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
@@ -301,5 +312,11 @@ pub enum RuntimeEvent {
     ContextUsage {
         prompt_tokens: u64,
         context_window_tokens: u32,
+    },
+    /// Fired when a plan is generated and parsed successfully, awaiting user approval.
+    /// The TUI renders the numbered step list with ^Y approve / ^N abandon controls.
+    PlanApprovalRequired {
+        goal: String,
+        steps: Vec<(String, String)>,
     },
 }

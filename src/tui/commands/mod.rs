@@ -43,6 +43,10 @@ pub enum Command {
     Ability(Option<String>),
     Skill(Option<String>),
     Fetch(String),
+    PlanCreate(String),
+    PlanApprove,
+    PlanAbandon,
+    PlanStatus,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -181,6 +185,13 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some(url) => Some(Ok(Command::Fetch(url.to_string()))),
             None => Some(Err(ParseError::MissingArgument { command: "/fetch" })),
         },
+        "/plan" => match arg {
+            None | Some("status") => Some(Ok(Command::PlanStatus)),
+            Some("approve") => Some(Ok(Command::PlanApprove)),
+            Some("abandon") => Some(Ok(Command::PlanAbandon)),
+            Some(goal) if !goal.is_empty() => Some(Ok(Command::PlanCreate(goal.to_string()))),
+            _ => Some(Err(ParseError::MissingArgument { command: "/plan" })),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -216,6 +227,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/last",
         "/ls",
         "/lsp",
+        "/plan",
         "/prompt-physics",
         "/providers",
         "/quit",
@@ -312,6 +324,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/lsp",
             description: "show LSP server status",
+        },
+        LauncherCommand {
+            name: "/plan",
+            description: "create a structured plan from a goal (/plan <goal>)",
         },
         LauncherCommand {
             name: "/prompt-physics",
@@ -826,5 +842,33 @@ mod tests {
                 "https://example.com/path?q=1".to_string()
             )))
         );
+    }
+
+    #[test]
+    fn parses_plan_create() {
+        assert_eq!(
+            parse("/plan refactor auth"),
+            Some(Ok(Command::PlanCreate("refactor auth".to_string())))
+        );
+    }
+
+    #[test]
+    fn parses_plan_status_explicit() {
+        assert_eq!(parse("/plan status"), Some(Ok(Command::PlanStatus)));
+    }
+
+    #[test]
+    fn parses_plan_bare_defaults_to_status() {
+        assert_eq!(parse("/plan"), Some(Ok(Command::PlanStatus)));
+    }
+
+    #[test]
+    fn parses_plan_approve() {
+        assert_eq!(parse("/plan approve"), Some(Ok(Command::PlanApprove)));
+    }
+
+    #[test]
+    fn parses_plan_abandon() {
+        assert_eq!(parse("/plan abandon"), Some(Ok(Command::PlanAbandon)));
     }
 }

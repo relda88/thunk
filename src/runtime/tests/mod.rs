@@ -26,6 +26,7 @@ mod investigation;
 mod investigation_inline;
 mod investigation_modes;
 mod path_scope;
+mod plan_command;
 mod project_snapshot;
 mod prompt_physics;
 mod read_bounds;
@@ -140,6 +141,7 @@ pub fn make_runtime(responses: Vec<impl Into<String>>) -> Runtime {
         default_registry().with_project_root(root.as_path_buf()),
         None,
         PathBuf::from("/tmp"),
+        "test-session".to_string(),
     )
 }
 
@@ -152,6 +154,7 @@ pub fn make_runtime_in(responses: Vec<impl Into<String>>, root: &std::path::Path
         default_registry().with_project_root(project_root.as_path_buf()),
         None,
         root.to_path_buf(),
+        "test-session".to_string(),
     )
 }
 
@@ -167,6 +170,7 @@ pub fn make_runtime_with_recorded_requests(
         default_registry().with_project_root(root.as_path_buf()),
         None,
         PathBuf::from("/tmp"),
+        "test-session".to_string(),
     );
     (runtime, requests)
 }
@@ -254,6 +258,7 @@ pub fn make_runtime_with_token_counting_backend(
         default_registry().with_project_root(root.as_path_buf()),
         None,
         PathBuf::from("/tmp"),
+        "test-session".to_string(),
     )
 }
 

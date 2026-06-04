@@ -81,14 +81,26 @@ pub(super) fn handle_key_event(
         }
         (KeyCode::Char('p'), KeyModifiers::CONTROL) => state.recall_previous_input(),
         (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-            if state.pending_approval.is_some() {
+            if state.pending_plan_approval.is_some() {
+                dispatch::dispatch_command_runtime_request(
+                    state,
+                    cmd_tx,
+                    RuntimeRequest::PlanAbandon,
+                )?;
+            } else if state.pending_approval.is_some() {
                 dispatch::dispatch_command_runtime_request(state, cmd_tx, RuntimeRequest::Reject)?;
             } else {
                 state.recall_next_input();
             }
         }
         (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-            if state.pending_approval.is_some() {
+            if state.pending_plan_approval.is_some() {
+                dispatch::dispatch_command_runtime_request(
+                    state,
+                    cmd_tx,
+                    RuntimeRequest::PlanApprove,
+                )?;
+            } else if state.pending_approval.is_some() {
                 dispatch::dispatch_command_runtime_request(state, cmd_tx, RuntimeRequest::Approve)?;
             }
         }

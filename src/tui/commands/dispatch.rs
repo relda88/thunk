@@ -94,6 +94,10 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::Ability(name) => CommandAction::Runtime(RuntimeRequest::AbilityToggle { name }),
         Command::Skill(name) => CommandAction::Runtime(RuntimeRequest::SkillToggle { name }),
         Command::Fetch(url) => CommandAction::Runtime(RuntimeRequest::FetchUrl { url }),
+        Command::PlanCreate(goal) => CommandAction::Runtime(RuntimeRequest::PlanCreate { goal }),
+        Command::PlanApprove => CommandAction::Runtime(RuntimeRequest::PlanApprove),
+        Command::PlanAbandon => CommandAction::Runtime(RuntimeRequest::PlanAbandon),
+        Command::PlanStatus => CommandAction::Runtime(RuntimeRequest::PlanStatus),
     }
 }
 

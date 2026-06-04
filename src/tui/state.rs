@@ -54,6 +54,12 @@ pub(crate) struct PendingApprovalState {
     pub(crate) transaction_files: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PendingPlanApprovalState {
+    pub(crate) goal: String,
+    pub(crate) steps: Vec<(String, String)>,
+}
+
 /// Represents a chat message with a role (system, user, assistant) and content
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
@@ -102,6 +108,7 @@ pub struct AppState {
     /// the newly focused message into the upper third of the viewport.
     pub(crate) scroll_to_message_idx: Option<usize>,
     pub(crate) pending_approval: Option<PendingApprovalState>,
+    pub(crate) pending_plan_approval: Option<PendingPlanApprovalState>,
     pub(crate) autocomplete_matches: Vec<String>,
     pub(crate) autocomplete_index: usize,
     pub(crate) autocomplete_prefix: Option<String>,
@@ -157,6 +164,7 @@ impl AppState {
             visible_collapsible_ids: Vec::new(),
             scroll_to_message_idx: None,
             pending_approval: None,
+            pending_plan_approval: None,
             autocomplete_matches: Vec::new(),
             autocomplete_index: 0,
             autocomplete_prefix: None,
@@ -262,6 +270,7 @@ impl AppState {
         self.visible_collapsible_ids.clear();
         self.scroll_to_message_idx = None;
         self.pending_approval = None;
+        self.pending_plan_approval = None;
         self.reset_scroll();
     }
 

@@ -1,9 +1,11 @@
 use crate::llm::backend::{BackendEvent, GenerateRequest, Message, Role};
+use crate::storage::tasks::PlanStatus;
 use crate::tools::{
     PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolOutput, ToolRunResult,
 };
 
 use super::super::super::protocol::abilities::AbilityLoader;
+use super::super::super::protocol::plan_parser::{parse_plan, PlanStep};
 use super::super::super::protocol::skills::SkillLoader;
 use super::super::super::protocol::tool_codec;
 use super::super::super::resolve;
@@ -11,6 +13,11 @@ use super::super::super::trace::trace_runtime_decision;
 use super::super::super::types::{Activity, RuntimeEvent};
 use super::super::telemetry::TurnPerformance;
 use super::Runtime;
+
+pub(crate) struct PendingPlanDraft {
+    pub goal: String,
+    pub steps: Vec<PlanStep>,
+}
 
 /// Bounds for /history output. Limits messages shown and chars per message to
 /// prevent unbounded InfoMessage output from long or tool-heavy sessions.
@@ -463,6 +470,7 @@ impl Runtime {
 
     pub(super) fn handle_reset(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         self.pending_action = None;
+        self.pending_plan = None;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,
@@ -889,6 +897,255 @@ impl Runtime {
                 };
                 on_event(RuntimeEvent::SystemMessage(status));
             }
+        }
+    }
+
+    pub(super) fn handle_plan_create(
+        &mut self,
+        goal: String,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        if self.pending_action.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "plan: cannot create plan while a tool approval is pending".to_string(),
+            ));
+            return;
+        }
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        if let Some(store) = &self.task_store {
+            match store.get_active_plan(&self.session_id, &project_root) {
+                Ok(Some(existing)) => {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "plan: '{}' is already active — use /plan abandon first",
+                        existing.goal
+                    )));
+                    return;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "plan: storage error: {e}"
+                    )));
+                    return;
+                }
+            }
+        }
+
+        on_event(RuntimeEvent::SystemMessage(
+            "plan: generating...".to_string(),
+        ));
+
+        let mut steps_result: Result<Vec<_>, String> = Err("no response".to_string());
+        for attempt in 0..2 {
+            match self.generate_plan_steps(&goal) {
+                Some(text) => match parse_plan(&text) {
+                    Ok(steps) => {
+                        steps_result = Ok(steps);
+                        break;
+                    }
+                    Err(e) => {
+                        if attempt == 0 {
+                            on_event(RuntimeEvent::SystemMessage(format!(
+                                "plan: retrying... ({e})"
+                            )));
+                        } else {
+                            steps_result = Err(e);
+                        }
+                    }
+                },
+                None => {
+                    steps_result = Err("backend did not respond".to_string());
+                    break;
+                }
+            }
+        }
+
+        match steps_result {
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "plan: could not parse model response — {e} — try again or simplify the goal"
+                )));
+            }
+            Ok(steps) => {
+                let step_pairs: Vec<(String, String)> = steps
+                    .iter()
+                    .map(|s| (s.title.clone(), s.description.clone()))
+                    .collect();
+                self.pending_plan = Some(PendingPlanDraft {
+                    goal: goal.clone(),
+                    steps,
+                });
+                on_event(RuntimeEvent::PlanApprovalRequired {
+                    goal,
+                    steps: step_pairs,
+                });
+            }
+        }
+    }
+
+    pub(super) fn handle_plan_approve(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let draft = match self.pending_plan.take() {
+            Some(d) => d,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "plan: no pending plan to approve".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "plan: no storage configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let plan_id = match store.create_plan(&self.session_id, &project_root, &draft.goal) {
+            Ok(id) => id,
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "plan: failed to save plan: {e}"
+                )));
+                return;
+            }
+        };
+
+        for (i, step) in draft.steps.iter().enumerate() {
+            if let Err(e) = store.add_task(
+                &plan_id,
+                &self.session_id,
+                &project_root,
+                i + 1,
+                &step.title,
+                &step.description,
+            ) {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "plan: failed to save step {}: {e}",
+                    i + 1
+                )));
+                return;
+            }
+        }
+
+        if let Err(e) = store.update_plan_status(&plan_id, PlanStatus::Active) {
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "plan: failed to activate plan: {e}"
+            )));
+            return;
+        }
+
+        on_event(RuntimeEvent::SystemMessage(
+            "plan: approved and saved — use /plan status to view steps".to_string(),
+        ));
+    }
+
+    pub(super) fn handle_plan_abandon(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        self.pending_plan = None;
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        if let Some(store) = &self.task_store {
+            if let Ok(Some(plan)) = store.get_active_plan(&self.session_id, &project_root) {
+                let _ = store.update_plan_status(&plan.id, PlanStatus::Abandoned);
+            }
+        }
+
+        on_event(RuntimeEvent::SystemMessage("plan: abandoned".to_string()));
+    }
+
+    pub(super) fn handle_plan_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        if let Some(ref draft) = self.pending_plan {
+            let mut msg = format!("plan (pending approval): {}\n", draft.goal);
+            for (i, step) in draft.steps.iter().enumerate() {
+                msg.push_str(&format!(
+                    "  {}. {}: {}\n",
+                    i + 1,
+                    step.title,
+                    step.description
+                ));
+            }
+            msg.push_str("  Use /plan approve or /plan abandon");
+            on_event(RuntimeEvent::SystemMessage(msg));
+            return;
+        }
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        if let Some(store) = &self.task_store {
+            match store.get_active_plan(&self.session_id, &project_root) {
+                Ok(Some(plan)) => {
+                    let mut msg = format!("plan: {}\n", plan.goal);
+                    match store.list_tasks(&plan.id) {
+                        Ok(tasks) => {
+                            for task in &tasks {
+                                msg.push_str(&format!(
+                                    "  {}. [{}] {}: {}\n",
+                                    task.step_number,
+                                    task.status.as_str(),
+                                    task.title,
+                                    task.description
+                                ));
+                            }
+                        }
+                        Err(e) => msg.push_str(&format!("  (error loading tasks: {e})")),
+                    }
+                    on_event(RuntimeEvent::SystemMessage(msg));
+                    return;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "plan: storage error: {e}"
+                    )));
+                    return;
+                }
+            }
+        }
+
+        on_event(RuntimeEvent::SystemMessage(
+            "plan: no active plan".to_string(),
+        ));
+    }
+
+    fn generate_plan_steps(&mut self, goal: &str) -> Option<String> {
+        let prompt = format!(
+            "You are generating a structured implementation plan.\n\
+             Respond with ONLY a numbered list — no preamble, no prose,\n\
+             no markdown headers, no trailing commentary.\n\n\
+             Format (one step per line):\n\
+             1. Title: Brief description of this step\n\
+             2. Title: Brief description of this step\n\n\
+             Goal: {goal}\n\n\
+             Requirements:\n\
+             - At least 2 steps, at most 10 steps\n\
+             - Each line must match exactly: N. Title: Description\n\
+             - No blank lines between steps\n\
+             - No text before or after the numbered list"
+        );
+        let mut messages = self.conversation.pruned_snapshot();
+        messages.push(Message::user(prompt));
+        let request = GenerateRequest::new(messages);
+        let mut result = String::new();
+        if self
+            .backend
+            .generate(request, &mut |event| {
+                if let BackendEvent::TextDelta(chunk) = event {
+                    result.push_str(&chunk);
+                }
+            })
+            .is_err()
+        {
+            return None;
+        }
+        let text = result.trim().to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
         }
     }
 }

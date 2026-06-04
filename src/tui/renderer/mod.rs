@@ -134,8 +134,12 @@ impl Renderer {
                 + a.preview.len().min(4) as u16
                 + 1
         });
+        let plan_rows: u16 = state
+            .pending_plan_approval
+            .as_ref()
+            .map_or(0, |p| 1 + p.steps.len() as u16 + 1);
         let input_base_rows = input_rows + overlay_rows;
-        let effective_rows = input_base_rows + approval_rows;
+        let effective_rows = input_base_rows + approval_rows + plan_rows;
 
         // Rows 2..h-effective_rows-2: transcript
         if h > effective_rows + 3 {
@@ -149,9 +153,15 @@ impl Renderer {
             self.paint(cur, 0, row, &rule, w, self.theme.border());
         }
 
+        // Plan approval widget (above the tool approval widget)
+        if plan_rows > 0 {
+            let first_row = h.saturating_sub(effective_rows - approval_rows + 1);
+            self.paint_plan_approval_widget(state, first_row, w);
+        }
+
         // Approval widget: rows above the input area (between separator and input)
         if approval_rows > 0 {
-            let first_row = h.saturating_sub(effective_rows + 1);
+            let first_row = h.saturating_sub(approval_rows + input_base_rows + 1);
             self.paint_approval_widget(state, first_row, w);
         }
 
@@ -565,6 +575,24 @@ impl Renderer {
             w,
             dim,
         );
+    }
+
+    fn paint_plan_approval_widget(&mut self, state: &AppState, first_row: u16, w: u16) {
+        let Some(ref plan) = state.pending_plan_approval else {
+            return;
+        };
+        let cur = self.current;
+        let dim = self.theme.dim();
+        let label_style = self.theme.chip_warning();
+        let label = format!("  Plan: {}", plan.goal);
+        self.paint(cur, 0, first_row, &label, w, label_style);
+        for (i, (title, desc)) in plan.steps.iter().enumerate() {
+            let row_text = format!("  {}. {}: {}", i + 1, title, desc);
+            let display: String = row_text.chars().take(w as usize).collect();
+            self.paint(cur, 0, first_row + 1 + i as u16, &display, w, dim);
+        }
+        let control_row = first_row + 1 + plan.steps.len() as u16;
+        self.paint(cur, 0, control_row, "  ^Y approve   ^N abandon", w, dim);
     }
 
     fn paint_autocomplete_overlay(

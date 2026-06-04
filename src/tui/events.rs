@@ -2,7 +2,9 @@ use crate::runtime::{AnswerSource, RuntimeEvent};
 use crate::tools::RiskLevel;
 
 use super::format::summarize_command_output;
-use super::state::{AppState, ApprovalRisk, DirtySections, PendingApprovalState};
+use super::state::{
+    AppState, ApprovalRisk, DirtySections, PendingApprovalState, PendingPlanApprovalState,
+};
 
 pub(super) fn decode_approval_preview(tool_name: &str, payload: &str) -> Vec<String> {
     match tool_name {
@@ -53,6 +55,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         RuntimeEvent::AnswerReady(source) => {
             state.is_busy = false;
             state.pending_approval = None;
+            state.pending_plan_approval = None;
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("ready");
             if let AnswerSource::ToolLimitReached = source {
@@ -62,6 +65,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         RuntimeEvent::Failed { message } => {
             state.is_busy = false;
             state.pending_approval = None;
+            state.pending_plan_approval = None;
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("error");
             state.add_error_message(message);
@@ -128,6 +132,11 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         } => {
             let pct = (prompt_tokens * 100 / u64::from(context_window_tokens)).min(100) as u8;
             state.set_context_pct(pct);
+        }
+        RuntimeEvent::PlanApprovalRequired { goal, steps } => {
+            state.pending_plan_approval = Some(PendingPlanApprovalState { goal, steps });
+            state.mark_dirty(DirtySections::INPUT);
+            state.set_status("awaiting plan approval");
         }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}

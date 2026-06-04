@@ -17,6 +17,10 @@ pub struct ActiveSession {
 }
 
 impl ActiveSession {
+    pub fn id(&self) -> &str {
+        &self.session_id
+    }
+
     /// Opens the session database and returns the active session, previously stored messages,
     /// and restored anchor state. Returns empty messages and None anchors if no prior session exists.
     pub fn open_or_restore(

@@ -136,8 +136,15 @@ impl AppContext {
         thunk_md: Option<String>,
         thunk_dir: std::path::PathBuf,
     ) -> Result<Self> {
-        let mut runtime =
-            Runtime::new(config, project_root, backend, registry, thunk_md, thunk_dir);
+        let mut runtime = Runtime::new(
+            config,
+            project_root,
+            backend,
+            registry,
+            thunk_md,
+            thunk_dir,
+            session.id().to_string(),
+        );
         if let Some(path) = db_path {
             runtime = runtime.with_symbol_store(path);
             runtime = runtime.with_task_store(path);
@@ -192,6 +199,10 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::AbilityToggle { .. } => "ability_toggle",
         RuntimeRequest::SkillToggle { .. } => "skill_toggle",
         RuntimeRequest::FetchUrl { .. } => "fetch_url",
+        RuntimeRequest::PlanCreate { .. } => "plan_create",
+        RuntimeRequest::PlanApprove => "plan_approve",
+        RuntimeRequest::PlanAbandon => "plan_abandon",
+        RuntimeRequest::PlanStatus => "plan_status",
     }
 }
 
@@ -210,6 +221,9 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         )),
         RuntimeEvent::InfoMessage(text) => Some(format!("info: {text}")),
         RuntimeEvent::SystemMessage(text) => Some(format!("system: {text}")),
+        RuntimeEvent::PlanApprovalRequired { goal, .. } => {
+            Some(format!("plan approval required: {goal}"))
+        }
         // Handled with timing in handle():
         RuntimeEvent::AssistantMessageStarted
         | RuntimeEvent::AssistantMessageFinished
