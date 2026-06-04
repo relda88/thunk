@@ -98,6 +98,16 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::PlanApprove => CommandAction::Runtime(RuntimeRequest::PlanApprove),
         Command::PlanAbandon => CommandAction::Runtime(RuntimeRequest::PlanAbandon),
         Command::PlanStatus => CommandAction::Runtime(RuntimeRequest::PlanStatus),
+        Command::TaskExecute { step } => {
+            CommandAction::Runtime(RuntimeRequest::TaskExecute { step })
+        }
+        Command::TaskComplete { step, summary } => {
+            CommandAction::Runtime(RuntimeRequest::TaskComplete { step, summary })
+        }
+        Command::TaskBlock { step, reason } => {
+            CommandAction::Runtime(RuntimeRequest::TaskBlock { step, reason })
+        }
+        Command::TaskStatus => CommandAction::Runtime(RuntimeRequest::TaskStatus),
     }
 }
 

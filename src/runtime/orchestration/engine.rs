@@ -346,6 +346,14 @@ impl Runtime {
             RuntimeRequest::PlanApprove => self.handle_plan_approve(on_event),
             RuntimeRequest::PlanAbandon => self.handle_plan_abandon(on_event),
             RuntimeRequest::PlanStatus => self.handle_plan_status(on_event),
+            RuntimeRequest::TaskExecute { step } => self.handle_task_execute(step, on_event),
+            RuntimeRequest::TaskComplete { step, summary } => {
+                self.handle_task_complete(step, summary, on_event)
+            }
+            RuntimeRequest::TaskBlock { step, reason } => {
+                self.handle_task_block(step, reason, on_event)
+            }
+            RuntimeRequest::TaskStatus => self.handle_task_status(on_event),
         }
     }
 

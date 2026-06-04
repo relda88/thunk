@@ -29,11 +29,15 @@ pub enum Command {
     BranchCreate(String),
     BranchList,
     BranchSwitch(String),
-    Commit { message: Option<String> },
+    Commit {
+        message: Option<String>,
+    },
     Diff(DiffMode),
     Ls(String),
     LspStatus,
-    IndexBuild { large: bool },
+    IndexBuild {
+        large: bool,
+    },
     IndexStatus,
     ContextStats,
     Compact,
@@ -47,6 +51,18 @@ pub enum Command {
     PlanApprove,
     PlanAbandon,
     PlanStatus,
+    TaskExecute {
+        step: usize,
+    },
+    TaskComplete {
+        step: usize,
+        summary: Option<String>,
+    },
+    TaskBlock {
+        step: usize,
+        reason: Option<String>,
+    },
+    TaskStatus,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -192,6 +208,37 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some(goal) if !goal.is_empty() => Some(Ok(Command::PlanCreate(goal.to_string()))),
             _ => Some(Err(ParseError::MissingArgument { command: "/plan" })),
         },
+        "/task" => match arg {
+            None | Some("status") => Some(Ok(Command::TaskStatus)),
+            Some(rest) if rest.starts_with("complete") => {
+                let parts: Vec<&str> = rest.splitn(3, ' ').collect();
+                match parts.get(1).and_then(|s| s.parse::<usize>().ok()) {
+                    Some(step) => Some(Ok(Command::TaskComplete {
+                        step,
+                        summary: parts.get(2).map(|s| s.to_string()),
+                    })),
+                    None => Some(Err(ParseError::MissingArgument {
+                        command: "/task complete",
+                    })),
+                }
+            }
+            Some(rest) if rest.starts_with("block") => {
+                let parts: Vec<&str> = rest.splitn(3, ' ').collect();
+                match parts.get(1).and_then(|s| s.parse::<usize>().ok()) {
+                    Some(step) => Some(Ok(Command::TaskBlock {
+                        step,
+                        reason: parts.get(2).map(|s| s.to_string()),
+                    })),
+                    None => Some(Err(ParseError::MissingArgument {
+                        command: "/task block",
+                    })),
+                }
+            }
+            Some(rest) => match rest.trim().parse::<usize>() {
+                Ok(step) => Some(Ok(Command::TaskExecute { step })),
+                Err(_) => Some(Err(ParseError::MissingArgument { command: "/task" })),
+            },
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -237,6 +284,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/session",
         "/sessions",
         "/skill",
+        "/task",
         "/transaction",
         "/undo",
         "/verify",
@@ -364,6 +412,11 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/skill",
             description: "set response style: concise, thorough, educational, critical, creative",
+        },
+        LauncherCommand {
+            name: "/task",
+            description:
+                "execute a plan step (/task <n>), mark complete (/task complete <n>), or blocked",
         },
         LauncherCommand {
             name: "/transaction",

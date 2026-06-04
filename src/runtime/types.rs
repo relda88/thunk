@@ -237,6 +237,22 @@ pub enum RuntimeRequest {
     PlanAbandon,
     /// /plan status — show the pending plan or active plan task list.
     PlanStatus,
+    /// /task <n> — execute step N of the active plan via the normal investigation turn loop.
+    TaskExecute {
+        step: usize,
+    },
+    /// /task complete <n> [summary] — mark step N as completed with an optional summary.
+    TaskComplete {
+        step: usize,
+        summary: Option<String>,
+    },
+    /// /task block <n> [reason] — mark step N as blocked with an optional reason.
+    TaskBlock {
+        step: usize,
+        reason: Option<String>,
+    },
+    /// /task status — show all task statuses for the active plan.
+    TaskStatus,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

@@ -203,6 +203,10 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::PlanApprove => "plan_approve",
         RuntimeRequest::PlanAbandon => "plan_abandon",
         RuntimeRequest::PlanStatus => "plan_status",
+        RuntimeRequest::TaskExecute { .. } => "task_execute",
+        RuntimeRequest::TaskComplete { .. } => "task_complete",
+        RuntimeRequest::TaskBlock { .. } => "task_block",
+        RuntimeRequest::TaskStatus => "task_status",
     }
 }
 

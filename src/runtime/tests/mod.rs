@@ -32,6 +32,7 @@ mod prompt_physics;
 mod read_bounds;
 mod search_budget;
 mod search_guardrails;
+mod task_command;
 mod tool_round;
 mod tool_surface;
 mod web_fetch;

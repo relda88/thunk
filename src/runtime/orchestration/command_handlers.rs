@@ -1,5 +1,5 @@
 use crate::llm::backend::{BackendEvent, GenerateRequest, Message, Role};
-use crate::storage::tasks::PlanStatus;
+use crate::storage::tasks::{PlanStatus, TaskStatus};
 use crate::tools::{
     PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolOutput, ToolRunResult,
 };
@@ -1150,6 +1150,282 @@ impl Runtime {
             None
         } else {
             Some(text)
+        }
+    }
+
+    pub(super) fn handle_task_execute(
+        &mut self,
+        step: usize,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        if self.pending_action.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "task: cannot execute while a tool approval is pending".to_string(),
+            ));
+            return;
+        }
+
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no storage configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let plan = match store.get_active_plan(&self.session_id, &project_root) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no active plan — use /plan first".to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+                return;
+            }
+        };
+
+        let tasks = match store.list_tasks(&plan.id) {
+            Ok(t) => t,
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+                return;
+            }
+        };
+
+        let task = match tasks.iter().find(|t| t.step_number == step) {
+            Some(t) => t.clone(),
+            None => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: step {step} not found in active plan"
+                )));
+                return;
+            }
+        };
+
+        let total = tasks.len();
+
+        if task.status == TaskStatus::Completed {
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "task: step {step} is already completed — executing anyway"
+            )));
+        }
+
+        if let Some(store) = &self.task_store {
+            let _ = store.update_task_status(&task.id, TaskStatus::InProgress, None);
+        }
+
+        let augmented_prompt = format!(
+            "[runtime:task] Step {step} of {total}: \"{title}\"\n\
+             Description: {description}\n\
+             Plan goal: {goal}\n\n\
+             Work on this step now.",
+            title = task.title,
+            description = task.description,
+            goal = plan.goal,
+        );
+
+        self.conversation.push_user(augmented_prompt);
+        on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
+        self.run_turns(0, on_event);
+    }
+
+    pub(super) fn handle_task_complete(
+        &mut self,
+        step: usize,
+        summary: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no storage configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let plan = match store.get_active_plan(&self.session_id, &project_root) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no active plan".to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+                return;
+            }
+        };
+
+        let tasks = match store.list_tasks(&plan.id) {
+            Ok(t) => t,
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+                return;
+            }
+        };
+
+        let task = match tasks.iter().find(|t| t.step_number == step) {
+            Some(t) => t.clone(),
+            None => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: step {step} not found in active plan"
+                )));
+                return;
+            }
+        };
+
+        if let Err(e) =
+            store.update_task_status(&task.id, TaskStatus::Completed, summary.as_deref())
+        {
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "task: storage error: {e}"
+            )));
+            return;
+        }
+
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "task {step}: completed"
+        )));
+
+        let all_done = tasks
+            .iter()
+            .filter(|t| t.step_number != step)
+            .all(|t| t.status == TaskStatus::Completed);
+        if all_done {
+            if let Some(store) = &self.task_store {
+                let _ = store.update_plan_status(&plan.id, PlanStatus::Completed);
+            }
+            on_event(RuntimeEvent::SystemMessage(
+                "plan: all steps completed".to_string(),
+            ));
+        }
+    }
+
+    pub(super) fn handle_task_block(
+        &mut self,
+        step: usize,
+        reason: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no storage configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let plan = match store.get_active_plan(&self.session_id, &project_root) {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no active plan".to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+                return;
+            }
+        };
+
+        let tasks = match store.list_tasks(&plan.id) {
+            Ok(t) => t,
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+                return;
+            }
+        };
+
+        let task = match tasks.iter().find(|t| t.step_number == step) {
+            Some(t) => t.clone(),
+            None => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: step {step} not found in active plan"
+                )));
+                return;
+            }
+        };
+
+        if let Err(e) = store.update_task_status(&task.id, TaskStatus::Blocked, reason.as_deref()) {
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "task: storage error: {e}"
+            )));
+            return;
+        }
+
+        on_event(RuntimeEvent::SystemMessage(format!("task {step}: blocked")));
+    }
+
+    pub(super) fn handle_task_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let store = match &self.task_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no storage configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        match store.get_active_plan(&self.session_id, &project_root) {
+            Ok(Some(plan)) => {
+                let mut msg = format!("plan: {}\n", plan.goal);
+                match store.list_tasks(&plan.id) {
+                    Ok(tasks) => {
+                        for task in &tasks {
+                            let badge = match task.status {
+                                TaskStatus::Pending => "[pending]",
+                                TaskStatus::InProgress => "[in_progress]",
+                                TaskStatus::Completed => "[completed]",
+                                TaskStatus::Blocked => "[blocked]",
+                            };
+                            msg.push_str(&format!(
+                                "  {}. {} {}: {}\n",
+                                task.step_number, badge, task.title, task.description
+                            ));
+                        }
+                    }
+                    Err(e) => msg.push_str(&format!("  (error loading tasks: {e})")),
+                }
+                on_event(RuntimeEvent::SystemMessage(msg));
+            }
+            Ok(None) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "task: no active plan".to_string(),
+                ));
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "task: storage error: {e}"
+                )));
+            }
         }
     }
 }
