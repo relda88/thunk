@@ -1428,4 +1428,69 @@ impl Runtime {
             }
         }
     }
+
+    pub(super) fn handle_agent_run(
+        &mut self,
+        ability: String,
+        target: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        if !matches!(ability.as_str(), "review" | "investigate") {
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "agent: unsupported ability '{ability}' — supported: review, investigate"
+            )));
+            return;
+        }
+
+        let ability_content = match AbilityLoader::load(&ability, &self.thunk_dir) {
+            Ok(c) => c,
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!("agent: {e}")));
+                return;
+            }
+        };
+
+        let saved_ability = self.active_ability.clone();
+        let saved_pp_ability = self.prompt_physics.active_ability.clone();
+
+        self.active_ability = Some(ability_content);
+        self.prompt_physics.active_ability = self.active_ability.clone();
+
+        let target_str = target.as_deref().unwrap_or("the current codebase");
+
+        let augmented_prompt = match ability.as_str() {
+            "review" => format!(
+                "[runtime:agent:review] Review workflow\n\
+                 Target: {target_str}\n\n\
+                 Use the review ability. Read the relevant files. \
+                 Produce a structured critique.\n\n\
+                 Format each issue as:\n\
+                 [critical|warning|note] <what is wrong> — \
+                 <why it matters> — <fix direction>\n\n\
+                 Correctness bugs first. Cite specific file and \
+                 line for every claim. Do not soften real bugs."
+            ),
+            "investigate" => format!(
+                "[runtime:agent:investigate] Investigate workflow\n\
+                 Target: {target_str}\n\n\
+                 Use the investigate ability. Gather evidence \
+                 systematically.\n\n\
+                 Format your findings as:\n\
+                 KNOWN: <confirmed facts with evidence>\n\
+                 UNKNOWN: <open questions, ranked by value>\n\
+                 HYPOTHESIS: <current best explanation>\n\
+                 NEXT READS: <specific files/symbols to resolve \
+                 the top unknown>\n\n\
+                 Do not conclude until evidence is sufficient."
+            ),
+            _ => unreachable!(),
+        };
+
+        self.conversation.push_user(augmented_prompt);
+        on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
+        self.run_turns(0, on_event);
+
+        self.active_ability = saved_ability;
+        self.prompt_physics.active_ability = saved_pp_ability;
+    }
 }

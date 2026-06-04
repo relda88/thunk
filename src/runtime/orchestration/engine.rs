@@ -354,6 +354,9 @@ impl Runtime {
                 self.handle_task_block(step, reason, on_event)
             }
             RuntimeRequest::TaskStatus => self.handle_task_status(on_event),
+            RuntimeRequest::AgentRun { ability, target } => {
+                self.handle_agent_run(ability, target, on_event)
+            }
         }
     }
 

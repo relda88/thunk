@@ -253,6 +253,14 @@ pub enum RuntimeRequest {
     },
     /// /task status — show all task statuses for the active plan.
     TaskStatus,
+    /// /agent <ability> [target] — activate the named ability, inject a structured
+    /// workflow prompt, and run the normal investigation turn loop. Read-only; no
+    /// mutations. Supported abilities: review, investigate.
+    /// `target` is free text interpolated into the augmented prompt — not a file path.
+    AgentRun {
+        ability: String,
+        target: Option<String>,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

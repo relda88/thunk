@@ -10,6 +10,7 @@ pub use super::{
 };
 
 mod ability_skill;
+mod agent_command;
 mod anchors;
 mod approval;
 mod branch_commands;

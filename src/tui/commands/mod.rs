@@ -63,6 +63,10 @@ pub enum Command {
         reason: Option<String>,
     },
     TaskStatus,
+    Agent {
+        ability: String,
+        target: Option<String>,
+    },
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -239,6 +243,19 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
                 Err(_) => Some(Err(ParseError::MissingArgument { command: "/task" })),
             },
         },
+        "/agent" => match arg {
+            None => Some(Err(ParseError::MissingArgument { command: "/agent" })),
+            Some(rest) => {
+                let mut parts = rest.splitn(2, ' ');
+                let ability = parts.next().unwrap_or("").to_string();
+                let target = parts.next().map(|s| s.to_string());
+                if ability.is_empty() {
+                    Some(Err(ParseError::MissingArgument { command: "/agent" }))
+                } else {
+                    Some(Ok(Command::Agent { ability, target }))
+                }
+            }
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -257,6 +274,7 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
 pub(crate) fn autocomplete_names() -> &'static [&'static str] {
     &[
         "/ability",
+        "/agent",
         "/anchors",
         "/approve",
         "/branch",
@@ -303,6 +321,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/ability",
             description: "set reasoning posture: debug, review, refactor, investigate, explain",
+        },
+        LauncherCommand {
+            name: "/agent",
+            description: "run ability-driven workflow: review or investigate [target]",
         },
         LauncherCommand {
             name: "/anchors",
