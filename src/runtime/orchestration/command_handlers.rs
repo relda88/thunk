@@ -1457,11 +1457,16 @@ impl Runtime {
         self.prompt_physics.active_ability = self.active_ability.clone();
 
         let target_str = target.as_deref().unwrap_or("the current codebase");
+        let anchor = target
+            .as_deref()
+            .map(|p| format!("Read {p} first.\n\n"))
+            .unwrap_or_default();
 
         let augmented_prompt = match ability.as_str() {
             "review" => format!(
                 "[runtime:agent:review] Review workflow\n\
                  Target: {target_str}\n\n\
+                 {anchor}\
                  Use the review ability. Read the relevant files. \
                  Produce a structured critique.\n\n\
                  Format each issue as:\n\
@@ -1473,6 +1478,7 @@ impl Runtime {
             "investigate" => format!(
                 "[runtime:agent:investigate] Investigate workflow\n\
                  Target: {target_str}\n\n\
+                 {anchor}\
                  Use the investigate ability. Gather evidence \
                  systematically.\n\n\
                  Format your findings as:\n\
