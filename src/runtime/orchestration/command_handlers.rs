@@ -1044,6 +1044,7 @@ impl Runtime {
         on_event(RuntimeEvent::SystemMessage(
             "plan: approved and saved — use /plan status to view steps".to_string(),
         ));
+        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
     }
 
     pub(super) fn handle_plan_abandon(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
@@ -1058,6 +1059,7 @@ impl Runtime {
 
         on_event(RuntimeEvent::PlanApprovalCleared);
         on_event(RuntimeEvent::SystemMessage("plan: abandoned".to_string()));
+        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
     }
 
     pub(super) fn handle_plan_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {

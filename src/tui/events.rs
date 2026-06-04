@@ -141,6 +141,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         RuntimeEvent::PlanApprovalCleared => {
             state.pending_plan_approval = None;
             state.mark_dirty(DirtySections::INPUT);
+            state.set_status("ready");
         }
         // Advisory only — absorbed by the logging layer before reaching here.
         RuntimeEvent::BackendTiming { .. } => {}
