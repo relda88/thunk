@@ -39,6 +39,7 @@ pub enum Command {
         large: bool,
     },
     IndexStatus,
+    IndexEmbed,
     ContextStats,
     Compact,
     PromptPhysics(Option<bool>),
@@ -180,6 +181,7 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") => Some(Ok(Command::IndexStatus)),
             Some("build") => Some(Ok(Command::IndexBuild { large: false })),
             Some("build --large") => Some(Ok(Command::IndexBuild { large: true })),
+            Some("embed") => Some(Ok(Command::IndexEmbed)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
         "/context" => match arg {
@@ -381,7 +383,7 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         },
         LauncherCommand {
             name: "/index",
-            description: "manage the symbol index (status, build)",
+            description: "manage the symbol index (status, build, embed)",
         },
         LauncherCommand {
             name: "/last",

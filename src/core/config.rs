@@ -207,6 +207,22 @@ impl Default for PromptPhysicsSettings {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RetrievalConfig {
+    pub embedding_model: Option<String>,
+    pub vector_weight: f32,
+}
+
+impl Default for RetrievalConfig {
+    fn default() -> Self {
+        Self {
+            embedding_model: None,
+            vector_weight: 0.3,
+        }
+    }
+}
+
 /// Web fetch configuration. Enabled by default; set `[web_fetch]\nenabled = false` to disable.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -237,6 +253,7 @@ pub struct Config {
     pub project: ProjectConfig,
     pub prompt_physics: PromptPhysicsSettings,
     pub web_fetch: WebFetchConfig,
+    pub retrieval: RetrievalConfig,
 }
 
 /// Application configuration for the app

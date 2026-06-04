@@ -82,6 +82,7 @@ fn resolve_command(cmd: Command) -> CommandAction {
             CommandAction::Runtime(RuntimeRequest::IndexBuild { large })
         }
         Command::IndexStatus => CommandAction::Runtime(RuntimeRequest::IndexStatus),
+        Command::IndexEmbed => CommandAction::Runtime(RuntimeRequest::IndexEmbed),
         Command::ContextStats => CommandAction::Runtime(RuntimeRequest::ContextStats),
         Command::Compact => CommandAction::Runtime(RuntimeRequest::Compact),
         Command::PromptPhysics(enabled) => {

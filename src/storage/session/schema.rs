@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::core::error::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 7;
+const CURRENT_VERSION: i32 = 8;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
@@ -90,6 +90,17 @@ const SCHEMA: &str = "
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS index_embeddings (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_root TEXT NOT NULL,
+        symbol_id    INTEGER NOT NULL,
+        embedding    BLOB NOT NULL,
+        model_name   TEXT NOT NULL,
+        generated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_embeddings_project_model
+        ON index_embeddings (project_root, model_name);
 ";
 
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -137,6 +148,10 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
             conn.execute("ALTER TABLE index_symbols ADD COLUMN parent_scope TEXT", [])
                 .map_err(|e| AppError::Storage(e.to_string()))?;
         }
+    }
+
+    if version < 8 {
+        // index_embeddings table — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
     }
 
     if version < CURRENT_VERSION {

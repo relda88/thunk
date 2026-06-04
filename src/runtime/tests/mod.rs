@@ -21,6 +21,7 @@ mod engine;
 mod external_repo_fixtures;
 mod finalization;
 mod git_acquisition;
+mod index_embed;
 mod integration;
 mod integration_misc;
 mod investigation;

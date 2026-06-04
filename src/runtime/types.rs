@@ -180,6 +180,10 @@ pub enum RuntimeRequest {
     /// Read-only index status query. Returns symbol count, import count, and last
     /// build time as a SystemMessage event.
     IndexStatus,
+    /// Generates and stores vector embeddings for the top-2000 symbols by confidence.
+    /// Requires retrieval.embedding_model to be set. Skips silently if unconfigured.
+    /// Does not mutate conversation state or trigger session save.
+    IndexEmbed,
     /// Read-only context stats query. Returns token estimate, message count, tool
     /// result count, oldest tool result age, and context window percentage as a
     /// SystemMessage event.  Does not mutate conversation state or trigger session save.

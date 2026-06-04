@@ -257,6 +257,198 @@ impl SymbolStore {
         }
         Ok(out)
     }
+
+    pub(crate) fn all_symbols_ranked(&self, project_root: &str) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, signature FROM index_symbols \
+                 WHERE project_root = ?1 \
+                 ORDER BY CASE confidence \
+                     WHEN 'High' THEN 0 \
+                     WHEN 'Medium' THEN 1 \
+                     ELSE 2 \
+                 END, id",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![project_root], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn upsert_embeddings(
+        &self,
+        project_root: &str,
+        records: &[(i64, Vec<f32>, String)],
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        let now = now_str();
+        for (symbol_id, embedding, model_name) in records {
+            let blob = encode_embedding(embedding);
+            tx.execute(
+                "INSERT OR REPLACE INTO index_embeddings \
+                 (project_root, symbol_id, embedding, model_name, generated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![project_root, symbol_id, &blob, model_name, &now],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        tx.commit().map_err(|e| AppError::Storage(e.to_string()))
+    }
+
+    pub(crate) fn clear_embeddings(&self, project_root: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM index_embeddings WHERE project_root = ?1",
+                params![project_root],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_embedding_model(&self, project_root: &str) -> Result<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT model_name FROM index_embeddings \
+                 WHERE project_root = ?1 LIMIT 1",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut rows = stmt
+            .query(params![project_root])
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        match rows.next().map_err(|e| AppError::Storage(e.to_string()))? {
+            Some(row) => Ok(Some(
+                row.get(0).map_err(|e| AppError::Storage(e.to_string()))?,
+            )),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn embedding_count(&self, project_root: &str) -> Result<i64> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM index_embeddings WHERE project_root = ?1",
+                params![project_root],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))
+    }
+
+    pub(crate) fn cosine_search(
+        &self,
+        project_root: &str,
+        query: &[f32],
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT ie.embedding, sym.file_path \
+                 FROM index_embeddings ie \
+                 JOIN index_symbols sym ON ie.symbol_id = sym.id \
+                 WHERE ie.project_root = ?1",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![project_root], |row| {
+                let blob: Vec<u8> = row.get(0)?;
+                let file_path: String = row.get(1)?;
+                Ok((blob, file_path))
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut scored: Vec<(f32, String)> = Vec::new();
+        for row in rows {
+            let (blob, file_path) = row.map_err(|e| AppError::Storage(e.to_string()))?;
+            let embedding = decode_embedding(&blob);
+            if !embedding.is_empty() {
+                let score = cosine_similarity(query, &embedding);
+                scored.push((score, file_path));
+            }
+        }
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut seen = std::collections::HashSet::new();
+        let files = scored
+            .into_iter()
+            .filter_map(|(_, f)| {
+                if seen.insert(f.clone()) {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .take(limit)
+            .collect();
+
+        Ok(files)
+    }
+
+    #[cfg(feature = "vector-extensions")]
+    pub(crate) fn try_load_vss(&self) -> bool {
+        use std::path::Path;
+        let candidates = ["vss0.so", "vss0.dylib", "vss0.dll"];
+        for name in &candidates {
+            let loaded = unsafe {
+                if self.conn.load_extension_enable().is_err() {
+                    false
+                } else {
+                    let ok = self.conn.load_extension(Path::new(name), None).is_ok();
+                    let _ = self.conn.load_extension_disable();
+                    ok
+                }
+            };
+            if loaded {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+pub(crate) fn encode_embedding(v: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(v.len() * 4);
+    for &f in v {
+        bytes.extend_from_slice(&f.to_le_bytes());
+    }
+    bytes
+}
+
+pub(crate) fn decode_embedding(bytes: &[u8]) -> Vec<f32> {
+    bytes
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    dot / (norm_a * norm_b)
 }
 
 fn now_str() -> String {
@@ -447,5 +639,133 @@ mod tests {
         let targets: Vec<&str> = results.iter().map(|e| e.to_file.as_str()).collect();
         assert!(targets.contains(&"src/b.rs"));
         assert!(targets.contains(&"src/c.rs"));
+    }
+
+    #[test]
+    fn encode_decode_embedding_roundtrip() {
+        let v: Vec<f32> = vec![0.1, -0.5, 1.0, 0.0, std::f32::consts::PI];
+        let bytes = encode_embedding(&v);
+        let decoded = decode_embedding(&bytes);
+        assert_eq!(v.len(), decoded.len());
+        for (a, b) in v.iter().zip(decoded.iter()) {
+            assert!((a - b).abs() < 1e-6, "roundtrip mismatch: {a} != {b}");
+        }
+    }
+
+    #[test]
+    fn encode_decode_empty_embedding_roundtrip() {
+        let v: Vec<f32> = vec![];
+        assert!(decode_embedding(&encode_embedding(&v)).is_empty());
+    }
+
+    #[test]
+    fn cosine_similarity_identical_vectors() {
+        let v = vec![1.0f32, 0.0, 0.0];
+        let score = cosine_similarity(&v, &v);
+        assert!((score - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors() {
+        let a = vec![1.0f32, 0.0];
+        let b = vec![0.0f32, 1.0];
+        let score = cosine_similarity(&a, &b);
+        assert!(score.abs() < 1e-6);
+    }
+
+    #[test]
+    fn cosine_similarity_mismatched_lengths_returns_zero() {
+        let a = vec![1.0f32, 0.0, 0.5];
+        let b = vec![1.0f32, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn upsert_and_get_embedding_model() {
+        let store = in_memory();
+        store
+            .upsert_symbols("root", &[make_symbol("fn_a")])
+            .unwrap();
+        let sym_id = {
+            let mut stmt = store
+                .conn
+                .prepare("SELECT id FROM index_symbols WHERE project_root = 'root' LIMIT 1")
+                .unwrap();
+            stmt.query_row([], |r| r.get::<_, i64>(0)).unwrap()
+        };
+        assert!(store.get_embedding_model("root").unwrap().is_none());
+        store
+            .upsert_embeddings("root", &[(sym_id, vec![1.0, 0.0], "nomic".to_string())])
+            .unwrap();
+        assert_eq!(
+            store.get_embedding_model("root").unwrap().as_deref(),
+            Some("nomic")
+        );
+    }
+
+    #[test]
+    fn clear_embeddings_removes_all_for_project() {
+        let store = in_memory();
+        store
+            .upsert_symbols("root", &[make_symbol("fn_b")])
+            .unwrap();
+        let sym_id = {
+            let mut stmt = store
+                .conn
+                .prepare("SELECT id FROM index_symbols WHERE project_root = 'root' LIMIT 1")
+                .unwrap();
+            stmt.query_row([], |r| r.get::<_, i64>(0)).unwrap()
+        };
+        store
+            .upsert_embeddings("root", &[(sym_id, vec![1.0, 0.0], "m".to_string())])
+            .unwrap();
+        assert_eq!(store.embedding_count("root").unwrap(), 1);
+        store.clear_embeddings("root").unwrap();
+        assert_eq!(store.embedding_count("root").unwrap(), 0);
+    }
+
+    #[test]
+    fn cosine_search_returns_best_matching_file() {
+        let store = in_memory();
+        store
+            .upsert_symbols(
+                "root",
+                &[
+                    make_symbol("close_fn"),
+                    ExtractedSymbol {
+                        name: "far_fn".to_string(),
+                        kind: SymbolKind::Function,
+                        file_path: "src/far.rs".to_string(),
+                        line: 1,
+                        col: 1,
+                        signature: "pub fn far_fn()".to_string(),
+                        confidence: SymbolConfidence::High,
+                        parent_scope: None,
+                    },
+                ],
+            )
+            .unwrap();
+        let ids: Vec<(i64, String)> = {
+            let mut stmt = store
+                .conn
+                .prepare(
+                    "SELECT id, file_path FROM index_symbols WHERE project_root = 'root' ORDER BY id",
+                )
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        let query = vec![1.0f32, 0.0];
+        // close_fn embedding is nearly identical to query; far_fn points away
+        let embeddings = vec![
+            (ids[0].0, vec![0.99f32, 0.1], "m".to_string()),
+            (ids[1].0, vec![0.0f32, 1.0], "m".to_string()),
+        ];
+        store.upsert_embeddings("root", &embeddings).unwrap();
+        let results = store.cosine_search("root", &query, 5).unwrap();
+        assert!(!results.is_empty());
+        assert_eq!(results[0], "src/foo.rs");
     }
 }

@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crate::logging::SessionLog;
+use crate::runtime::index::OllamaEmbeddingProvider;
 use crate::runtime::{ProjectRoot, Runtime, RuntimeEvent, RuntimeRequest};
 use crate::storage::session::SessionMeta;
 use crate::tools::ToolRegistry;
@@ -149,6 +150,11 @@ impl AppContext {
             runtime = runtime.with_symbol_store(path);
             runtime = runtime.with_task_store(path);
         }
+        if let Some(ref model) = config.retrieval.embedding_model {
+            let provider =
+                OllamaEmbeddingProvider::new(config.ollama.base_url.clone(), model.clone());
+            runtime = runtime.with_embedding_provider(Box::new(provider));
+        }
         if !history.is_empty() {
             runtime.load_history(history);
         }
@@ -190,6 +196,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::LspStatus => "lsp_status",
         RuntimeRequest::IndexBuild { .. } => "index_build",
         RuntimeRequest::IndexStatus => "index_status",
+        RuntimeRequest::IndexEmbed => "index_embed",
         RuntimeRequest::ContextStats => "context_stats",
         RuntimeRequest::Compact => "compact",
         RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",

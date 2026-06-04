@@ -1,5 +1,5 @@
 mod conversation;
-mod index;
+pub(crate) mod index;
 mod investigation;
 pub(crate) mod lsp;
 mod orchestration;

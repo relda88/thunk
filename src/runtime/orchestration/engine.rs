@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
-use crate::core::config::Config;
+use crate::core::config::{Config, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
+use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
 use crate::storage::tasks::TaskStore;
 use crate::tools::{
@@ -114,6 +115,9 @@ pub struct Runtime {
     lsp: LspManager,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
+    /// Embedding provider for vector search. `None` when unconfigured.
+    pub(super) embedding_provider: Option<Box<dyn EmbeddingProvider + Send>>,
+    pub(super) retrieval_config: RetrievalConfig,
     /// Plan/task store. `None` when no db_path was supplied (e.g. in tests).
     pub(crate) task_store: Option<TaskStore>,
     /// Set to true after the first on-demand index build attempt this session.
@@ -193,6 +197,8 @@ impl Runtime {
             undo_stack: Vec::new(),
             lsp,
             symbol_store: None,
+            embedding_provider: None,
+            retrieval_config: config.retrieval.clone(),
             task_store: None,
             index_triggered: false,
             context_75_warned: false,
@@ -221,6 +227,12 @@ impl Runtime {
     /// Silently proceeds without a store if the path cannot be opened.
     pub fn with_task_store(mut self, db_path: &std::path::Path) -> Self {
         self.task_store = TaskStore::open(db_path).ok();
+        self
+    }
+
+    /// Attaches an embedding provider for vector search. Returns `self` for chaining.
+    pub fn with_embedding_provider(mut self, provider: Box<dyn EmbeddingProvider + Send>) -> Self {
+        self.embedding_provider = Some(provider);
         self
     }
 
@@ -330,6 +342,7 @@ impl Runtime {
             RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
             RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
             RuntimeRequest::IndexStatus => self.handle_index_status(on_event),
+            RuntimeRequest::IndexEmbed => self.handle_index_embed(on_event),
             RuntimeRequest::ContextStats => self.handle_context_stats(on_event),
             RuntimeRequest::Compact => self.handle_compact(on_event),
             RuntimeRequest::PromptPhysicsToggle { enabled } => {

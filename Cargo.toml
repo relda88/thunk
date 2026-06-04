@@ -1,6 +1,6 @@
 [package]
 name = "thunk"
-version = "0.22.67"
+version = "0.23.67"
 edition = "2021"
 
 [dependencies]
@@ -31,6 +31,7 @@ tree-sitter-parsing = [
     "tree-sitter-javascript",
     "tree-sitter-typescript",
 ]
+vector-extensions = ["rusqlite/load_extension"]
 default = ["local"]
 
 [dev-dependencies]
