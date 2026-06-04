@@ -471,9 +471,26 @@ impl Runtime {
             && self.symbol_store.is_some();
 
         if !use_vector {
+            let reason = if self.retrieval_config.vector_weight <= 0.0 {
+                "vec_weight_zero"
+            } else if self.embedding_provider.is_none() {
+                "no_provider"
+            } else {
+                "no_store"
+            };
+            trace_runtime_decision(
+                on_event,
+                "hybrid_search_decision",
+                &[("use_vector", "false".into()), ("reason", reason.into())],
+            );
             self.dispatch_command_tool(CommandTool::SearchCode { query }, on_event);
             return;
         }
+        trace_runtime_decision(
+            on_event,
+            "hybrid_search_decision",
+            &[("use_vector", "true".into()), ("reason", "enabled".into())],
+        );
 
         // Keyword search — run directly so we can capture the output before augmenting.
         if self.pending_action.is_some() {
@@ -514,54 +531,124 @@ impl Runtime {
             .record_successful_search(&keyword_output, query.clone(), None);
 
         // Try to augment with vector results.
-        let final_output = self.try_vector_augment(query, keyword_output);
+        let final_output = self.try_vector_augment(query, keyword_output, on_event);
         on_event(RuntimeEvent::InfoMessage(tool_codec::format_tool_result(
             "search_code",
             &final_output,
         )));
     }
 
-    fn try_vector_augment(&self, query: String, keyword_output: ToolOutput) -> ToolOutput {
+    fn try_vector_augment(
+        &self,
+        query: String,
+        keyword_output: ToolOutput,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) -> ToolOutput {
         let ToolOutput::SearchResults(mut results) = keyword_output else {
             return keyword_output;
         };
 
         let store = match &self.symbol_store {
             Some(s) => s,
-            None => return ToolOutput::SearchResults(results),
+            None => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "no_store".into())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
         };
         let provider = match &self.embedding_provider {
             Some(p) => p.as_ref(),
-            None => return ToolOutput::SearchResults(results),
+            None => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "no_provider".into())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
         };
 
         let project_root = self.project_root.path().to_string_lossy().to_string();
 
         // Guard: skip vector search if too many embeddings (naive O(n) path).
         match store.embedding_count(&project_root) {
-            Ok(0) => return ToolOutput::SearchResults(results),
-            Ok(n) if n > 10_000 => return ToolOutput::SearchResults(results),
-            Err(_) => return ToolOutput::SearchResults(results),
+            Ok(0) => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "no_embeddings".into())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
+            Ok(n) if n > 10_000 => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "cap_exceeded".into()), ("n", n.to_string())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
+            Err(_) => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "store_error".into())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
             _ => {}
         }
 
         // Embed the query (single call — fast path).
         let query_vec = match provider.embed(&[query]) {
             Ok(mut vecs) if !vecs.is_empty() => vecs.remove(0),
-            _ => return ToolOutput::SearchResults(results),
+            _ => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "embed_failed".into())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
         };
 
         let vector_files = match store.cosine_search(&project_root, &query_vec, 10) {
             Ok(files) => files,
-            Err(_) => return ToolOutput::SearchResults(results),
+            Err(_) => {
+                trace_runtime_decision(
+                    on_event,
+                    "vector_augment_skipped",
+                    &[("reason", "cosine_search_failed".into())],
+                );
+                return ToolOutput::SearchResults(results);
+            }
         };
 
         if vector_files.is_empty() {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "no_vector_results".into())],
+            );
             return ToolOutput::SearchResults(results);
         }
 
         let vector_weight = self.retrieval_config.vector_weight;
+        let keyword_count = results.matches.len();
+        let vector_count = vector_files.len();
         results.matches = merge_keyword_vector(results.matches, &vector_files, vector_weight);
+        trace_runtime_decision(
+            on_event,
+            "vector_augment_applied",
+            &[
+                ("weight", format!("{vector_weight:.2}")),
+                ("keyword_count", keyword_count.to_string()),
+                ("vector_count", vector_count.to_string()),
+            ],
+        );
         ToolOutput::SearchResults(results)
     }
 
@@ -708,6 +795,11 @@ impl Runtime {
 
         let total = symbols.len();
         let symbols: Vec<(i64, String)> = if total > 2000 {
+            trace_runtime_decision(
+                on_event,
+                "embedding_cap_applied",
+                &[("total", total.to_string()), ("cap", "2000".into())],
+            );
             on_event(RuntimeEvent::SystemMessage(format!(
                 "embed: {total} symbols found — capping at 2000 by confidence score (High first)"
             )));
@@ -724,6 +816,14 @@ impl Runtime {
 
         match store.get_embedding_model(&project_root) {
             Ok(Some(ref stored)) if stored != &configured_model => {
+                trace_runtime_decision(
+                    on_event,
+                    "embedding_model_mismatch",
+                    &[
+                        ("stored", stored.clone()),
+                        ("configured", configured_model.clone()),
+                    ],
+                );
                 on_event(RuntimeEvent::SystemMessage(format!(
                     "embed: model changed ({stored} → {configured_model}), clearing old embeddings"
                 )));
@@ -829,6 +929,11 @@ impl Runtime {
         };
         if pct >= 90 {
             let count = self.conversation.compact_stale_tool_results();
+            trace_runtime_decision(
+                on_event,
+                "context_compacted",
+                &[("pct", pct.to_string()), ("count", count.to_string())],
+            );
             if count > 0 {
                 on_event(RuntimeEvent::SystemMessage(format!(
                     "context at {pct}% — auto-compacted {count} stale tool result(s)"
@@ -837,6 +942,11 @@ impl Runtime {
             self.context_75_warned = true;
         } else if pct >= 75 && !self.context_75_warned {
             self.context_75_warned = true;
+            trace_runtime_decision(
+                on_event,
+                "context_warning_75pct",
+                &[("pct", pct.to_string())],
+            );
             on_event(RuntimeEvent::SystemMessage(
                 "context at 75% — run /compact to free space".to_string(),
             ));
@@ -926,18 +1036,29 @@ impl Runtime {
                 return;
             }
         };
+        let prev_provider = self.config.llm.provider.clone();
         let mut new_config = self.config.clone();
         new_config.llm.provider = normalized.to_string();
         match crate::llm::providers::build_backend(&new_config) {
             Ok(new_backend) => {
                 self.backend = new_backend;
                 self.config.llm.provider = normalized.to_string();
+                trace_runtime_decision(
+                    on_event,
+                    "provider_switched",
+                    &[("from", prev_provider), ("to", normalized.to_string())],
+                );
                 on_event(RuntimeEvent::SystemMessage(format!(
                     "Switched to provider: {}",
                     normalized
                 )));
             }
             Err(e) => {
+                trace_runtime_decision(
+                    on_event,
+                    "provider_switch_failed",
+                    &[("name", normalized.to_string())],
+                );
                 on_event(RuntimeEvent::SystemMessage(format!(
                     "Failed to switch to '{}': {}",
                     normalized, e
@@ -954,12 +1075,22 @@ impl Runtime {
         match enabled {
             Some(true) => {
                 self.prompt_physics.enabled = true;
+                trace_runtime_decision(
+                    on_event,
+                    "prompt_physics_toggled",
+                    &[("enabled", "true".into())],
+                );
                 on_event(RuntimeEvent::SystemMessage(
                     "prompt physics: enabled".to_string(),
                 ));
             }
             Some(false) => {
                 self.prompt_physics.enabled = false;
+                trace_runtime_decision(
+                    on_event,
+                    "prompt_physics_toggled",
+                    &[("enabled", "false".into())],
+                );
                 on_event(RuntimeEvent::SystemMessage(
                     "prompt physics: disabled".to_string(),
                 ));
@@ -991,6 +1122,7 @@ impl Runtime {
             Some("off") => {
                 self.active_ability = None;
                 self.prompt_physics.active_ability = None;
+                trace_runtime_decision(on_event, "ability_cleared", &[]);
                 on_event(RuntimeEvent::SystemMessage("ability: cleared".into()));
             }
             Some("list") => {
@@ -1005,6 +1137,11 @@ impl Runtime {
                     let name = content.name.clone();
                     self.active_ability = Some(content);
                     self.prompt_physics.active_ability = self.active_ability.clone();
+                    trace_runtime_decision(
+                        on_event,
+                        "ability_activated",
+                        &[("name", name.clone())],
+                    );
                     on_event(RuntimeEvent::SystemMessage(format!("ability: {name}")));
                 }
                 Err(e) => {
@@ -1030,6 +1167,7 @@ impl Runtime {
             Some("off") => {
                 self.active_skill = None;
                 self.prompt_physics.active_skill = None;
+                trace_runtime_decision(on_event, "skill_cleared", &[]);
                 on_event(RuntimeEvent::SystemMessage("skill: cleared".into()));
             }
             Some("list") => {
@@ -1044,6 +1182,7 @@ impl Runtime {
                     let name = content.name.clone();
                     self.active_skill = Some(content);
                     self.prompt_physics.active_skill = self.active_skill.clone();
+                    trace_runtime_decision(on_event, "skill_activated", &[("name", name.clone())]);
                     on_event(RuntimeEvent::SystemMessage(format!("skill: {name}")));
                 }
                 Err(e) => {
@@ -1144,6 +1283,11 @@ impl Runtime {
                         break;
                     }
                     Err(e) => {
+                        trace_runtime_decision(
+                            on_event,
+                            "plan_parse_failed",
+                            &[("attempt", attempt.to_string())],
+                        );
                         if attempt == 0 {
                             on_event(RuntimeEvent::SystemMessage(format!(
                                 "plan: retrying... ({e})"
@@ -1171,6 +1315,11 @@ impl Runtime {
                     .iter()
                     .map(|s| (s.title.clone(), s.description.clone()))
                     .collect();
+                trace_runtime_decision(
+                    on_event,
+                    "plan_draft_created",
+                    &[("steps", steps.len().to_string())],
+                );
                 self.pending_plan = Some(PendingPlanDraft {
                     goal: goal.clone(),
                     steps,
@@ -1239,6 +1388,7 @@ impl Runtime {
             return;
         }
 
+        trace_runtime_decision(on_event, "plan_approved", &[("plan_id", plan_id.clone())]);
         on_event(RuntimeEvent::PlanApprovalCleared);
         on_event(RuntimeEvent::SystemMessage(
             "plan: approved and saved — use /plan status to view steps".to_string(),
@@ -1253,6 +1403,7 @@ impl Runtime {
         if let Some(store) = &self.task_store {
             if let Ok(Some(plan)) = store.get_active_plan(&self.session_id, &project_root) {
                 let _ = store.update_plan_status(&plan.id, PlanStatus::Abandoned);
+                trace_runtime_decision(on_event, "plan_abandoned", &[("plan_id", plan.id.clone())]);
             }
         }
 
@@ -1422,6 +1573,15 @@ impl Runtime {
         if let Some(store) = &self.task_store {
             let _ = store.update_task_status(&task.id, TaskStatus::InProgress, None);
         }
+        trace_runtime_decision(
+            on_event,
+            "task_status_changed",
+            &[
+                ("step", step.to_string()),
+                ("old", format!("{:?}", task.status)),
+                ("new", "InProgress".into()),
+            ],
+        );
 
         let augmented_prompt = format!(
             "[runtime:task] Step {step} of {total}: \"{title}\"\n\
@@ -1500,6 +1660,15 @@ impl Runtime {
             return;
         }
 
+        trace_runtime_decision(
+            on_event,
+            "task_status_changed",
+            &[
+                ("step", step.to_string()),
+                ("old", format!("{:?}", task.status)),
+                ("new", "Completed".into()),
+            ],
+        );
         on_event(RuntimeEvent::SystemMessage(format!(
             "task {step}: completed"
         )));
@@ -1512,6 +1681,7 @@ impl Runtime {
             if let Some(store) = &self.task_store {
                 let _ = store.update_plan_status(&plan.id, PlanStatus::Completed);
             }
+            trace_runtime_decision(on_event, "plan_completed", &[("plan_id", plan.id.clone())]);
             on_event(RuntimeEvent::SystemMessage(
                 "plan: all steps completed".to_string(),
             ));
@@ -1578,6 +1748,15 @@ impl Runtime {
             return;
         }
 
+        trace_runtime_decision(
+            on_event,
+            "task_status_changed",
+            &[
+                ("step", step.to_string()),
+                ("old", format!("{:?}", task.status)),
+                ("new", "Blocked".into()),
+            ],
+        );
         on_event(RuntimeEvent::SystemMessage(format!("task {step}: blocked")));
     }
 
@@ -1701,9 +1880,22 @@ impl Runtime {
             _ => unreachable!(),
         };
 
+        trace_runtime_decision(
+            on_event,
+            "agent_run_started",
+            &[
+                ("ability", ability.clone()),
+                ("target", target_str.to_string()),
+            ],
+        );
         self.conversation.push_user(augmented_prompt);
         on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
         self.run_turns(0, on_event);
+        trace_runtime_decision(
+            on_event,
+            "agent_run_finished",
+            &[("ability", ability.clone())],
+        );
 
         if ability == "refactor" {
             if self.pending_action.is_some() {

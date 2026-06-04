@@ -4,10 +4,9 @@ use std::path::Path;
 use crate::tools::ToolOutput;
 
 use super::super::paths::normalize_evidence_path;
+use super::super::trace::trace_runtime_decision;
 use super::super::types::RuntimeEvent;
 use super::graph::InvestigationGraph;
-
-const RUNTIME_TRACE_ENV: &str = "THUNK_TRACE_RUNTIME";
 
 // Exact substring triggers used for structured investigation modes.
 // Keep these narrow: broad matching increases false positives for small local models.
@@ -31,37 +30,6 @@ const LOCKFILE_NAMES: &[&str] = &[
 const SOURCE_EXTENSIONS: &[&str] = &[
     "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "c", "cpp", "h", "hpp",
 ];
-
-// Advisory runtime tracing only. Trace events must not influence control flow.
-fn trace_runtime_decision(
-    on_event: &mut dyn FnMut(RuntimeEvent),
-    event: &str,
-    fields: &[(&str, String)],
-) {
-    if std::env::var_os(RUNTIME_TRACE_ENV).is_none() {
-        return;
-    }
-
-    let mut line = format!("[runtime:trace] event={event}");
-    for (key, value) in fields {
-        line.push(' ');
-        line.push_str(key);
-        line.push('=');
-        line.push_str(&trace_field_value(value));
-    }
-    on_event(RuntimeEvent::RuntimeTrace(line));
-}
-
-fn trace_field_value(value: &str) -> String {
-    if value
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '/' | '.' | ':' | '='))
-    {
-        value.to_string()
-    } else {
-        format!("{value:?}")
-    }
-}
 
 fn push_unique_path(paths: &mut Vec<String>, path: &str) {
     if !paths.iter().any(|existing| existing == path) {

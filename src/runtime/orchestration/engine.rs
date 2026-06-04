@@ -2171,6 +2171,14 @@ impl TurnContext {
             if let Some(cmd) = shell_request.as_ref() {
                 if !is_permitted_shell_command(cmd) {
                     let first = cmd.split_whitespace().next().unwrap_or(cmd);
+                    trace_runtime_decision(
+                        on_event,
+                        "shell_command_rejected",
+                        &[
+                            ("cmd", first.to_string()),
+                            ("surface", tool_surface.as_str().to_string()),
+                        ],
+                    );
                     on_event(RuntimeEvent::Failed {
                         message: format!(
                             "shell command '{}' is not permitted. Allowed: cargo",

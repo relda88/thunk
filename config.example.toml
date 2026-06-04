@@ -62,3 +62,7 @@ enabled = true
 
 [prompt_physics]
 enabled = true
+
+[retrieval]
+embedding_model = "nomic-embed-text"
+vector_weight = 0.3
