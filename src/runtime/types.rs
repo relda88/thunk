@@ -319,4 +319,6 @@ pub enum RuntimeEvent {
         goal: String,
         steps: Vec<(String, String)>,
     },
+    /// Fired after plan approval or abandonment to dismiss the plan approval widget.
+    PlanApprovalCleared,
 }

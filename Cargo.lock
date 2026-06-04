@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "thunk"
-version = "0.22.64"
+version = "0.22.65"
 dependencies = [
  "crossterm",
  "libc",

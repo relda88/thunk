@@ -1040,6 +1040,7 @@ impl Runtime {
             return;
         }
 
+        on_event(RuntimeEvent::PlanApprovalCleared);
         on_event(RuntimeEvent::SystemMessage(
             "plan: approved and saved — use /plan status to view steps".to_string(),
         ));
@@ -1055,6 +1056,7 @@ impl Runtime {
             }
         }
 
+        on_event(RuntimeEvent::PlanApprovalCleared);
         on_event(RuntimeEvent::SystemMessage("plan: abandoned".to_string()));
     }
 

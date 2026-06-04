@@ -56,7 +56,7 @@ pub(super) fn summarize_command_output(text: &str) -> String {
                 "search: done".to_string()
             }
         }
-        "git_status" | "git_diff" | "git_log" => body.to_string(),
+        "git_status" | "git_diff" | "git_log" | "web_fetch" => body.to_string(),
         "git_branch" => {
             if body == "No branches found." {
                 return "git branch: no branches".to_string();

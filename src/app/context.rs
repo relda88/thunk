@@ -224,6 +224,7 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
         RuntimeEvent::PlanApprovalRequired { goal, .. } => {
             Some(format!("plan approval required: {goal}"))
         }
+        RuntimeEvent::PlanApprovalCleared => Some("plan approval cleared".to_string()),
         // Handled with timing in handle():
         RuntimeEvent::AssistantMessageStarted
         | RuntimeEvent::AssistantMessageFinished
