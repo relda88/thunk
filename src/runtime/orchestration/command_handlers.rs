@@ -1435,9 +1435,9 @@ impl Runtime {
         target: Option<String>,
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) {
-        if !matches!(ability.as_str(), "review" | "investigate") {
+        if !matches!(ability.as_str(), "review" | "investigate" | "refactor") {
             on_event(RuntimeEvent::SystemMessage(format!(
-                "agent: unsupported ability '{ability}' — supported: review, investigate"
+                "agent: unsupported ability '{ability}' — supported: review, investigate, refactor"
             )));
             return;
         }
@@ -1489,12 +1489,89 @@ impl Runtime {
                  the top unknown>\n\n\
                  Do not conclude until evidence is sufficient."
             ),
+            "refactor" => format!(
+                "[runtime:agent:refactor] Refactor investigation\n\
+                 Target: {target_str}\n\n\
+                 {anchor}\
+                 Use the refactor ability. Investigate the target. \
+                 Identify structural problems: coupling, duplication, \
+                 unclear naming, god functions, mixed responsibilities.\n\n\
+                 Report what you found — structure, problems, and \
+                 what a clean refactor would address. Be specific."
+            ),
             _ => unreachable!(),
         };
 
         self.conversation.push_user(augmented_prompt);
         on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
         self.run_turns(0, on_event);
+
+        if ability == "refactor" {
+            if self.pending_action.is_some() {
+                on_event(RuntimeEvent::SystemMessage(
+                    "agent refactor: investigation triggered a mutation approval \
+                     — resolve it first"
+                        .into(),
+                ));
+            } else if self.task_store.is_none() {
+                on_event(RuntimeEvent::SystemMessage(
+                    "agent refactor: no storage configured".into(),
+                ));
+            } else {
+                let root = self.project_root.path().to_string_lossy().to_string();
+                let active_plan = self
+                    .task_store
+                    .as_ref()
+                    .and_then(|s| s.get_active_plan(&self.session_id, &root).ok().flatten());
+                if active_plan.is_some() {
+                    on_event(RuntimeEvent::SystemMessage(
+                        "agent refactor: an active plan already exists — use /plan abandon first"
+                            .into(),
+                    ));
+                } else {
+                    let plan_goal = format!("Refactor {target_str}");
+                    on_event(RuntimeEvent::SystemMessage(
+                        "agent refactor: generating plan...".into(),
+                    ));
+                    let mut parsed_steps = None;
+                    for attempt in 0..2 {
+                        if let Some(raw) = self.generate_plan_steps(&plan_goal) {
+                            match parse_plan(&raw) {
+                                Ok(steps) => {
+                                    parsed_steps = Some(steps);
+                                    break;
+                                }
+                                Err(_) if attempt == 0 => continue,
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                    match parsed_steps {
+                        Some(steps) => {
+                            let step_tuples: Vec<(String, String)> = steps
+                                .iter()
+                                .map(|s| (s.title.clone(), s.description.clone()))
+                                .collect();
+                            self.pending_plan = Some(PendingPlanDraft {
+                                goal: plan_goal.clone(),
+                                steps,
+                            });
+                            on_event(RuntimeEvent::PlanApprovalRequired {
+                                goal: plan_goal,
+                                steps: step_tuples,
+                            });
+                        }
+                        None => {
+                            on_event(RuntimeEvent::SystemMessage(
+                                "agent refactor: could not generate a valid plan \
+                                 — try again or use /plan directly"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
 
         self.active_ability = saved_ability;
         self.prompt_physics.active_ability = saved_pp_ability;

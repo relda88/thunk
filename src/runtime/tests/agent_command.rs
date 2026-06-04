@@ -1,6 +1,18 @@
+use rusqlite::Connection;
 use tempfile::TempDir;
 
+use crate::storage::session::schema;
+use crate::storage::tasks::TaskStore;
+
 use super::*;
+
+fn attach_task_store(runtime: &mut Runtime, path: &std::path::Path) {
+    let init_conn = Connection::open(path).unwrap();
+    schema::initialize(&init_conn).unwrap();
+    drop(init_conn);
+    let store = TaskStore::open(path).unwrap();
+    runtime.task_store = Some(store);
+}
 
 fn system_messages(events: &[RuntimeEvent]) -> Vec<String> {
     events
@@ -137,5 +149,112 @@ fn parses_agent_missing_ability() {
     assert_eq!(
         result,
         Some(Err(ParseError::MissingArgument { command: "/agent" }))
+    );
+}
+
+#[test]
+fn agent_run_refactor_emits_plan_approval_required() {
+    let tmp_root = TempDir::new().unwrap();
+    let tmp_db = tempfile::NamedTempFile::new().unwrap();
+
+    // The investigation turn issues a SEARCH_BEFORE_ANSWERING correction (one extra
+    // backend call) before emitting the terminal answer, so three responses are needed:
+    // [0] investigation, [1] correction-round filler, [2] plan steps for generate_plan_steps.
+    let investigation_answer = "Investigation complete. The module has mixed concerns.";
+    let correction_filler = "I will search the codebase now.";
+    let plan_steps = "1. Extract: Move validation logic to a separate module\n\
+                      2. Decouple: Remove direct dependency on file store";
+    let mut runtime = make_runtime_in(
+        vec![investigation_answer, correction_filler, plan_steps],
+        tmp_root.path(),
+    );
+    attach_task_store(&mut runtime, tmp_db.path());
+
+    let events = collect_events(
+        &mut runtime,
+        RuntimeRequest::AgentRun {
+            ability: "refactor".into(),
+            target: Some("sandbox/services/task_service.py".into()),
+        },
+    );
+
+    let approval = events
+        .iter()
+        .find(|e| matches!(e, RuntimeEvent::PlanApprovalRequired { .. }));
+    assert!(
+        approval.is_some(),
+        "expected PlanApprovalRequired after agent refactor workflow; got: {events:?}"
+    );
+    if let Some(RuntimeEvent::PlanApprovalRequired { goal, steps }) = approval {
+        assert!(
+            goal.contains("task_service.py"),
+            "expected goal to reference target; got: {goal:?}"
+        );
+        assert_eq!(steps.len(), 2, "expected 2 plan steps; got: {steps:?}");
+        assert_eq!(steps[0].0, "Extract");
+        assert_eq!(steps[1].0, "Decouple");
+    }
+}
+
+#[test]
+fn agent_run_refactor_restores_ability_after_workflow() {
+    let tmp_root = TempDir::new().unwrap();
+    let tmp_db = tempfile::NamedTempFile::new().unwrap();
+
+    let investigation_answer = "Found mixed concerns.";
+    let plan_steps = "1. Extract: Pull out the concern\n2. Rename: Use clear names";
+    let mut runtime = make_runtime_in(vec![investigation_answer, plan_steps], tmp_root.path());
+    attach_task_store(&mut runtime, tmp_db.path());
+
+    // Activate review ability as the session baseline.
+    collect_events(
+        &mut runtime,
+        RuntimeRequest::AbilityToggle {
+            name: Some("review".into()),
+        },
+    );
+
+    collect_events(
+        &mut runtime,
+        RuntimeRequest::AgentRun {
+            ability: "refactor".into(),
+            target: None,
+        },
+    );
+
+    // Ability must have reverted to review.
+    let events = collect_events(&mut runtime, RuntimeRequest::AbilityToggle { name: None });
+    let msgs = system_messages(&events);
+    assert!(
+        msgs.iter().any(|m| m.contains("ability: review")),
+        "expected ability restored to 'review' after agent refactor workflow, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn agent_run_refactor_no_storage_emits_error() {
+    let tmp_root = TempDir::new().unwrap();
+    let mut runtime = make_runtime_in(vec!["Investigation done."], tmp_root.path());
+    // No task store attached.
+
+    let events = collect_events(
+        &mut runtime,
+        RuntimeRequest::AgentRun {
+            ability: "refactor".into(),
+            target: Some("src/foo.rs".into()),
+        },
+    );
+
+    let msgs = system_messages(&events);
+    assert!(
+        msgs.iter().any(|m| m.contains("no storage configured")),
+        "expected 'no storage configured' error; got: {msgs:?}"
+    );
+    let has_approval = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::PlanApprovalRequired { .. }));
+    assert!(
+        !has_approval,
+        "must not fire PlanApprovalRequired without storage; got approval"
     );
 }

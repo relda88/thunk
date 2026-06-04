@@ -255,7 +255,7 @@ pub enum RuntimeRequest {
     TaskStatus,
     /// /agent <ability> [target] — activate the named ability, inject a structured
     /// workflow prompt, and run the normal investigation turn loop. Read-only; no
-    /// mutations. Supported abilities: review, investigate.
+    /// mutations. Supported abilities: review, investigate, refactor.
     /// `target` is free text interpolated into the augmented prompt — not a file path.
     AgentRun {
         ability: String,
