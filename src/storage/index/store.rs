@@ -15,6 +15,7 @@ pub(crate) struct SymbolRecord {
     pub(crate) col: usize,
     pub(crate) signature: String,
     pub(crate) confidence: String,
+    pub(crate) parent_scope: Option<String>,
 }
 
 pub(crate) struct SymbolStore {
@@ -44,8 +45,8 @@ impl SymbolStore {
             self.conn
                 .execute(
                     "INSERT INTO index_symbols \
-                     (project_root, name, kind, file_path, line, col, signature, confidence, updated_at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                     (project_root, name, kind, file_path, line, col, signature, confidence, updated_at, parent_scope) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         project_root,
                         sym.name,
@@ -56,6 +57,7 @@ impl SymbolStore {
                         sym.signature,
                         sym.confidence.as_str(),
                         now,
+                        sym.parent_scope,
                     ],
                 )
                 .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -92,7 +94,7 @@ impl SymbolStore {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT name, kind, file_path, line, col, signature, confidence \
+                "SELECT name, kind, file_path, line, col, signature, confidence, parent_scope \
                  FROM index_symbols WHERE project_root = ?1 AND name = ?2",
             )
             .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -107,6 +109,7 @@ impl SymbolStore {
                     col: row.get::<_, i64>(4)? as usize,
                     signature: row.get(5)?,
                     confidence: row.get(6)?,
+                    parent_scope: row.get(7)?,
                 })
             })
             .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -287,6 +290,7 @@ mod tests {
             col: 1,
             signature: format!("pub fn {name}()"),
             confidence: SymbolConfidence::High,
+            parent_scope: None,
         }
     }
 
@@ -305,6 +309,7 @@ mod tests {
         assert_eq!(r.line, 10);
         assert_eq!(r.col, 1);
         assert_eq!(r.confidence, "High");
+        assert_eq!(r.parent_scope, None);
     }
 
     #[test]

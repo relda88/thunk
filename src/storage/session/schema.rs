@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::core::error::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 6;
+const CURRENT_VERSION: i32 = 7;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
@@ -40,7 +40,8 @@ const SCHEMA: &str = "
         col           INTEGER NOT NULL,
         signature     TEXT NOT NULL,
         confidence    TEXT NOT NULL,
-        updated_at    TEXT NOT NULL
+        updated_at    TEXT NOT NULL,
+        parent_scope  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_symbols_project_name
         ON index_symbols (project_root, name);
@@ -129,6 +130,13 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
 
     if version < 6 {
         // plans and plan_tasks tables — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
+    }
+
+    if version < 7 {
+        if !has_column(conn, "index_symbols", "parent_scope")? {
+            conn.execute("ALTER TABLE index_symbols ADD COLUMN parent_scope TEXT", [])
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
     }
 
     if version < CURRENT_VERSION {

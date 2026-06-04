@@ -10,6 +10,11 @@ libc = "0.2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 llama-cpp-2 = { version = "=0.1.143", optional = true }
 llama-cpp-sys-2 = { version = "=0.1.143", optional = true }
+tree-sitter = { version = "0.26", optional = true }
+tree-sitter-rust = { version = "0.24", optional = true }
+tree-sitter-python = { version = "0.25", optional = true }
+tree-sitter-javascript = { version = "0.25", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
 petgraph = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -19,6 +24,13 @@ ureq = { version = "2", features = ["tls"] }
 
 [features]
 local = ["llama-cpp-2", "llama-cpp-sys-2"]
+tree-sitter-parsing = [
+    "tree-sitter",
+    "tree-sitter-rust",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+]
 default = ["local"]
 
 [dev-dependencies]

@@ -80,11 +80,13 @@ pub(crate) struct ExtractedSymbol {
     pub(crate) file_path: String,
     /// 1-indexed line number.
     pub(crate) line: usize,
-    /// Always 1 for heuristic extraction.
+    /// Always 1 for heuristic extraction; 1-indexed column for tree-sitter.
     pub(crate) col: usize,
-    /// Full trimmed definition line.
+    /// Full trimmed definition line (regex) or first line of node source (tree-sitter).
     pub(crate) signature: String,
     pub(crate) confidence: SymbolConfidence,
+    /// Nearest named enclosing scope, if any (e.g. "Bar" for a method inside `impl Bar`).
+    pub(crate) parent_scope: Option<String>,
 }
 
 #[derive(Debug, Clone)]

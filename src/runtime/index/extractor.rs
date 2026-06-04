@@ -55,6 +55,14 @@ pub(crate) fn extract_symbols(root: &ProjectRoot) -> Vec<ExtractedSymbol> {
                     Err(_) => continue,
                 };
 
+                #[cfg(feature = "tree-sitter-parsing")]
+                if let Some(ts_symbols) =
+                    super::tree_sitter_parser::parse_file(&path, &content, root.path())
+                {
+                    symbols.extend(ts_symbols);
+                    continue;
+                }
+
                 extract_from_file(&content, &rel, &mut symbols);
             }
         }
@@ -293,6 +301,7 @@ fn classify_line(line: &str, file_path: &str, line_no: usize) -> Option<Extracte
             col: 1,
             signature,
             confidence,
+            parent_scope: None,
         });
     }
 

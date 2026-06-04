@@ -539,6 +539,7 @@ fn index_hit_promotes_definition_candidate_on_definition_lookup() {
                 col: 1,
                 signature: "pub fn my_fn_30_3()".to_string(),
                 confidence: SymbolConfidence::High,
+                parent_scope: None,
             }],
         )
         .unwrap();
