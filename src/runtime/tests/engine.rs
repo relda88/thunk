@@ -9,7 +9,7 @@ use super::super::orchestration::tool_round::{run_tool_round, SearchBudget, Tool
 use super::super::protocol::response_text::*;
 use super::super::types::RuntimeTerminalReason;
 use super::*;
-use crate::core::config::{Config, LspConfig};
+use crate::core::config::{Config, LspConfig, RetrievalConfig};
 use crate::llm::backend::{BackendCapabilities, BackendEvent, GenerateRequest, ModelBackend};
 use crate::runtime::ProjectRoot;
 use crate::tools::{default_registry, ToolInput};
@@ -399,6 +399,8 @@ fn search_anchor_stores_effective_clamped_scope() {
         &mut requested_read_completed,
         Some("sandbox/"),
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |e| events.push(e),
     );
 
@@ -460,6 +462,8 @@ fn failed_search_code_does_not_update_last_search_anchor() {
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |e| events.push(e),
     );
     assert!(
@@ -492,6 +496,8 @@ fn failed_search_code_does_not_update_last_search_anchor() {
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |e| events.push(e),
     );
 
@@ -635,6 +641,8 @@ fn same_scope_forced_broader_path_clamps_to_prior_scoped_search() {
         &mut seed_requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |e| events.push(e),
     );
     assert!(
@@ -680,6 +688,8 @@ fn same_scope_forced_broader_path_clamps_to_prior_scoped_search() {
         &mut requested_read_completed,
         Some(&same_scope),
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |e| events.push(e),
     );
 

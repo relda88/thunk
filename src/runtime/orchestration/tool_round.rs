@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use crate::core::config::RetrievalConfig;
+use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
 use crate::tools::types::LspDefinitionOutput;
 use crate::tools::{
@@ -221,6 +223,8 @@ pub(crate) fn run_tool_round(
     requested_read_completed: &mut bool,
     investigation_path_scope: Option<&str>,
     symbol_store: Option<&SymbolStore>,
+    embedding_provider: Option<&(dyn EmbeddingProvider + Send)>,
+    retrieval_config: &RetrievalConfig,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> ToolRoundOutcome {
     let mut accumulated = String::new();
@@ -881,6 +885,52 @@ pub(crate) fn run_tool_round(
                         .unwrap_or(true),
                     "tool '{name}' returned Immediate but spec declares RequiresApproval"
                 );
+                // For agent-turn search_code, apply hybrid vector augmentation if configured.
+                let output = if name == "search_code" {
+                    let query_str = effective_search_input
+                        .as_ref()
+                        .map(|(q, _)| q.as_str())
+                        .unwrap_or("");
+                    let use_vector = retrieval_config.vector_weight > 0.0
+                        && embedding_provider.is_some()
+                        && symbol_store.is_some();
+                    let skip_reason = if retrieval_config.vector_weight <= 0.0 {
+                        "vec_weight_zero"
+                    } else if embedding_provider.is_none() {
+                        "no_provider"
+                    } else {
+                        "no_store"
+                    };
+                    trace_runtime_decision(
+                        on_event,
+                        "hybrid_search_decision",
+                        &[
+                            (
+                                "use_vector",
+                                if use_vector { "true" } else { "false" }.into(),
+                            ),
+                            (
+                                "reason",
+                                if use_vector { "enabled" } else { skip_reason }.into(),
+                            ),
+                        ],
+                    );
+                    if use_vector {
+                        try_vector_augment(
+                            query_str,
+                            output,
+                            symbol_store,
+                            embedding_provider,
+                            retrieval_config,
+                            project_root,
+                            on_event,
+                        )
+                    } else {
+                        output
+                    }
+                } else {
+                    output
+                };
                 // Record search results against the per-turn budget and investigation state.
                 let search_closed_message = if name == "search_code" {
                     if let Some((query, scope)) = effective_search_input.clone() {
@@ -1259,6 +1309,168 @@ pub(crate) fn run_tool_round(
     }
 }
 
+pub(super) fn try_vector_augment(
+    query: &str,
+    keyword_output: ToolOutput,
+    symbol_store: Option<&SymbolStore>,
+    embedding_provider: Option<&(dyn EmbeddingProvider + Send)>,
+    retrieval_config: &RetrievalConfig,
+    project_root: &ProjectRoot,
+    on_event: &mut dyn FnMut(RuntimeEvent),
+) -> ToolOutput {
+    let ToolOutput::SearchResults(mut results) = keyword_output else {
+        return keyword_output;
+    };
+
+    let store = match symbol_store {
+        Some(s) => s,
+        None => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "no_store".into())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+    };
+    let provider = match embedding_provider {
+        Some(p) => p,
+        None => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "no_provider".into())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+    };
+
+    let project_root_str = project_root.path().to_string_lossy().to_string();
+
+    match store.embedding_count(&project_root_str) {
+        Ok(0) => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "no_embeddings".into())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+        Ok(n) if n > 10_000 => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "cap_exceeded".into()), ("n", n.to_string())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+        Err(_) => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "store_error".into())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+        _ => {}
+    }
+
+    let query_vec = match provider.embed(&[query.to_string()]) {
+        Ok(mut vecs) if !vecs.is_empty() => vecs.remove(0),
+        _ => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "embed_failed".into())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+    };
+
+    let vector_files = match store.cosine_search(&project_root_str, &query_vec, 10) {
+        Ok(files) => files,
+        Err(_) => {
+            trace_runtime_decision(
+                on_event,
+                "vector_augment_skipped",
+                &[("reason", "cosine_search_failed".into())],
+            );
+            return ToolOutput::SearchResults(results);
+        }
+    };
+
+    if vector_files.is_empty() {
+        trace_runtime_decision(
+            on_event,
+            "vector_augment_skipped",
+            &[("reason", "no_vector_results".into())],
+        );
+        return ToolOutput::SearchResults(results);
+    }
+
+    let vector_weight = retrieval_config.vector_weight;
+    let keyword_count = results.matches.len();
+    let vector_count = vector_files.len();
+    results.matches = merge_keyword_vector(results.matches, &vector_files, vector_weight);
+    trace_runtime_decision(
+        on_event,
+        "vector_augment_applied",
+        &[
+            ("weight", format!("{vector_weight:.2}")),
+            ("keyword_count", keyword_count.to_string()),
+            ("vector_count", vector_count.to_string()),
+        ],
+    );
+    ToolOutput::SearchResults(results)
+}
+
+fn merge_keyword_vector(
+    matches: Vec<crate::tools::types::SearchMatch>,
+    vector_files: &[String],
+    vector_weight: f32,
+) -> Vec<crate::tools::types::SearchMatch> {
+    if matches.is_empty() || vector_files.is_empty() {
+        return matches;
+    }
+
+    let mut file_order: Vec<String> = Vec::new();
+    let mut by_file: Vec<(String, Vec<crate::tools::types::SearchMatch>)> = Vec::new();
+
+    for m in matches {
+        if let Some(idx) = file_order.iter().position(|f| f == &m.file) {
+            by_file[idx].1.push(m);
+        } else {
+            file_order.push(m.file.clone());
+            by_file.push((m.file.clone(), vec![m]));
+        }
+    }
+
+    let n_kw = file_order.len();
+    let n_vec = vector_files.len();
+
+    let mut scored: Vec<(f32, usize)> = file_order
+        .iter()
+        .enumerate()
+        .map(|(kw_pos, file)| {
+            let kw_score = 1.0 - kw_pos as f32 / n_kw.max(1) as f32;
+            let vec_score = vector_files
+                .iter()
+                .position(|f| f == file)
+                .map(|vec_pos| 1.0 - vec_pos as f32 / n_vec.max(1) as f32)
+                .unwrap_or(0.0);
+            let score = (1.0 - vector_weight) * kw_score + vector_weight * vec_score;
+            (score, kw_pos)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    scored
+        .into_iter()
+        .flat_map(|(_, idx)| by_file[idx].1.clone())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -1353,6 +1565,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         )
     }
@@ -1590,6 +1804,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1622,6 +1838,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1679,6 +1897,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1705,6 +1925,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1737,6 +1959,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1798,6 +2022,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1824,6 +2050,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
         assert!(
@@ -1854,6 +2082,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
         assert!(
@@ -1915,6 +2145,8 @@ mod tests {
             &mut requested_read_completed,
             Some("sandbox/"),
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -1945,6 +2177,8 @@ mod tests {
             &mut requested_read_completed,
             Some("sandbox/"),
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2002,6 +2236,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2039,6 +2275,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2076,6 +2314,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2136,6 +2376,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2220,6 +2462,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2280,6 +2524,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2343,6 +2589,8 @@ mod tests {
             &mut requested_read_completed,
             None,
             None,
+            None,
+            &RetrievalConfig::default(),
             &mut |_| {},
         );
 
@@ -2355,6 +2603,96 @@ mod tests {
                 }
             ),
             "LSP seeding must be skipped for non-Rust (.py) definition candidates"
+        );
+    }
+
+    #[test]
+    fn agent_turn_search_emits_hybrid_search_decision_with_provider() {
+        use crate::core::error::Result;
+        use crate::runtime::index::EmbeddingProvider;
+        use crate::runtime::trace::RUNTIME_TRACE_ENV;
+        use crate::storage::index::SymbolStore;
+        use crate::storage::session::schema;
+        use rusqlite::Connection;
+
+        struct ConstantEmbedProvider;
+        impl EmbeddingProvider for ConstantEmbedProvider {
+            fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![0.1f32; 4]).collect())
+            }
+        }
+
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("a.rs"), "fn needle_38() {}\n").unwrap();
+
+        // Initialize schema so embedding_count() can query index_embeddings.
+        let db_path = root.path().join("test.db");
+        let conn = Connection::open(&db_path).unwrap();
+        schema::initialize(&conn).unwrap();
+        drop(conn);
+        let store = SymbolStore::open(&db_path).unwrap();
+
+        let provider = ConstantEmbedProvider;
+        let retrieval_config = RetrievalConfig {
+            vector_weight: 0.5,
+            embedding_model: None,
+        };
+
+        // Enable tracing so trace_runtime_decision emits RuntimeTrace events.
+        std::env::set_var(RUNTIME_TRACE_ENV, "1");
+
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        let mut lsp = LspManager::new(&LspConfig::default(), std::path::Path::new("."));
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed = 0usize;
+        let mut weak_query = 0usize;
+        let mut events: Vec<crate::runtime::types::RuntimeEvent> = Vec::new();
+
+        run_tool_round(
+            &root,
+            &registry,
+            vec![ToolInput::SearchCode {
+                query: "needle_38".into(),
+                path: None,
+            }],
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut lsp,
+            &mut reads_this_turn,
+            &mut anchors,
+            ToolSurface::RetrievalFirst,
+            &mut disallowed,
+            &mut weak_query,
+            false,
+            false,
+            InvestigationMode::General,
+            None,
+            &mut requested_read_completed,
+            None,
+            Some(&store),
+            Some(&provider as &(dyn EmbeddingProvider + Send)),
+            &retrieval_config,
+            &mut |e| events.push(e),
+        );
+
+        std::env::remove_var(RUNTIME_TRACE_ENV);
+
+        let has_hybrid_decision_true = events.iter().any(|e| {
+            if let crate::runtime::types::RuntimeEvent::RuntimeTrace(line) = e {
+                line.contains("event=hybrid_search_decision") && line.contains("use_vector=true")
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_hybrid_decision_true,
+            "agent-turn search_code with embedding_provider set must emit \
+             hybrid_search_decision(use_vector=true); events: {events:?}"
         );
     }
 }

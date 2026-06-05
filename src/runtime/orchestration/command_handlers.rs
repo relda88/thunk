@@ -531,125 +531,19 @@ impl Runtime {
             .record_successful_search(&keyword_output, query.clone(), None);
 
         // Try to augment with vector results.
-        let final_output = self.try_vector_augment(query, keyword_output, on_event);
+        let final_output = super::super::tool_round::try_vector_augment(
+            &query,
+            keyword_output,
+            self.symbol_store.as_ref(),
+            self.embedding_provider.as_deref(),
+            &self.retrieval_config,
+            &self.project_root,
+            on_event,
+        );
         on_event(RuntimeEvent::InfoMessage(tool_codec::format_tool_result(
             "search_code",
             &final_output,
         )));
-    }
-
-    fn try_vector_augment(
-        &self,
-        query: String,
-        keyword_output: ToolOutput,
-        on_event: &mut dyn FnMut(RuntimeEvent),
-    ) -> ToolOutput {
-        let ToolOutput::SearchResults(mut results) = keyword_output else {
-            return keyword_output;
-        };
-
-        let store = match &self.symbol_store {
-            Some(s) => s,
-            None => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "no_store".into())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-        };
-        let provider = match &self.embedding_provider {
-            Some(p) => p.as_ref(),
-            None => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "no_provider".into())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-        };
-
-        let project_root = self.project_root.path().to_string_lossy().to_string();
-
-        // Guard: skip vector search if too many embeddings (naive O(n) path).
-        match store.embedding_count(&project_root) {
-            Ok(0) => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "no_embeddings".into())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-            Ok(n) if n > 10_000 => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "cap_exceeded".into()), ("n", n.to_string())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-            Err(_) => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "store_error".into())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-            _ => {}
-        }
-
-        // Embed the query (single call — fast path).
-        let query_vec = match provider.embed(&[query]) {
-            Ok(mut vecs) if !vecs.is_empty() => vecs.remove(0),
-            _ => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "embed_failed".into())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-        };
-
-        let vector_files = match store.cosine_search(&project_root, &query_vec, 10) {
-            Ok(files) => files,
-            Err(_) => {
-                trace_runtime_decision(
-                    on_event,
-                    "vector_augment_skipped",
-                    &[("reason", "cosine_search_failed".into())],
-                );
-                return ToolOutput::SearchResults(results);
-            }
-        };
-
-        if vector_files.is_empty() {
-            trace_runtime_decision(
-                on_event,
-                "vector_augment_skipped",
-                &[("reason", "no_vector_results".into())],
-            );
-            return ToolOutput::SearchResults(results);
-        }
-
-        let vector_weight = self.retrieval_config.vector_weight;
-        let keyword_count = results.matches.len();
-        let vector_count = vector_files.len();
-        results.matches = merge_keyword_vector(results.matches, &vector_files, vector_weight);
-        trace_runtime_decision(
-            on_event,
-            "vector_augment_applied",
-            &[
-                ("weight", format!("{vector_weight:.2}")),
-                ("keyword_count", keyword_count.to_string()),
-                ("vector_count", vector_count.to_string()),
-            ],
-        );
-        ToolOutput::SearchResults(results)
     }
 
     pub(super) fn handle_reset(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
@@ -1967,58 +1861,4 @@ impl Runtime {
         self.active_ability = saved_ability;
         self.prompt_physics.active_ability = saved_pp_ability;
     }
-}
-
-/// Merges keyword `SearchMatch` results with a vector-ranked file list.
-///
-/// Files are scored by a weighted combination of their keyword rank and vector rank,
-/// then re-sorted. Vector-only files have no line matches and are not injected into the
-/// output; only the ordering of existing keyword matches is adjusted.
-fn merge_keyword_vector(
-    matches: Vec<crate::tools::types::SearchMatch>,
-    vector_files: &[String],
-    vector_weight: f32,
-) -> Vec<crate::tools::types::SearchMatch> {
-    if matches.is_empty() || vector_files.is_empty() {
-        return matches;
-    }
-
-    // Group matches by file, preserving within-file ordering.
-    let mut file_order: Vec<String> = Vec::new();
-    let mut by_file: Vec<(String, Vec<crate::tools::types::SearchMatch>)> = Vec::new();
-
-    for m in matches {
-        if let Some(idx) = file_order.iter().position(|f| f == &m.file) {
-            by_file[idx].1.push(m);
-        } else {
-            file_order.push(m.file.clone());
-            by_file.push((m.file.clone(), vec![m]));
-        }
-    }
-
-    let n_kw = file_order.len();
-    let n_vec = vector_files.len();
-
-    // Score each keyword-result file.
-    let mut scored: Vec<(f32, usize)> = file_order
-        .iter()
-        .enumerate()
-        .map(|(kw_pos, file)| {
-            let kw_score = 1.0 - kw_pos as f32 / n_kw.max(1) as f32;
-            let vec_score = vector_files
-                .iter()
-                .position(|f| f == file)
-                .map(|vec_pos| 1.0 - vec_pos as f32 / n_vec.max(1) as f32)
-                .unwrap_or(0.0);
-            let score = (1.0 - vector_weight) * kw_score + vector_weight * vec_score;
-            (score, kw_pos)
-        })
-        .collect();
-
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-    scored
-        .into_iter()
-        .flat_map(|(_, idx)| by_file[idx].1.clone())
-        .collect()
 }

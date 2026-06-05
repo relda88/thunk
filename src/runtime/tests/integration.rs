@@ -5,7 +5,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::config::LspConfig;
+use crate::core::config::{LspConfig, RetrievalConfig};
 use crate::runtime::investigation::anchors::AnchorState;
 use crate::runtime::investigation::investigation::{InvestigationMode, InvestigationState};
 use crate::runtime::investigation::tool_surface::ToolSurface;
@@ -57,6 +57,8 @@ fn run_round(
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |_| {},
     )
 }
@@ -265,6 +267,8 @@ fn lsp_definition_seeded_on_definition_lookup_with_real_search() {
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |_| {},
     );
 
@@ -329,6 +333,8 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |_| {},
     );
 
@@ -360,6 +366,8 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |_| {},
     );
 
@@ -459,6 +467,8 @@ fn definition_lookup_truncated_no_declaration_dispatches_refinement() {
         &mut requested_read_completed,
         None,
         None,
+        None,
+        &RetrievalConfig::default(),
         &mut |_| {},
     );
 
@@ -577,6 +587,8 @@ fn index_hit_promotes_definition_candidate_on_definition_lookup() {
         &mut requested_read_completed,
         None,
         Some(&store),
+        None,
+        &RetrievalConfig::default(),
         &mut |_| {},
     );
 

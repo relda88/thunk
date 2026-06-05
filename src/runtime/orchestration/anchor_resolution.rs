@@ -54,6 +54,8 @@ impl Runtime {
             &mut requested_read_completed,
             None,
             self.symbol_store.as_ref(),
+            self.embedding_provider.as_deref(),
+            &self.retrieval_config,
             on_event,
         ) {
             ToolRoundOutcome::Completed { results, .. } => {

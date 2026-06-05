@@ -1224,6 +1224,8 @@ impl Runtime {
             &mut state.requested_read_completed,
             ctx.investigation_path_scope.as_deref(),
             self.symbol_store.as_ref(),
+            self.embedding_provider.as_deref(),
+            &self.retrieval_config,
             on_event,
         ) {
             ToolRoundOutcome::Completed {
