@@ -71,6 +71,10 @@ pub enum Command {
     /// /depth shallow|normal|deep — session-scoped investigation depth toggle.
     /// None = query current status.
     Depth(Option<InvestigationDepth>),
+    /// /retrieval log [n] — show last N retrieval turn summaries (default 10).
+    RetrievalLog {
+        n: Option<usize>,
+    },
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -268,6 +272,14 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             None | Some("status") => Some(Ok(Command::Depth(None))),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/retrieval" => match arg {
+            None | Some("log") => Some(Ok(Command::RetrievalLog { n: None })),
+            Some(rest) if rest.starts_with("log") => {
+                let n = rest["log".len()..].trim().parse::<usize>().ok();
+                Some(Ok(Command::RetrievalLog { n }))
+            }
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -311,6 +323,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/quit",
         "/read",
         "/reject",
+        "/retrieval",
         "/search",
         "/session",
         "/sessions",
@@ -366,6 +379,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/depth",
             description: "set investigation depth: shallow, normal (default), deep",
+        },
+        LauncherCommand {
+            name: "/retrieval",
+            description: "show retrieval quality log: /retrieval log [n] (default 10)",
         },
         LauncherCommand {
             name: "/diff",

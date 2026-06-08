@@ -149,6 +149,7 @@ impl AppContext {
         if let Some(path) = db_path {
             runtime = runtime.with_symbol_store(path);
             runtime = runtime.with_task_store(path);
+            runtime = runtime.with_retrieval_log_store(path);
         }
         if let Some(ref model) = config.retrieval.embedding_model {
             let provider =
@@ -216,6 +217,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::TaskStatus => "task_status",
         RuntimeRequest::AgentRun { .. } => "agent_run",
         RuntimeRequest::InvestigationDepthToggle { .. } => "investigation_depth_toggle",
+        RuntimeRequest::RetrievalLog { .. } => "retrieval_log",
     }
 }
 

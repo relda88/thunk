@@ -533,6 +533,9 @@ pub(crate) struct InvestigationState {
     /// Session-scoped investigation depth. Copied from config on each turn by engine.rs.
     /// Checked in tool_round.rs to suppress additional-evidence auto-dispatches in Shallow mode.
     pub(crate) investigation_depth: InvestigationDepth,
+    /// True if vector augmentation was applied to any search_code call this turn.
+    /// Set by tool_round.rs after try_vector_augment confirms augmentation occurred.
+    pub(crate) vector_augmented: bool,
 }
 
 impl InvestigationState {
@@ -590,6 +593,7 @@ impl InvestigationState {
             graph: InvestigationGraph::new(),
             deepening_phase_active: false,
             investigation_depth: InvestigationDepth::Normal,
+            vector_augmented: false,
         }
     }
 
@@ -605,6 +609,10 @@ impl InvestigationState {
             self.search_candidate_paths.push(path.to_string());
         }
         self.deepening_phase_active = true;
+    }
+
+    pub(crate) fn record_vector_augmented(&mut self) {
+        self.vector_augmented = true;
     }
 
     pub(crate) fn evidence_ready(&self) -> bool {

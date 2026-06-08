@@ -271,6 +271,11 @@ pub enum RuntimeRequest {
     InvestigationDepthToggle {
         depth: Option<InvestigationDepth>,
     },
+    /// /retrieval log [n] — show last N retrieval turn summaries (default 10).
+    /// Read-only; does not mutate conversation or trigger session save.
+    RetrievalLog {
+        n: Option<usize>,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

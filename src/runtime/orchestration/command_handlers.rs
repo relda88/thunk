@@ -531,8 +531,8 @@ impl Runtime {
         self.anchors
             .record_successful_search(&keyword_output, query.clone(), None);
 
-        // Try to augment with vector results.
-        let final_output = super::super::tool_round::try_vector_augment(
+        // Try to augment with vector results (discard was_applied — not an investigation turn).
+        let (final_output, _) = super::super::tool_round::try_vector_augment(
             &query,
             keyword_output,
             self.symbol_store.as_ref(),
@@ -1884,5 +1884,54 @@ impl Runtime {
                 )));
             }
         }
+    }
+
+    pub(super) fn handle_retrieval_log(
+        &mut self,
+        n: Option<usize>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        let limit = n.unwrap_or(10);
+        let Some(ref store) = self.retrieval_log_store else {
+            on_event(RuntimeEvent::SystemMessage(
+                "retrieval log: not available (no db path)".to_string(),
+            ));
+            return;
+        };
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        let entries = match store.last_n(&project_root, limit) {
+            Ok(e) => e,
+            Err(e) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "retrieval log: error reading log: {e}"
+                )));
+                return;
+            }
+        };
+        if entries.is_empty() {
+            on_event(RuntimeEvent::SystemMessage(
+                "retrieval log: no entries yet".to_string(),
+            ));
+            return;
+        }
+        let mut lines = vec![format!("retrieval log (last {}):", entries.len())];
+        for e in &entries {
+            let vec_flag = if e.vector_augmented { " [vec]" } else { "" };
+            let hops = if e.hops_taken > 0 {
+                format!(" hops={}", e.hops_taken)
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "  strategy={} candidates={} reads={} gate={}{}{}",
+                e.strategy,
+                e.candidates_found,
+                e.reads_accepted,
+                e.evidence_outcome,
+                hops,
+                vec_flag,
+            ));
+        }
+        on_event(RuntimeEvent::SystemMessage(lines.join("\n")));
     }
 }

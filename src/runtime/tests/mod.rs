@@ -32,6 +32,7 @@ mod plan_command;
 mod project_snapshot;
 mod prompt_physics;
 mod read_bounds;
+mod retrieval_log;
 mod search_budget;
 mod search_guardrails;
 mod task_command;

@@ -4,6 +4,7 @@ use crate::core::config::{Config, InvestigationDepth, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
 use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
+use crate::storage::retrieval::{RetrievalLogEntry, RetrievalLogStore};
 use crate::storage::tasks::TaskStore;
 use crate::tools::{
     PendingAction, PendingApprovalStage, PendingTransaction, ToolInput, ToolOutput, ToolRegistry,
@@ -164,6 +165,11 @@ pub struct Runtime {
     investigation_hop_limit: usize,
     /// Hard cap on total reads per turn in deep mode. From config.investigation.max_total_reads.
     investigation_max_reads: usize,
+    /// Retrieval quality log. `None` when no db_path was supplied (e.g. in tests).
+    retrieval_log_store: Option<RetrievalLogStore>,
+    /// True after the low-hit-rate warning has been emitted this session.
+    /// Ensures the warning fires at most once per session.
+    retrieval_warn_emitted: bool,
 }
 
 impl Runtime {
@@ -227,6 +233,8 @@ impl Runtime {
             investigation_depth: config.investigation.depth,
             investigation_hop_limit: config.investigation.hop_limit,
             investigation_max_reads: config.investigation.max_total_reads,
+            retrieval_log_store: None,
+            retrieval_warn_emitted: false,
         }
     }
 
@@ -241,6 +249,13 @@ impl Runtime {
     /// Silently proceeds without a store if the path cannot be opened.
     pub fn with_task_store(mut self, db_path: &std::path::Path) -> Self {
         self.task_store = TaskStore::open(db_path).ok();
+        self
+    }
+
+    /// Attaches a `RetrievalLogStore` backed by `db_path`. Returns `self` for chaining.
+    /// Silently proceeds without a store if the path cannot be opened.
+    pub fn with_retrieval_log_store(mut self, db_path: &std::path::Path) -> Self {
+        self.retrieval_log_store = RetrievalLogStore::open(db_path).ok();
         self
     }
 
@@ -387,6 +402,7 @@ impl Runtime {
             RuntimeRequest::InvestigationDepthToggle { depth } => {
                 self.handle_depth_toggle(depth, on_event)
             }
+            RuntimeRequest::RetrievalLog { n } => self.handle_retrieval_log(n, on_event),
         }
     }
 
@@ -1250,6 +1266,7 @@ impl Runtime {
                 TurnSignal::Finish => {
                     state.turn_perf.emit_summary(on_event);
                     self.maybe_warn_or_prune_context(&state.turn_perf, on_event);
+                    self.write_retrieval_log(&ctx, &state, on_event);
                     return;
                 }
                 TurnSignal::Continue => continue,
@@ -2240,6 +2257,57 @@ impl Runtime {
         &mut self,
     ) -> std::io::Result<ProjectStructureSnapshot> {
         self.get_or_build_project_snapshot().cloned()
+    }
+
+    fn write_retrieval_log(
+        &mut self,
+        ctx: &TurnContext,
+        state: &TurnState,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        let Some(ref store) = self.retrieval_log_store else {
+            return;
+        };
+        let project_root = self.project_root.path().to_string_lossy().into_owned();
+        let evidence_outcome = if state.investigation.evidence_ready() {
+            "met"
+        } else {
+            "unmet"
+        };
+        let entry = RetrievalLogEntry {
+            project_root: project_root.clone(),
+            strategy: ctx.investigation_mode.as_str().to_string(),
+            candidates_found: state.investigation.search_candidate_count(),
+            reads_accepted: state.investigation.useful_accepted_candidate_reads,
+            evidence_outcome: evidence_outcome.to_string(),
+            hops_taken: state
+                .deepening
+                .as_ref()
+                .map(|d| d.reads_this_deep_phase)
+                .unwrap_or(0),
+            vector_augmented: state.investigation.vector_augmented,
+        };
+        let _ = store.insert(&entry);
+
+        if self.retrieval_warn_emitted {
+            return;
+        }
+        if let Ok(Some(rate)) = store.recent_hit_rate(&project_root, 5) {
+            if rate == 0.0 {
+                // Suppress the warn when searches produced no candidates at all (index
+                // simply wasn't used) vs. when candidates existed but none were accepted.
+                if let Ok(last5) = store.last_n(&project_root, 5) {
+                    let any_had_candidates = last5.iter().any(|e| e.candidates_found > 0);
+                    if any_had_candidates {
+                        self.retrieval_warn_emitted = true;
+                        on_event(RuntimeEvent::SystemMessage(
+                            "Low retrieval hit rate on recent turns — consider running /index build"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+        }
     }
 }
 

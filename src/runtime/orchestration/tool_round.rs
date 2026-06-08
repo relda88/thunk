@@ -918,7 +918,7 @@ pub(crate) fn run_tool_round(
                         ],
                     );
                     if use_vector {
-                        try_vector_augment(
+                        let (augmented, was_applied) = try_vector_augment(
                             query_str,
                             output,
                             symbol_store,
@@ -926,7 +926,11 @@ pub(crate) fn run_tool_round(
                             retrieval_config,
                             project_root,
                             on_event,
-                        )
+                        );
+                        if was_applied {
+                            investigation.record_vector_augmented();
+                        }
+                        augmented
                     } else {
                         output
                     }
@@ -1312,6 +1316,8 @@ pub(crate) fn run_tool_round(
     }
 }
 
+/// Returns `(output, was_applied)` where `was_applied` is true only when vector
+/// candidates were merged into the keyword results.
 pub(super) fn try_vector_augment(
     query: &str,
     keyword_output: ToolOutput,
@@ -1320,9 +1326,9 @@ pub(super) fn try_vector_augment(
     retrieval_config: &RetrievalConfig,
     project_root: &ProjectRoot,
     on_event: &mut dyn FnMut(RuntimeEvent),
-) -> ToolOutput {
+) -> (ToolOutput, bool) {
     let ToolOutput::SearchResults(mut results) = keyword_output else {
-        return keyword_output;
+        return (keyword_output, false);
     };
 
     let store = match symbol_store {
@@ -1333,7 +1339,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "no_store".into())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
     };
     let provider = match embedding_provider {
@@ -1344,7 +1350,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "no_provider".into())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
     };
 
@@ -1357,7 +1363,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "no_embeddings".into())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
         Ok(n) if n > 10_000 => {
             trace_runtime_decision(
@@ -1365,7 +1371,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "cap_exceeded".into()), ("n", n.to_string())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
         Err(_) => {
             trace_runtime_decision(
@@ -1373,7 +1379,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "store_error".into())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
         _ => {}
     }
@@ -1386,7 +1392,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "embed_failed".into())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
     };
 
@@ -1398,7 +1404,7 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "cosine_search_failed".into())],
             );
-            return ToolOutput::SearchResults(results);
+            return (ToolOutput::SearchResults(results), false);
         }
     };
 
@@ -1408,7 +1414,7 @@ pub(super) fn try_vector_augment(
             "vector_augment_skipped",
             &[("reason", "no_vector_results".into())],
         );
-        return ToolOutput::SearchResults(results);
+        return (ToolOutput::SearchResults(results), false);
     }
 
     let vector_weight = retrieval_config.vector_weight;
@@ -1424,7 +1430,7 @@ pub(super) fn try_vector_augment(
             ("vector_count", vector_count.to_string()),
         ],
     );
-    ToolOutput::SearchResults(results)
+    (ToolOutput::SearchResults(results), true)
 }
 
 fn merge_keyword_vector(
