@@ -53,6 +53,12 @@ mod answer_admission;
 #[path = "answer_guard.rs"]
 mod answer_guard;
 
+#[path = "plan_handlers.rs"]
+mod plan_handlers;
+
+#[path = "embed_handlers.rs"]
+mod embed_handlers;
+
 fn capture_session_head(root: &std::path::Path) -> Option<String> {
     std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
