@@ -259,6 +259,42 @@ fn index_embed_clears_on_model_change() {
 }
 
 #[test]
+fn index_embed_emits_per_chunk_progress_messages() {
+    let root = canonical_root();
+    let db = NamedTempFile::new().unwrap();
+    let store = open_store(db.path());
+    // Seed 40 symbols — chunk_size is 32, so this produces 2 chunk iterations.
+    let names: Vec<String> = (0..40).map(|i| format!("fn_{i}")).collect();
+    let name_strs: Vec<&str> = names.iter().map(String::as_str).collect();
+    seed_symbols(&store, &root, &name_strs);
+    drop(store);
+
+    let provider = Box::new(ConstantEmbedProvider(vec![0.1, 0.9]));
+    let (mut rt, _) = make_runtime_with_store_and_provider(db.path(), provider);
+
+    let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
+    let chunk_msgs: Vec<&str> = events
+        .iter()
+        .filter_map(|e| {
+            if let RuntimeEvent::SystemMessage(m) = e {
+                if m.contains("embed: chunk ") {
+                    Some(m.as_str())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        chunk_msgs.len() >= 2,
+        "expected at least 2 per-chunk progress messages; got {}: {events:?}",
+        chunk_msgs.len()
+    );
+}
+
+#[test]
 fn index_embed_caps_at_2000_symbols_with_warning() {
     let root = canonical_root();
     let db = NamedTempFile::new().unwrap();

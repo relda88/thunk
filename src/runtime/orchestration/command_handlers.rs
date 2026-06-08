@@ -742,8 +742,14 @@ impl Runtime {
         let chunk_size = 32;
         let mut embedded: Vec<(i64, Vec<f32>, String)> = Vec::with_capacity(symbols.len());
 
-        for chunk in symbols.chunks(chunk_size) {
+        for (chunk_idx, chunk) in symbols.chunks(chunk_size).enumerate() {
             let texts: Vec<String> = chunk.iter().map(|(_, sig)| sig.clone()).collect();
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "embed: chunk {}/{} ({} symbols processed)",
+                chunk_idx + 1,
+                (symbols.len() + chunk_size - 1) / chunk_size,
+                chunk_idx * chunk_size,
+            )));
             let vecs = match self.embedding_provider.as_ref().unwrap().embed(&texts) {
                 Ok(v) => v,
                 Err(e) => {

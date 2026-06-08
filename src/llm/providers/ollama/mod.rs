@@ -82,6 +82,8 @@ impl ModelBackend for OllamaBackend {
             }
         });
 
+        on_event(BackendEvent::PromptAssembled(body.to_string()));
+
         let url = format!("{}/api/chat", self.config.base_url);
 
         let agent = ureq::AgentBuilder::new()
@@ -147,5 +149,38 @@ impl ModelBackend for OllamaBackend {
 
         on_event(BackendEvent::Finished);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::config::OllamaConfig;
+    use crate::llm::backend::{BackendEvent, GenerateRequest, Message, ModelBackend};
+
+    #[test]
+    fn prompt_assembled_emitted_before_status_changed() {
+        let config = OllamaConfig {
+            base_url: "http://127.0.0.1:1".to_string(),
+            model: "test".to_string(),
+            ..OllamaConfig::default()
+        };
+        let mut backend = OllamaBackend::new(config);
+        let request = GenerateRequest::new(vec![Message::user("hi")]);
+        let mut events: Vec<BackendEvent> = Vec::new();
+        let _ = backend.generate(request, &mut |e| events.push(e));
+        let prompt_idx = events
+            .iter()
+            .position(|e| matches!(e, BackendEvent::PromptAssembled(_)));
+        let status_idx = events
+            .iter()
+            .position(|e| matches!(e, BackendEvent::StatusChanged(_)));
+        assert!(prompt_idx.is_some(), "PromptAssembled must be emitted");
+        if let Some(si) = status_idx {
+            assert!(
+                prompt_idx.unwrap() < si,
+                "PromptAssembled must precede StatusChanged"
+            );
+        }
     }
 }
