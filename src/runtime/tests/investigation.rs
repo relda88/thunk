@@ -1697,3 +1697,304 @@ fn non_candidate_dispatch_falls_back_to_first_result_when_no_mode_specific_candi
         "answer grounded in the dispatched fallback candidate must be ToolAssisted: {answer_source:?}"
     );
 }
+
+// --- Slice 38.3: Iterative Deepening Mode ---
+
+#[test]
+fn shallow_mode_terminates_before_second_candidate_read() {
+    // Shallow depth: the runtime terminates after exactly one candidate read when evidence
+    // is not yet ready, rather than seeding a second read as normal mode would.
+    //
+    // File setup produces a broad UsageLookup (two substantive usage candidates → target=2).
+    // In normal mode both are auto-read before synthesis is admitted.  In shallow mode the
+    // runtime intercepts the model's premature synthesis attempt after the first auto-read
+    // and emits a RuntimeTerminal { InsufficientEvidence } without ever reading the second.
+    use crate::core::config::{Config, InvestigationConfig, InvestigationDepth};
+    use crate::tools::default_registry;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+    fs::create_dir_all(tmp.path().join("models")).unwrap();
+
+    // Two substantive usage files — triggers broad UsageLookup (target=2).
+    fs::write(
+        tmp.path().join("services").join("worker_a.py"),
+        "if task.status == TaskStatus.DONE:\n    do_a()\nif old == TaskStatus.DONE:\n    audit_a()\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("services").join("worker_b.py"),
+        "status = TaskStatus.DONE\ndo_b()\n",
+    )
+    .unwrap();
+    // Definition file (def-only candidate, not substantive).
+    fs::write(
+        tmp.path().join("models").join("enums.py"),
+        "class TaskStatus(str, Enum):\n    DONE = \"done\"\n",
+    )
+    .unwrap();
+
+    let config = Config {
+        investigation: InvestigationConfig {
+            depth: InvestigationDepth::Shallow,
+            ..InvestigationConfig::default()
+        },
+        ..Config::default()
+    };
+
+    let project_root = ProjectRoot::new(tmp.path().to_path_buf()).unwrap();
+    let mut rt = Runtime::new(
+        &config,
+        project_root.clone(),
+        Box::new(TestBackend::new(vec![
+            "[search_code: TaskStatus]",
+            // Round 3: model generates premature synthesis after 1 auto-read.
+            // Shallow mode intercepts here — only 1 candidate was read, target=2 not met.
+            "TaskStatus is used in services/worker_a.py.",
+        ])),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+        tmp.path().to_path_buf(),
+        "test-session".to_string(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is TaskStatus used?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "turn must not fail: {events:?}");
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "shallow mode must terminate after first candidate read: {answer_source:?}"
+    );
+
+    // Shallow mode must stop after exactly one auto-read (worker_a.py).
+    // In normal mode two reads would happen; shallow intercepts before the second.
+    let snapshot = rt.messages_snapshot();
+    let read_count = snapshot
+        .iter()
+        .filter(|m| m.content.contains("=== tool_result: read_file ==="))
+        .count();
+    assert_eq!(
+        read_count, 1,
+        "shallow mode must stop after exactly 1 candidate read, got {read_count}"
+    );
+}
+
+#[test]
+fn deep_mode_follows_import_chain_after_candidate_exhaustion() {
+    // Deep depth: after the normal two-candidate-read limit is exhausted without satisfying
+    // evidence gates, the runtime follows the graph's import edges (deepening hops) to reach
+    // an additional file not found by the original search.  Evidence becomes ready after the
+    // deepening read and the final model synthesis is admitted as ToolAssisted.
+    //
+    // Setup: three search candidates (task_service.py = import-only,
+    // enums.py + alt_enums.py = def-only).  task_service.py imports from models/base.py
+    // which is NOT in the search results.  After two candidate reads the graph already has
+    // an import edge task_service → models/base.py, so deepening reads it and satisfies
+    // evidence gates.
+    use crate::core::config::{Config, InvestigationConfig, InvestigationDepth};
+    use crate::tools::default_registry;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("models")).unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+
+    // def-only candidates (both will be read but rejected by Gate 1)
+    fs::write(
+        tmp.path().join("models").join("enums.py"),
+        "class TaskStatus(str, Enum):\n    TODO = \"todo\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("models").join("alt_enums.py"),
+        "class TaskStatus:\n    DONE = \"done\"\n",
+    )
+    .unwrap();
+    // import-only candidate; also imports models/base.py → graph edge seeded for deepening
+    fs::write(
+        tmp.path().join("services").join("task_service.py"),
+        "from models.enums import TaskStatus\nfrom models.base import StatusBase\n",
+    )
+    .unwrap();
+    // NOT a search candidate, but reachable via task_service.py import edge
+    fs::write(
+        tmp.path().join("models").join("base.py"),
+        "class StatusBase:\n    pass\n",
+    )
+    .unwrap();
+
+    let config = Config {
+        investigation: InvestigationConfig {
+            depth: InvestigationDepth::Deep,
+            hop_limit: 3,
+            max_total_reads: 10,
+        },
+        ..Config::default()
+    };
+
+    let project_root = ProjectRoot::new(tmp.path().to_path_buf()).unwrap();
+    let mut rt = Runtime::new(
+        &config,
+        project_root.clone(),
+        Box::new(TestBackend::new(vec![
+            // Call 1: search → auto-dispatch task_service.py (pending, no model call).
+            // Rounds 2–4 are all pending reads (no model call):
+            //   Round 2: task_service.py → import gate first-fire → recovery to alt_enums.py;
+            //            graph edges: task_service → enums.py, task_service → base.py.
+            //   Round 3: alt_enums.py → Gate 1 first-fire → recovery to task_service.py.
+            //   Round 4: task_service.py again → dedup fires → Completed (model called next).
+            "[search_code: TaskStatus]",
+            // Call 2: candidate_reads_count=2 >= MAX, model returns plain text →
+            // handle_no_tool_call → deepening fires, reads models/base.py via graph edge,
+            // evidence_ready=true, answer_phase set.
+            "TaskStatus is defined in models.",
+            // Call 3: synthesis admitted as ToolAssisted.
+            "TaskStatus found via import chain in models/base.py.",
+        ])),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+        tmp.path().to_path_buf(),
+        "test-session".to_string(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is TaskStatus used?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "turn must not fail: {events:?}");
+
+    // Debug: print all RuntimeTrace events
+    for e in &events {
+        if let RuntimeEvent::RuntimeTrace(line) = e {
+            eprintln!("{line}");
+        }
+    }
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "deep mode must admit synthesis after deepening makes evidence ready: {answer_source:?}"
+    );
+
+    // models/base.py must appear in a tool_result (the deepening hop read).
+    let snapshot = rt.messages_snapshot();
+    assert!(
+        snapshot.iter().any(|m| m.content.contains("base.py")),
+        "deepening must have read models/base.py: {snapshot:?}"
+    );
+}
+
+#[test]
+fn deep_mode_hop_limit_zero_gives_insufficient_terminal() {
+    // Deep depth with hop_limit=0: deepening is triggered (candidate reads exhausted,
+    // evidence not ready) but the hop counter immediately hits the limit, producing a
+    // RuntimeTerminal { InsufficientEvidence } identical to normal-mode exhaustion.
+    // Verifies that hop_limit=0 is a safe no-op (no panic, clean terminal).
+    use crate::core::config::{Config, InvestigationConfig, InvestigationDepth};
+    use crate::tools::default_registry;
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("models")).unwrap();
+    fs::create_dir_all(tmp.path().join("services")).unwrap();
+
+    fs::write(
+        tmp.path().join("models").join("enums.py"),
+        "class TaskStatus(str, Enum):\n    TODO = \"todo\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("models").join("alt_enums.py"),
+        "class TaskStatus:\n    DONE = \"done\"\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join("services").join("task_service.py"),
+        "from models.enums import TaskStatus\n",
+    )
+    .unwrap();
+
+    let config = Config {
+        investigation: InvestigationConfig {
+            depth: InvestigationDepth::Deep,
+            hop_limit: 0,
+            max_total_reads: 10,
+        },
+        ..Config::default()
+    };
+
+    let project_root = ProjectRoot::new(tmp.path().to_path_buf()).unwrap();
+    let mut rt = Runtime::new(
+        &config,
+        project_root.clone(),
+        Box::new(TestBackend::new(vec![
+            "[search_code: TaskStatus]",
+            "[read_file: models/enums.py]",
+            "[read_file: models/alt_enums.py]",
+            "TaskStatus is defined in models/enums.py.",
+        ])),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+        tmp.path().to_path_buf(),
+        "test-session".to_string(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "Where is TaskStatus used?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "turn must not fail: {events:?}");
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::InsufficientEvidence,
+                ..
+            })
+        ),
+        "deep mode with hop_limit=0 must give InsufficientEvidence terminal: {answer_source:?}"
+    );
+}

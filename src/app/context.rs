@@ -215,6 +215,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::TaskBlock { .. } => "task_block",
         RuntimeRequest::TaskStatus => "task_status",
         RuntimeRequest::AgentRun { .. } => "agent_run",
+        RuntimeRequest::InvestigationDepthToggle { .. } => "investigation_depth_toggle",
     }
 }
 

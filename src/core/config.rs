@@ -236,6 +236,54 @@ impl Default for WebFetchConfig {
     }
 }
 
+/// Investigation depth for retrieval — how aggressively the runtime follows import chains.
+/// `shallow`: stop after the first useful candidate read.
+/// `normal`: current behavior (up to two candidate reads).
+/// `deep`: after candidate exhaustion, follow import/definition edges for up to `hop_limit`
+///         additional hops, bounded by `max_total_reads`. Call-site following is not
+///         available (no callers index); only import chains and definition-site edges are used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum InvestigationDepth {
+    Shallow,
+    #[default]
+    Normal,
+    Deep,
+}
+
+impl InvestigationDepth {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Shallow => "shallow",
+            Self::Normal => "normal",
+            Self::Deep => "deep",
+        }
+    }
+}
+
+/// Investigation behavior settings.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct InvestigationConfig {
+    pub depth: InvestigationDepth,
+    /// Maximum number of deepening hops in deep mode (import-chain following after
+    /// initial candidate exhaustion). Only used when `depth = "deep"`.
+    pub hop_limit: usize,
+    /// Hard cap on total reads per turn in deep mode (initial reads + deepening reads).
+    /// Only used when `depth = "deep"`.
+    pub max_total_reads: usize,
+}
+
+impl Default for InvestigationConfig {
+    fn default() -> Self {
+        Self {
+            depth: InvestigationDepth::Normal,
+            hop_limit: 3,
+            max_total_reads: 10,
+        }
+    }
+}
+
 /// Main configuration struct for the application
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
@@ -254,6 +302,7 @@ pub struct Config {
     pub prompt_physics: PromptPhysicsSettings,
     pub web_fetch: WebFetchConfig,
     pub retrieval: RetrievalConfig,
+    pub investigation: InvestigationConfig,
 }
 
 /// Application configuration for the app

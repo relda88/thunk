@@ -1,6 +1,6 @@
 pub(crate) mod dispatch;
 
-use crate::core::config::{AllowedCommandTool, Config};
+use crate::core::config::{AllowedCommandTool, Config, InvestigationDepth};
 use crate::runtime::{DiffMode, RuntimeRequest};
 
 /// A parsed slash command entered by the user.
@@ -68,6 +68,9 @@ pub enum Command {
         ability: String,
         target: Option<String>,
     },
+    /// /depth shallow|normal|deep — session-scoped investigation depth toggle.
+    /// None = query current status.
+    Depth(Option<InvestigationDepth>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -258,6 +261,13 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
                 }
             }
         },
+        "/depth" => match arg {
+            Some("shallow") => Some(Ok(Command::Depth(Some(InvestigationDepth::Shallow)))),
+            Some("normal") => Some(Ok(Command::Depth(Some(InvestigationDepth::Normal)))),
+            Some("deep") => Some(Ok(Command::Depth(Some(InvestigationDepth::Deep)))),
+            None | Some("status") => Some(Ok(Command::Depth(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -285,6 +295,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/compact",
         "/diff",
         "/context",
+        "/depth",
         "/exit",
         "/fetch",
         "/git",
@@ -351,6 +362,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/compact",
             description: "summarize and compress conversation context",
+        },
+        LauncherCommand {
+            name: "/depth",
+            description: "set investigation depth: shallow, normal (default), deep",
         },
         LauncherCommand {
             name: "/diff",

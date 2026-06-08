@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::core::config::RetrievalConfig;
+use crate::core::config::{InvestigationDepth, RetrievalConfig};
 use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
 use crate::tools::types::LspDefinitionOutput;
@@ -656,9 +656,11 @@ pub(crate) fn run_tool_round(
 
         // Candidate-read cap: once two matched candidates have been read without
         // useful evidence, do not allow the model to keep reading current candidates.
+        // Bypassed during the deepening phase so hop reads are not blocked.
         if investigation_required
             && !investigation.evidence_ready()
             && investigation.candidate_reads_count() >= MAX_CANDIDATE_READS_PER_INVESTIGATION
+            && !investigation.deepening_phase_active
         {
             if let Some(rp) = read_path.as_deref() {
                 if investigation.is_search_candidate_path(rp) {
@@ -1177,6 +1179,7 @@ pub(crate) fn run_tool_round(
                 if name == "read_file"
                     && !has_read_recovery
                     && matches!(investigation_mode, InvestigationMode::UsageLookup)
+                    && investigation.investigation_depth != InvestigationDepth::Shallow
                 {
                     if let Some(path) = investigation.next_usage_evidence_candidate() {
                         trace_runtime_decision(

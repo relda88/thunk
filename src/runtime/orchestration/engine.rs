@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::core::config::{Config, RetrievalConfig};
+use crate::core::config::{Config, InvestigationDepth, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
 use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
@@ -17,7 +17,9 @@ use super::super::investigation::anchors::{
     has_same_scope_reference, is_last_read_file_anchor_prompt, is_last_search_anchor_prompt,
     AnchorState,
 };
-use super::super::investigation::investigation::{detect_investigation_mode, InvestigationMode};
+use super::super::investigation::investigation::{
+    detect_investigation_mode, InvestigationMode, ReadClassification,
+};
 use super::super::paths::{normalize_evidence_path, path_is_within_scope};
 use super::super::project::ProjectRoot;
 use super::super::project::ProjectStructureSnapshot;
@@ -77,7 +79,9 @@ use super::telemetry::{
 
 use super::super::investigation::tool_surface::{select_tool_surface, ToolSurface};
 
-use super::turn_state::{AnswerPhaseKind, PendingRuntimeCall, TurnContext, TurnSignal, TurnState};
+use super::turn_state::{
+    AnswerPhaseKind, DeepeningState, PendingRuntimeCall, TurnContext, TurnSignal, TurnState,
+};
 
 /// Returns true if the prompt contains a token that looks like a code identifier.
 /// Only two structural patterns are checked — no NLP, no heuristics.
@@ -153,6 +157,13 @@ pub struct Runtime {
     /// Parsed plan awaiting user approval. Set by handle_plan_create, consumed by
     /// handle_plan_approve / handle_plan_abandon. Never persisted; cleared on reset.
     pending_plan: Option<command_handlers::PendingPlanDraft>,
+    /// Session-scoped investigation depth. Initialized from config.investigation.depth;
+    /// overridable at runtime via /depth <shallow|normal|deep>.
+    investigation_depth: InvestigationDepth,
+    /// Maximum deepening hops in deep mode. From config.investigation.hop_limit.
+    investigation_hop_limit: usize,
+    /// Hard cap on total reads per turn in deep mode. From config.investigation.max_total_reads.
+    investigation_max_reads: usize,
 }
 
 impl Runtime {
@@ -213,6 +224,9 @@ impl Runtime {
             web_fetch_enabled: config.web_fetch.enabled,
             session_id,
             pending_plan: None,
+            investigation_depth: config.investigation.depth,
+            investigation_hop_limit: config.investigation.hop_limit,
+            investigation_max_reads: config.investigation.max_total_reads,
         }
     }
 
@@ -370,6 +384,9 @@ impl Runtime {
             RuntimeRequest::AgentRun { ability, target } => {
                 self.handle_agent_run(ability, target, on_event)
             }
+            RuntimeRequest::InvestigationDepthToggle { depth } => {
+                self.handle_depth_toggle(depth, on_event)
+            }
         }
     }
 
@@ -378,6 +395,177 @@ impl Runtime {
     fn commit_tool_results(&mut self, results: String) {
         let capped = cap_tool_result_blocks(&results, self.context_policy.tool_result_max_lines);
         self.conversation.push_user(capped);
+    }
+
+    /// Iterative deepening phase: follow import-chain and definition edges from already-read
+    /// files for up to `investigation_hop_limit` additional reads, bounded by
+    /// `investigation_max_reads`. Only called when `investigation_depth == Deep` and the
+    /// initial candidate reads are exhausted without satisfying evidence gates.
+    ///
+    /// Loops internally until: evidence gates satisfied, hop limit hit, read budget
+    /// exhausted, or no more promoted candidates available. Returns `TurnSignal::Continue`
+    /// when evidence becomes ready (answer_phase set), or calls `finish_with_runtime_answer`
+    /// and returns `TurnSignal::Finish` when all options are exhausted.
+    ///
+    /// Note: call-site following is not available — the index has no callers table. Only
+    /// import chains (InvestigationGraph import edges) and definition-site edges are used.
+    fn run_deepening_hop(
+        &mut self,
+        ctx: &TurnContext,
+        state: &mut TurnState,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) -> TurnSignal {
+        state.deepening.get_or_insert(DeepeningState {
+            current_hop: 0,
+            reads_this_deep_phase: 0,
+        });
+
+        loop {
+            let (current_hop, reads_this_deep_phase) = {
+                let d = state.deepening.as_ref().unwrap();
+                (d.current_hop, d.reads_this_deep_phase)
+            };
+
+            // Stop: hop limit or total read budget exhausted
+            if current_hop >= self.investigation_hop_limit
+                || state.reads_this_turn.len() + reads_this_deep_phase
+                    >= self.investigation_max_reads
+            {
+                trace_insufficient_evidence_terminal(
+                    "deepening_exhausted",
+                    state.tool_rounds,
+                    &state.search_budget,
+                    &state.investigation,
+                    on_event,
+                );
+                self.finish_with_runtime_answer(
+                    ungrounded_investigation_final_answer(),
+                    AnswerSource::RuntimeTerminal {
+                        reason: RuntimeTerminalReason::InsufficientEvidence,
+                        rounds: state.tool_rounds,
+                    },
+                    on_event,
+                );
+                return TurnSignal::Finish;
+            }
+
+            // Get next promoted candidate (import/definition edges from already-read files)
+            let candidates = state.investigation.graph.promoted_candidates();
+            let candidate = candidates.into_iter().find(|path| {
+                let norm = normalize_evidence_path(path);
+                !state.reads_this_turn.contains(&norm)
+            });
+
+            let Some(path) = candidate else {
+                // No more reachable candidates at this depth — terminal
+                trace_insufficient_evidence_terminal(
+                    "deepening_no_more_candidates",
+                    state.tool_rounds,
+                    &state.search_budget,
+                    &state.investigation,
+                    on_event,
+                );
+                self.finish_with_runtime_answer(
+                    ungrounded_investigation_final_answer(),
+                    AnswerSource::RuntimeTerminal {
+                        reason: RuntimeTerminalReason::InsufficientEvidence,
+                        rounds: state.tool_rounds,
+                    },
+                    on_event,
+                );
+                return TurnSignal::Finish;
+            };
+
+            // Project confinement: resolve enforces that path stays within project root
+            let resolved = match resolve(
+                &self.project_root,
+                &ToolInput::ReadFile { path: path.clone() },
+            ) {
+                Ok(r) => r,
+                Err(_) => {
+                    // Path escapes root or is invalid — skip this candidate, advance hop
+                    if let Some(d) = state.deepening.as_mut() {
+                        d.current_hop += 1;
+                    }
+                    continue;
+                }
+            };
+
+            // Register as a search candidate so evidence gates in record_read_result apply
+            state.investigation.register_deepening_candidate(&path);
+
+            // Dispatch read directly — bypasses run_tool_round (no per-turn cap check)
+            let run_result = match self.registry.dispatch(resolved) {
+                Ok(r) => r,
+                Err(_) => {
+                    if let Some(d) = state.deepening.as_mut() {
+                        d.current_hop += 1;
+                    }
+                    continue;
+                }
+            };
+
+            let output = match run_result {
+                ToolRunResult::Immediate(o) => o,
+                ToolRunResult::Approval(_) => {
+                    // Read tools never require approval — defensive skip
+                    if let Some(d) = state.deepening.as_mut() {
+                        d.current_hop += 1;
+                    }
+                    continue;
+                }
+            };
+
+            // Record graph edges from the file's import declarations
+            if let ToolOutput::FileContents(ref fc) = output {
+                state
+                    .investigation
+                    .graph
+                    .record_read(&fc.path, &fc.contents);
+                let norm = normalize_evidence_path(&fc.path);
+                state.reads_this_turn.insert(norm);
+            }
+
+            // Run through evidence gates (record_read_result classifies the file)
+            let _recovery = state.investigation.record_read_result(
+                &output,
+                ctx.investigation_mode,
+                ReadClassification::Candidate,
+                on_event,
+            );
+
+            // Commit result to conversation context
+            let result_text = tool_codec::format_tool_result("read_file", &output);
+            self.commit_tool_results(result_text);
+
+            // Increment deepening counters and emit trace
+            let (new_hop, new_reads) = {
+                let d = state.deepening.as_mut().unwrap();
+                d.reads_this_deep_phase += 1;
+                d.current_hop += 1;
+                (d.current_hop, d.reads_this_deep_phase)
+            };
+
+            let norm_path = match &output {
+                ToolOutput::FileContents(fc) => normalize_evidence_path(&fc.path),
+                _ => normalize_evidence_path(&path),
+            };
+            trace_runtime_decision(
+                on_event,
+                "deepening_hop_read",
+                &[
+                    ("path", norm_path),
+                    ("hop", (new_hop - 1).to_string()),
+                    ("reads_this_deep_phase", new_reads.to_string()),
+                ],
+            );
+
+            // Evidence gates satisfied — transition to answer phase
+            if state.investigation.evidence_ready() {
+                state.answer_phase = Some(AnswerPhaseKind::InvestigationEvidenceReady);
+                return TurnSignal::Continue;
+            }
+        }
     }
 
     fn get_or_build_project_snapshot(&mut self) -> std::io::Result<&ProjectStructureSnapshot> {
@@ -1055,6 +1243,7 @@ impl Runtime {
                 }
             }
         }
+        state.investigation.investigation_depth = self.investigation_depth;
         seed_pending_runtime_call(&ctx, &mut state);
         loop {
             match self.run_loop_body(&ctx, &mut state, on_event) {
@@ -1623,11 +1812,39 @@ impl Runtime {
             }
 
             if state.investigation.search_produced_results() {
+                // Shallow mode: terminate after the first candidate read without useful evidence.
+                if self.investigation_depth == InvestigationDepth::Shallow
+                    && state.investigation.candidate_reads_count() >= 1
+                    && !state.investigation.evidence_ready()
+                {
+                    trace_insufficient_evidence_terminal(
+                        "shallow_mode_single_read_exhausted",
+                        state.tool_rounds,
+                        &state.search_budget,
+                        &state.investigation,
+                        on_event,
+                    );
+                    self.finish_with_runtime_answer(
+                        ungrounded_investigation_final_answer(),
+                        AnswerSource::RuntimeTerminal {
+                            reason: RuntimeTerminalReason::InsufficientEvidence,
+                            rounds: state.tool_rounds,
+                        },
+                        on_event,
+                    );
+                    return TurnSignal::Finish;
+                }
+
                 // Both candidate-read slots exhausted and evidence is still not ready.
-                // Do not attempt another correction cycle — terminate cleanly.
+                // In deep mode: attempt iterative deepening (import-chain following) before
+                // terminating. In normal/shallow mode: terminate cleanly.
                 if state.investigation.candidate_reads_count()
                     >= MAX_CANDIDATE_READS_PER_INVESTIGATION
+                    && !state.investigation.deepening_phase_active
                 {
+                    if self.investigation_depth == InvestigationDepth::Deep {
+                        return self.run_deepening_hop(ctx, state, on_event);
+                    }
                     trace_insufficient_evidence_terminal(
                         "candidate_read_limit_exhausted",
                         state.tool_rounds,

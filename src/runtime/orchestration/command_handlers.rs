@@ -1,3 +1,4 @@
+use crate::core::config::InvestigationDepth;
 use crate::llm::backend::{BackendEvent, GenerateRequest, Message, Role};
 use crate::storage::tasks::{PlanStatus, TaskStatus};
 use crate::tools::{
@@ -1860,5 +1861,28 @@ impl Runtime {
 
         self.active_ability = saved_ability;
         self.prompt_physics.active_ability = saved_pp_ability;
+    }
+
+    pub(super) fn handle_depth_toggle(
+        &mut self,
+        depth: Option<InvestigationDepth>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match depth {
+            Some(d) => {
+                self.investigation_depth = d;
+                trace_runtime_decision(on_event, "depth_toggled", &[("depth", d.as_str().into())]);
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "investigation depth: {}",
+                    d.as_str()
+                )));
+            }
+            None => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "investigation depth: {}",
+                    self.investigation_depth.as_str()
+                )));
+            }
+        }
     }
 }

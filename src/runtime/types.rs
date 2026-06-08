@@ -1,3 +1,4 @@
+use crate::core::config::InvestigationDepth;
 use crate::llm::backend::BackendTimingStage;
 use crate::tools::PendingAction;
 
@@ -264,6 +265,11 @@ pub enum RuntimeRequest {
     AgentRun {
         ability: String,
         target: Option<String>,
+    },
+    /// /depth shallow|normal|deep — session-scoped investigation depth toggle.
+    /// `None` queries current status. Does not mutate conversation or trigger session save.
+    InvestigationDepthToggle {
+        depth: Option<InvestigationDepth>,
     },
 }
 

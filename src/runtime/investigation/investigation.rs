@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use crate::core::config::InvestigationDepth;
 use crate::tools::ToolOutput;
 
 use super::super::paths::normalize_evidence_path;
@@ -525,6 +526,13 @@ pub(crate) struct InvestigationState {
     /// Graph-shaped candidate tracker. Records import edges from read files and surfaces
     /// unread imported files as promoted candidates after search candidates are exhausted.
     pub(crate) graph: InvestigationGraph,
+    /// True once the iterative deepening phase has begun (deep investigation mode only).
+    /// Signals to the candidate-read cap check that subsequent reads are deepening hops,
+    /// not normal candidate reads, so the cap does not re-trigger a terminal on each hop.
+    pub(crate) deepening_phase_active: bool,
+    /// Session-scoped investigation depth. Copied from config on each turn by engine.rs.
+    /// Checked in tool_round.rs to suppress additional-evidence auto-dispatches in Shallow mode.
+    pub(crate) investigation_depth: InvestigationDepth,
 }
 
 impl InvestigationState {
@@ -580,11 +588,23 @@ impl InvestigationState {
             definition_site_dispatch_issued: None,
             definition_refinement_issued: false,
             graph: InvestigationGraph::new(),
+            deepening_phase_active: false,
+            investigation_depth: InvestigationDepth::Normal,
         }
     }
 
     pub(crate) fn configure_usage_evidence_policy(&mut self, broad_usage_lookup: bool) {
         self.broad_usage_lookup = broad_usage_lookup;
+    }
+
+    /// Registers a path as a search candidate for the deepening phase.
+    /// Called by run_deepening_hop() before dispatching each hop read so that
+    /// record_read_result() processes the file through the normal evidence gates.
+    pub(crate) fn register_deepening_candidate(&mut self, path: &str) {
+        if !self.search_candidate_paths.contains(&path.to_string()) {
+            self.search_candidate_paths.push(path.to_string());
+        }
+        self.deepening_phase_active = true;
     }
 
     pub(crate) fn evidence_ready(&self) -> bool {

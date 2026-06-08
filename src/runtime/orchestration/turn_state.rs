@@ -30,6 +30,16 @@ pub(crate) enum TurnSignal {
     Suspend,
 }
 
+/// Tracks progress through the iterative deepening phase (deep investigation mode only).
+/// Created on the first deepening hop and reset per turn via TurnState::new().
+pub(crate) struct DeepeningState {
+    /// Number of hop rounds completed so far. Incremented when all promoted candidates
+    /// at the current depth are exhausted and a new depth level begins.
+    pub(crate) current_hop: usize,
+    /// Total number of reads dispatched during the deepening phase this turn.
+    pub(crate) reads_this_deep_phase: usize,
+}
+
 pub(crate) struct PendingRuntimeCall {
     pub(crate) input: ToolInput,
     pub(crate) seeded_pre_generation: bool,
@@ -71,6 +81,9 @@ pub(crate) struct TurnState {
     pub(crate) seeded_tool_executed: bool,
     pub(crate) direct_read_result: Option<String>,
     pub(crate) answer_guard_retry_entered: bool,
+    /// Deepening phase state; only populated when investigation_depth == Deep and the
+    /// initial candidate reads are exhausted without satisfying evidence gates.
+    pub(crate) deepening: Option<DeepeningState>,
 }
 
 impl TurnState {
@@ -103,6 +116,7 @@ impl TurnState {
             seeded_tool_executed: false,
             direct_read_result: None,
             answer_guard_retry_entered: false,
+            deepening: None,
         }
     }
 }
