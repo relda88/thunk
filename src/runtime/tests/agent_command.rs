@@ -174,7 +174,7 @@ fn agent_run_refactor_emits_plan_approval_required() {
         &mut runtime,
         RuntimeRequest::AgentRun {
             ability: "refactor".into(),
-            target: Some("sandbox/services/task_service.py".into()),
+            target: Some("sandbox/services/".into()),
         },
     );
 
@@ -187,7 +187,7 @@ fn agent_run_refactor_emits_plan_approval_required() {
     );
     if let Some(RuntimeEvent::PlanApprovalRequired { goal, steps }) = approval {
         assert!(
-            goal.contains("task_service.py"),
+            goal.contains("sandbox/services"),
             "expected goal to reference target; got: {goal:?}"
         );
         assert_eq!(steps.len(), 2, "expected 2 plan steps; got: {steps:?}");
@@ -256,5 +256,89 @@ fn agent_run_refactor_no_storage_emits_error() {
     assert!(
         !has_approval,
         "must not fire PlanApprovalRequired without storage; got approval"
+    );
+}
+
+#[test]
+fn agent_run_with_file_target_seeds_read_file_as_first_tool() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/foo.rs"), "fn main() {}\n").unwrap();
+
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::AgentRun {
+            ability: "investigate".into(),
+            target: Some("src/foo.rs".into()),
+        },
+    );
+
+    let first_tool = events.iter().find_map(|e| {
+        if let RuntimeEvent::ToolCallStarted { name } = e {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    });
+    assert_eq!(
+        first_tool,
+        Some("read_file"),
+        "file target must seed read_file as the first tool call; events: {events:?}"
+    );
+}
+
+#[test]
+fn agent_run_with_directory_target_does_not_seed_read_file() {
+    let tmp = TempDir::new().unwrap();
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::AgentRun {
+            ability: "investigate".into(),
+            target: Some("src/".into()),
+        },
+    );
+
+    let first_tool = events.iter().find_map(|e| {
+        if let RuntimeEvent::ToolCallStarted { name } = e {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    });
+    assert_ne!(
+        first_tool,
+        Some("read_file"),
+        "directory target (ends with /) must not seed a read_file call; events: {events:?}"
+    );
+}
+
+#[test]
+fn agent_run_with_no_target_does_not_seed_read_file() {
+    let tmp = TempDir::new().unwrap();
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::AgentRun {
+            ability: "investigate".into(),
+            target: None,
+        },
+    );
+
+    let first_tool = events.iter().find_map(|e| {
+        if let RuntimeEvent::ToolCallStarted { name } = e {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    });
+    assert_ne!(
+        first_tool,
+        Some("read_file"),
+        "no target must not seed a read_file call; events: {events:?}"
     );
 }

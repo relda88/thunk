@@ -782,13 +782,10 @@ impl InvestigationState {
 
     pub(crate) fn is_search_candidate_path(&self, path: &str) -> bool {
         let read_path = normalize_evidence_path(path);
-        let relative_suffix = read_path.contains('/').then(|| format!("/{read_path}"));
+        let suffix = format!("/{read_path}");
         self.search_candidate_paths.iter().any(|candidate| {
             let candidate = normalize_evidence_path(candidate);
-            candidate == read_path
-                || relative_suffix
-                    .as_ref()
-                    .is_some_and(|suffix| candidate.ends_with(suffix))
+            candidate == read_path || candidate.ends_with(&suffix)
         })
     }
 
@@ -1975,5 +1972,43 @@ impl InvestigationState {
             items.push(s.clone());
         }
         items
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state_with_candidate(candidate: &str) -> InvestigationState {
+        let mut s = InvestigationState::new();
+        s.search_candidate_paths.push(candidate.to_string());
+        s
+    }
+
+    #[test]
+    fn bare_filename_matches_candidate_in_subdirectory() {
+        let s = state_with_candidate("src/runtime/investigation/investigation.rs");
+        assert!(
+            s.is_search_candidate_path("investigation.rs"),
+            "bare filename must match candidate path that ends with /filename"
+        );
+    }
+
+    #[test]
+    fn bare_filename_does_not_match_partial_suffix() {
+        let s = state_with_candidate("src/bar/foo_extra.rs");
+        assert!(
+            !s.is_search_candidate_path("foo.rs"),
+            "foo.rs must not match foo_extra.rs"
+        );
+    }
+
+    #[test]
+    fn path_qualified_candidate_still_matches() {
+        let s = state_with_candidate("src/runtime/investigation.rs");
+        assert!(
+            s.is_search_candidate_path("src/runtime/investigation.rs"),
+            "exact path match must still work after fix"
+        );
     }
 }

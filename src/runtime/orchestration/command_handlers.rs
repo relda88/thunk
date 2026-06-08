@@ -5,6 +5,7 @@ use crate::tools::{
     PendingApprovalStage, PendingTransaction, ToolError, ToolInput, ToolOutput, ToolRunResult,
 };
 
+use super::super::super::investigation::prompt_analysis::looks_like_file_path;
 use super::super::super::protocol::abilities::AbilityLoader;
 use super::super::super::protocol::plan_parser::{parse_plan, PlanStep};
 use super::super::super::protocol::skills::SkillLoader;
@@ -13,6 +14,7 @@ use super::super::super::resolve;
 use super::super::super::trace::trace_runtime_decision;
 use super::super::super::types::{Activity, RuntimeEvent};
 use super::super::telemetry::TurnPerformance;
+use super::super::turn_state::PendingRuntimeCall;
 use super::Runtime;
 
 pub(crate) struct PendingPlanDraft {
@@ -1775,6 +1777,28 @@ impl Runtime {
             _ => unreachable!(),
         };
 
+        // Seed a runtime-owned read_file call when the target is a file path.
+        // NL anchor alone is insufficient — TurnContext cannot classify a mid-prompt
+        // "Read X first" because classify_direct_read_mode only fires on leading verbs.
+        if let Some(ref path) = target {
+            if !path.ends_with('/') && looks_like_file_path(path) {
+                if path.starts_with('/') || path.split('/').any(|c| c == "..") {
+                    trace_runtime_decision(
+                        on_event,
+                        "agent_seed_skipped",
+                        &[
+                            ("reason", "path_escapes_root".into()),
+                            ("path", path.clone()),
+                        ],
+                    );
+                } else {
+                    self.pending_runtime_call = Some(PendingRuntimeCall {
+                        input: ToolInput::ReadFile { path: path.clone() },
+                        seeded_pre_generation: true,
+                    });
+                }
+            }
+        }
         trace_runtime_decision(
             on_event,
             "agent_run_started",
