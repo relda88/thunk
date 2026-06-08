@@ -10,6 +10,7 @@ use crate::tools::{
 };
 
 use super::super::investigation::anchors::AnchorState;
+use super::super::investigation::classify::is_declaration_line;
 use super::super::investigation::investigation::{
     InvestigationMode, InvestigationState, ReadClassification,
 };
@@ -140,22 +141,6 @@ fn is_general_doc_like_candidate_path(path: &str) -> bool {
         || lower
             .split('/')
             .any(|segment| matches!(segment, "doc" | "docs" | "benchmark" | "benchmarks"))
-}
-
-fn is_declaration_line(line: &str) -> bool {
-    let t = line.trim();
-    if t.starts_with("//") || t.starts_with("/*") || t.starts_with("use ") {
-        return false;
-    }
-    t.contains("struct ")
-        || t.contains("fn ")
-        || t.contains("enum ")
-        || t.contains("trait ")
-        || t.contains("type ")
-        || t.contains("impl ")
-        || t.contains("const ")
-        || t.contains("static ")
-        || t.contains("macro_rules!")
 }
 
 /// Outcome of dispatching one round of tool calls.
@@ -2405,20 +2390,6 @@ mod tests {
             assert!(line >= 1, "line must be 1-based and >= 1");
             assert!(col >= 1, "col must be 1-based and >= 1");
         }
-    }
-
-    #[test]
-    fn is_declaration_line_accepts_struct() {
-        assert!(is_declaration_line(
-            "pub(crate) struct InvestigationGraph {"
-        ));
-    }
-
-    #[test]
-    fn is_declaration_line_rejects_comment() {
-        assert!(!is_declaration_line(
-            "// InvestigationGraph — graph-shaped candidate tracker."
-        ));
     }
 
     #[test]

@@ -7,6 +7,7 @@ use crate::tools::ToolOutput;
 use super::super::paths::normalize_evidence_path;
 use super::super::trace::trace_runtime_decision;
 use super::super::types::RuntimeEvent;
+use super::classify::{is_exact_symbol_definition, looks_like_definition};
 use super::graph::InvestigationGraph;
 
 // Exact substring triggers used for structured investigation modes.
@@ -119,44 +120,9 @@ pub(crate) fn looks_like_import(line: &str) -> bool {
 }
 
 /// Returns true if the line defines the exact identifier `symbol`.
-/// Strips each known definition prefix, extracts the first alphanumeric+underscore token,
-/// and requires exact equality — so "class TaskStatus:" does not match symbol "Task".
-/// Coverage mirrors `looks_like_definition`.
+/// Delegates to `classify::is_exact_symbol_definition`.
 pub(crate) fn looks_like_definition_of_symbol(line: &str, symbol: &str) -> bool {
-    let t = line.trim_start();
-    const PREFIXES: &[&str] = &[
-        "pub enum ",
-        "pub struct ",
-        "pub fn ",
-        "pub type ",
-        "pub trait ",
-        "pub const ",
-        "pub static ",
-        "enum ",
-        "struct ",
-        "fn ",
-        "type ",
-        "const ",
-        "trait ",
-        "impl ",
-        "class ",
-        "def ",
-        "func ",
-        "function ",
-        "interface ",
-    ];
-    for prefix in PREFIXES {
-        if let Some(rest) = t.strip_prefix(prefix) {
-            let ident = rest
-                .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
-                .next()
-                .unwrap_or("");
-            if ident == symbol {
-                return true;
-            }
-        }
-    }
-    false
+    is_exact_symbol_definition(line, symbol)
 }
 
 /// Returns true if the line contains a call expression for the exact identifier `symbol`.
@@ -172,38 +138,6 @@ pub(crate) fn looks_like_call_expression_of_symbol(line: &str, symbol: &str) -> 
 
 fn looks_like_call_expression(line: &str) -> bool {
     !looks_like_definition(line) && line.contains('(')
-}
-
-/// Returns true if the line (after stripping leading whitespace) looks like a symbol definition.
-/// Coverage: Rust, Python, Go, TypeScript, JavaScript.
-/// C/C++ patterns are excluded — too many false positives without a type parser.
-/// No regex, no scoring — prefix matching only.
-fn looks_like_definition(line: &str) -> bool {
-    let t = line.trim_start();
-    // Rust
-    t.starts_with("pub enum ")
-        || t.starts_with("pub struct ")
-        || t.starts_with("pub fn ")
-        || t.starts_with("pub type ")
-        || t.starts_with("pub trait ")
-        || t.starts_with("pub const ")
-        || t.starts_with("pub static ")
-        || t.starts_with("enum ")
-        || t.starts_with("struct ")
-        || t.starts_with("fn ")
-        || t.starts_with("type ")
-        || t.starts_with("const ")
-        || t.starts_with("trait ")
-        || t.starts_with("impl ")
-        // Python / TypeScript / JavaScript (shared keywords)
-        || t.starts_with("class ")
-        // Python
-        || t.starts_with("def ")
-        // Go
-        || t.starts_with("func ")
-        // TypeScript / JavaScript
-        || t.starts_with("function ")
-        || t.starts_with("interface ")
 }
 
 /// Structural mode for the current investigation turn.

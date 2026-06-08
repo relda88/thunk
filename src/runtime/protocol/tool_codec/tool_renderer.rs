@@ -1,5 +1,6 @@
 // Outbound: ToolOutput -> conversation text
 
+use crate::runtime::investigation::classify::{is_exact_symbol_definition, looks_like_definition};
 use crate::tools::types::{LspDefinitionOutput, WebFetchOutput};
 use crate::tools::{EntryKind, ToolOutput};
 
@@ -197,80 +198,6 @@ fn is_source_tier(path: &str) -> bool {
             | "sql"
             | "xml"
     )
-}
-
-/// Returns true if the line (after stripping leading whitespace) looks like a symbol definition.
-/// Coverage: Rust, Python, Go, TypeScript, JavaScript.
-/// C/C++ patterns are excluded — too many false positives without a type parser.
-/// No regex, no scoring — prefix matching only.
-pub fn looks_like_definition(line: &str) -> bool {
-    let t = line.trim_start();
-    // Rust
-    t.starts_with("pub enum ")
-        || t.starts_with("pub struct ")
-        || t.starts_with("pub fn ")
-        || t.starts_with("pub type ")
-        || t.starts_with("pub trait ")
-        || t.starts_with("pub const ")
-        || t.starts_with("pub static ")
-        || t.starts_with("enum ")
-        || t.starts_with("struct ")
-        || t.starts_with("fn ")
-        || t.starts_with("type ")
-        || t.starts_with("const ")
-        || t.starts_with("trait ")
-        || t.starts_with("impl ")
-        // Python / TypeScript / JavaScript (shared keywords)
-        || t.starts_with("class ")
-        // Python
-        || t.starts_with("def ")
-        // Go
-        || t.starts_with("func ")
-        // TypeScript / JavaScript
-        || t.starts_with("function ")
-        || t.starts_with("interface ")
-}
-
-/// Returns true if the line defines exactly `query` as its top-level symbol.
-/// Trims leading whitespace, strips the definition keyword prefix,
-/// extracts the first identifier after that prefix, and compares it exactly to `query`.
-/// Does NOT match type annotations in function parameters.
-/// Mirrors the heuristic in `tools::search_code::is_exact_symbol_definition`.
-fn is_exact_symbol_definition(line: &str, query: &str) -> bool {
-    let line = line.trim_start();
-    let def_prefixes = [
-        "pub struct ",
-        "pub const ",
-        "pub static ",
-        "pub enum ",
-        "pub fn ",
-        "pub type ",
-        "pub trait ",
-        "function ",
-        "interface ",
-        "struct ",
-        "enum ",
-        "class ",
-        "impl ",
-        "const ",
-        "trait ",
-        "def ",
-        "func ",
-        "type ",
-        "fn ",
-    ];
-    for prefix in def_prefixes {
-        if let Some(after_prefix) = line.strip_prefix(prefix) {
-            let first_ident = after_prefix
-                .split(|c: char| !c.is_alphanumeric() && c != '_')
-                .next();
-            if let Some(ident) = first_ident {
-                return ident == query;
-            }
-            return false;
-        }
-    }
-    false
 }
 
 /// Returns the path of the definition-site file for `query`, or None when ambiguous.
@@ -1027,56 +954,6 @@ mod tests {
         assert!(pos_first < pos_second && pos_second < pos_third);
     }
 
-    // Phase 9.2.1 — Definition Lookup Mode
-
-    #[test]
-    fn looks_like_definition_matches_rust_keywords() {
-        assert!(looks_like_definition("pub enum TaskStatus {"));
-        assert!(looks_like_definition("pub struct Config {"));
-        assert!(looks_like_definition("pub fn run_turns("));
-        assert!(looks_like_definition("pub type Result<T> ="));
-        assert!(looks_like_definition("pub trait Backend {"));
-        assert!(looks_like_definition("pub const MAX: usize = 10;"));
-        assert!(looks_like_definition("pub static INSTANCE: Lazy<Foo>"));
-        assert!(looks_like_definition("enum State {"));
-        assert!(looks_like_definition("struct Inner {"));
-        assert!(looks_like_definition("fn helper("));
-        assert!(looks_like_definition("type Alias = u32;"));
-        assert!(looks_like_definition("const CAP: usize = 50;"));
-        assert!(looks_like_definition("trait Render {"));
-        assert!(looks_like_definition("impl TaskStatus {"));
-        // leading whitespace stripped
-        assert!(looks_like_definition("    pub fn method("));
-        assert!(looks_like_definition("\tfn indented("));
-    }
-
-    #[test]
-    fn looks_like_definition_matches_other_languages() {
-        assert!(looks_like_definition("def my_function(self):"));
-        assert!(looks_like_definition("class MyService:"));
-        assert!(looks_like_definition("func HandleRequest("));
-        assert!(looks_like_definition("function onClick("));
-        assert!(looks_like_definition("interface UserRepo {"));
-        assert!(looks_like_definition(
-            "class Component extends React.Component {"
-        ));
-        assert!(looks_like_definition("type Config = {"));
-        assert!(looks_like_definition("const handler = ("));
-    }
-
-    #[test]
-    fn looks_like_definition_rejects_usage_lines() {
-        assert!(!looks_like_definition("let x = TaskStatus::Running;"));
-        assert!(!looks_like_definition("task.execute();"));
-        assert!(!looks_like_definition(
-            "use crate::tools::types::SearchMatch;"
-        ));
-        assert!(!looks_like_definition("// pub fn commented_out("));
-        assert!(!looks_like_definition("println!(\"fn not a definition\");"));
-        assert!(!looks_like_definition("x.fn_call()"));
-        assert!(!looks_like_definition("result = some_fn(a, b)"));
-    }
-
     #[test]
     fn definition_preamble_fires_for_only_source_file() {
         // Exactly one source-tier file in the results and it has a definition line.
@@ -1498,19 +1375,6 @@ mod tests {
             pos_enums < pos_readme,
             "source-tier definition file must appear before docs-tier file; got:\n{body}"
         );
-    }
-
-    #[test]
-    fn is_exact_symbol_definition_matches_and_rejects() {
-        assert!(is_exact_symbol_definition("class Task:", "Task"));
-        assert!(is_exact_symbol_definition("class Task(Base):", "Task"));
-        assert!(is_exact_symbol_definition("pub struct Task {", "Task"));
-        assert!(is_exact_symbol_definition("fn Task(", "Task"));
-        // prefix symbols must not match
-        assert!(!is_exact_symbol_definition("class TaskStatus:", "Task"));
-        assert!(!is_exact_symbol_definition("struct TaskRunner {", "Task"));
-        // non-definition lines must not match even if query is present
-        assert!(!is_exact_symbol_definition("x = Task()", "Task"));
     }
 
     #[test]

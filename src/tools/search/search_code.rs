@@ -306,7 +306,7 @@ fn sort_by_file_group_priority(matches: Vec<SearchMatch>, query: &str) -> Vec<Se
 /// Trims leading whitespace, strips the definition keyword prefix (e.g., `class `, `def `, `fn `),
 /// extracts the first identifier after that prefix, and compares it exactly to `query`.
 /// Does NOT match type annotations in function parameters (e.g., `def foo(task: Task)`).
-/// Mirrors the heuristic in `runtime::tool_codec::is_exact_symbol_definition`.
+/// Mirrors the heuristic in `runtime::investigation::classify::is_exact_symbol_definition`.
 fn is_exact_symbol_definition(line: &str, query: &str) -> bool {
     let line = line.trim_start();
     let def_prefixes = [
@@ -345,7 +345,7 @@ fn is_exact_symbol_definition(line: &str, query: &str) -> bool {
 }
 
 /// Returns true if the line looks like a top-level definition in any supported language.
-/// Mirrors the heuristic in `runtime::tool_codec::looks_like_definition`.
+/// Mirrors the heuristic in `runtime::investigation::classify::looks_like_definition`.
 fn looks_like_definition(line: &str) -> bool {
     let t = line.trim_start();
     t.starts_with("pub enum ")
