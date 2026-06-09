@@ -169,6 +169,9 @@ pub struct Runtime {
     /// Parsed plan awaiting user approval. Set by handle_plan_create, consumed by
     /// handle_plan_approve / handle_plan_abandon. Never persisted; cleared on reset.
     pending_plan: Option<command_handlers::PendingPlanDraft>,
+    /// In-progress chunked embed state between IndexEmbedChunk dispatches.
+    /// Set by handle_index_embed, consumed by handle_index_embed_chunk, cleared on reset.
+    pub(super) pending_embed: Option<embed_handlers::PendingEmbedState>,
     /// Session-scoped investigation depth. Initialized from config.investigation.depth;
     /// overridable at runtime via /depth <shallow|normal|deep>.
     investigation_depth: InvestigationDepth,
@@ -241,6 +244,7 @@ impl Runtime {
             web_fetch_enabled: config.web_fetch.enabled,
             session_id,
             pending_plan: None,
+            pending_embed: None,
             investigation_depth: config.investigation.depth,
             investigation_hop_limit: config.investigation.hop_limit,
             investigation_max_reads: config.investigation.max_total_reads,
@@ -383,6 +387,7 @@ impl Runtime {
             RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
             RuntimeRequest::IndexStatus => self.handle_index_status(on_event),
             RuntimeRequest::IndexEmbed => self.handle_index_embed(on_event),
+            RuntimeRequest::IndexEmbedChunk => self.handle_index_embed_chunk(on_event),
             RuntimeRequest::ContextStats => self.handle_context_stats(on_event),
             RuntimeRequest::Compact => self.handle_compact(on_event),
             RuntimeRequest::PromptPhysicsToggle { enabled } => {

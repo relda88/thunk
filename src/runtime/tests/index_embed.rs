@@ -323,3 +323,31 @@ fn index_embed_caps_at_2000_symbols_with_warning() {
     let store2 = open_store(db.path());
     assert_eq!(store2.embedding_count(&root).unwrap(), 2000);
 }
+
+#[test]
+fn index_embed_chunk_after_reset_is_silent_no_op() {
+    // Verifies the stale-dispatch guard: IndexEmbedChunk with no pending_embed
+    // (either because embed was never started or because Reset cleared it) must
+    // return silently without emitting any events or panicking.
+    let db = NamedTempFile::new().unwrap();
+    let store = open_store(db.path());
+    let root = canonical_root();
+    seed_symbols(&store, &root, &["fn_a", "fn_b", "fn_c"]);
+    drop(store);
+
+    let provider = Box::new(ConstantEmbedProvider(vec![0.1, 0.2]));
+    let (mut rt, _) = make_runtime_with_store_and_provider(db.path(), provider);
+
+    // Complete a full embed (synchronous recursive dispatch clears pending_embed).
+    let _ = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
+
+    // Reset the session — must clear pending_embed.
+    let _ = collect_events(&mut rt, RuntimeRequest::Reset);
+
+    // A stale IndexEmbedChunk must be a silent no-op.
+    let events = collect_events(&mut rt, RuntimeRequest::IndexEmbedChunk);
+    assert!(
+        events.is_empty(),
+        "expected no events from stale IndexEmbedChunk after reset; got: {events:?}"
+    );
+}

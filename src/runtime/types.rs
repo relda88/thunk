@@ -185,6 +185,10 @@ pub enum RuntimeRequest {
     /// Requires retrieval.embedding_model to be set. Skips silently if unconfigured.
     /// Does not mutate conversation state or trigger session save.
     IndexEmbed,
+    /// Internal-only: continues a chunked embed loop started by IndexEmbed.
+    /// Never constructed from TUI code — no Command variant maps to this.
+    /// All state is owned by Runtime.pending_embed between dispatches.
+    IndexEmbedChunk,
     /// Read-only context stats query. Returns token estimate, message count, tool
     /// result count, oldest tool result age, and context window percentage as a
     /// SystemMessage event.  Does not mutate conversation state or trigger session save.

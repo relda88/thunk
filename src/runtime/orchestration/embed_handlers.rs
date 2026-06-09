@@ -1,6 +1,21 @@
 use super::super::super::trace::trace_runtime_decision;
-use super::super::super::types::RuntimeEvent;
+use super::super::super::types::{RuntimeEvent, RuntimeRequest};
 use super::Runtime;
+
+pub(super) struct PendingEmbedState {
+    /// Full symbol set capped to 2000.
+    pub(super) symbols: Vec<(i64, String)>,
+    /// Index of the next chunk to process (0-based).
+    pub(super) chunk_idx: usize,
+    /// Accumulated (symbol_id, embedding_vec, model_name) results.
+    pub(super) embedded: Vec<(i64, Vec<f32>, String)>,
+    /// Total chunk count for progress display.
+    pub(super) total_chunks: usize,
+    /// Embedding model name captured at setup time.
+    pub(super) configured_model: String,
+    /// Project root string for store calls.
+    pub(super) project_root: String,
+}
 
 impl Runtime {
     pub(super) fn handle_index_embed(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
@@ -87,40 +102,108 @@ impl Runtime {
         )));
 
         let chunk_size = 32;
-        let mut embedded: Vec<(i64, Vec<f32>, String)> = Vec::with_capacity(symbols.len());
+        let total_chunks = (symbols.len() + chunk_size - 1) / chunk_size;
+        let total_symbols = symbols.len();
 
-        for (chunk_idx, chunk) in symbols.chunks(chunk_size).enumerate() {
-            let texts: Vec<String> = chunk.iter().map(|(_, sig)| sig.clone()).collect();
+        self.pending_embed = Some(PendingEmbedState {
+            symbols,
+            chunk_idx: 0,
+            embedded: Vec::with_capacity(total_symbols),
+            total_chunks,
+            configured_model,
+            project_root,
+        });
+
+        self.handle_index_embed_chunk(on_event);
+    }
+
+    pub(super) fn handle_index_embed_chunk(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let chunk_size = 32;
+
+        // Check if this is a stale dispatch after reset.
+        let chunk_start = match self.pending_embed.as_ref() {
+            Some(s) => s.chunk_idx * chunk_size,
+            None => return,
+        };
+
+        let symbols_len = self.pending_embed.as_ref().unwrap().symbols.len();
+
+        if chunk_start >= symbols_len {
+            // All chunks done — finalize.
+            let state = self.pending_embed.take().unwrap();
+            let Some(ref store) = self.symbol_store else {
+                on_event(RuntimeEvent::SystemMessage(
+                    "embed: store unavailable at finalization".to_string(),
+                ));
+                return;
+            };
+            match store.upsert_embeddings(&state.project_root, &state.embedded) {
+                Ok(()) => {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "embed: {} embeddings stored",
+                        state.embedded.len()
+                    )));
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "embed: storage failed: {e}"
+                    )));
+                }
+            }
+            return;
+        }
+
+        // Emit progress before the HTTP call.
+        {
+            let state = self.pending_embed.as_ref().unwrap();
             on_event(RuntimeEvent::SystemMessage(format!(
                 "embed: chunk {}/{} ({} symbols processed)",
-                chunk_idx + 1,
-                (symbols.len() + chunk_size - 1) / chunk_size,
-                chunk_idx * chunk_size,
+                state.chunk_idx + 1,
+                state.total_chunks,
+                chunk_start,
             )));
-            let vecs = match self.embedding_provider.as_ref().unwrap().embed(&texts) {
+        }
+
+        // Perform the embed call for this chunk.
+        let chunk_end = (chunk_start + chunk_size).min(symbols_len);
+        let texts: Vec<String> = {
+            let state = self.pending_embed.as_ref().unwrap();
+            state.symbols[chunk_start..chunk_end]
+                .iter()
+                .map(|(_, sig)| sig.clone())
+                .collect()
+        };
+
+        let vecs = match self.embedding_provider.as_ref() {
+            Some(p) => match p.embed(&texts) {
                 Ok(v) => v,
                 Err(e) => {
                     on_event(RuntimeEvent::SystemMessage(format!("embed: failed: {e}")));
+                    self.pending_embed = None;
                     return;
                 }
-            };
-            for ((id, _), vec) in chunk.iter().zip(vecs) {
-                embedded.push((*id, vec, configured_model.clone()));
+            },
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "embed: provider unavailable".to_string(),
+                ));
+                self.pending_embed = None;
+                return;
             }
+        };
+
+        // Accumulate results and advance chunk index.
+        {
+            let state = self.pending_embed.as_mut().unwrap();
+            let chunk = &state.symbols[chunk_start..chunk_end];
+            let model = state.configured_model.clone();
+            for ((id, _), vec) in chunk.iter().zip(vecs) {
+                state.embedded.push((*id, vec, model.clone()));
+            }
+            state.chunk_idx += 1;
         }
 
-        match store.upsert_embeddings(&project_root, &embedded) {
-            Ok(()) => {
-                on_event(RuntimeEvent::SystemMessage(format!(
-                    "embed: {} embeddings stored",
-                    embedded.len()
-                )));
-            }
-            Err(e) => {
-                on_event(RuntimeEvent::SystemMessage(format!(
-                    "embed: storage failed: {e}"
-                )));
-            }
-        }
+        // Recurse to process the next chunk.
+        self.handle(RuntimeRequest::IndexEmbedChunk, on_event);
     }
 }

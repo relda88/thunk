@@ -552,6 +552,7 @@ impl Runtime {
     pub(super) fn handle_reset(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         self.pending_action = None;
         self.pending_plan = None;
+        self.pending_embed = None;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,
