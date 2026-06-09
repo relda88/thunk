@@ -33,6 +33,7 @@ mod project_snapshot;
 mod prompt_physics;
 mod read_bounds;
 mod retrieval_log;
+mod scenarios;
 mod search_budget;
 mod search_guardrails;
 mod task_command;
@@ -291,4 +292,46 @@ pub fn failed_message(events: &[RuntimeEvent]) -> Option<String> {
             None
         }
     })
+}
+
+pub fn has_approval(events: &[RuntimeEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::ApprovalRequired { .. }))
+}
+
+pub fn has_chunk(events: &[RuntimeEvent]) -> bool {
+    events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::AssistantMessageChunk(_)))
+}
+
+pub fn assistant_chunks(events: &[RuntimeEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| {
+            if let RuntimeEvent::AssistantMessageChunk(chunk) = e {
+                Some(chunk.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn last_assistant_content(messages: &[crate::llm::backend::Message]) -> Option<&str> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str())
+}
+
+pub fn all_user_content(messages: &[crate::llm::backend::Message]) -> String {
+    messages
+        .iter()
+        .filter(|m| m.role == crate::llm::backend::Role::User)
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }

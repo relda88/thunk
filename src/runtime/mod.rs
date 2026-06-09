@@ -7,8 +7,6 @@ mod paths;
 pub(crate) mod project;
 mod protocol;
 #[cfg(test)]
-mod scenarios;
-#[cfg(test)]
 mod tests;
 mod trace;
 mod types;

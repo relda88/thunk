@@ -622,9 +622,24 @@ impl Runtime {
                 return;
             }
             let imports = crate::runtime::index::extract_imports(&self.project_root);
-            let _ = store.upsert_imports(&project_root, &imports);
+            if let Err(e) = store.upsert_imports(&project_root, &imports) {
+                trace_runtime_decision(
+                    on_event,
+                    "storage_warning",
+                    &[("op", "upsert_imports".into()), ("err", e.to_string())],
+                );
+            }
             // Record build timestamp via the project-level sentinel row.
-            let _ = store.upsert_file_metadata(&project_root, "", now_secs, "");
+            if let Err(e) = store.upsert_file_metadata(&project_root, "", now_secs, "") {
+                trace_runtime_decision(
+                    on_event,
+                    "storage_warning",
+                    &[
+                        ("op", "upsert_file_metadata".into()),
+                        ("err", e.to_string()),
+                    ],
+                );
+            }
             self.index_triggered = true;
             on_event(RuntimeEvent::SystemMessage(format!(
                 "index: {count} symbols indexed"
@@ -763,8 +778,23 @@ impl Runtime {
             match store.upsert_symbols(&project_root, &symbols) {
                 Ok(()) => {
                     let imports = crate::runtime::index::extract_imports(&self.project_root);
-                    let _ = store.upsert_imports(&project_root, &imports);
-                    let _ = store.upsert_file_metadata(&project_root, "", now_secs, "");
+                    if let Err(e) = store.upsert_imports(&project_root, &imports) {
+                        trace_runtime_decision(
+                            on_event,
+                            "storage_warning",
+                            &[("op", "upsert_imports".into()), ("err", e.to_string())],
+                        );
+                    }
+                    if let Err(e) = store.upsert_file_metadata(&project_root, "", now_secs, "") {
+                        trace_runtime_decision(
+                            on_event,
+                            "storage_warning",
+                            &[
+                                ("op", "upsert_file_metadata".into()),
+                                ("err", e.to_string()),
+                            ],
+                        );
+                    }
                     on_event(RuntimeEvent::SystemMessage(format!(
                         "index: {count} symbols indexed"
                     )));
