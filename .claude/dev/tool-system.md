@@ -39,6 +39,7 @@ Tools have two execution kinds. `ExecutionKind::Immediate` returns a `ToolOutput
 - **`write_file`**: proposes create or overwrite, sets risk based on current existence. `execute_approved()` refuses to create missing parent directories. Code: `src/tools/write_file.rs`.
 - **`shell`**: runs an arbitrary command inside the project root with a 60-second timeout and 8 KB output cap. Only `cargo` commands are permitted (`is_permitted_shell_command()`). Always `RequiresApproval`. Code: `src/tools/shell.rs`, `src/runtime/investigation/prompt_analysis.rs`.
 - **`lsp_definition`**: block-format tool. Dispatched in `tool_round.rs` before `registry.dispatch()` because `LspManager::query_definition()` requires `&mut self`. Returns the definition location of a symbol at `(path, line, col)`. On success, records a definition edge in `InvestigationGraph`. On LSP error, returns an empty `LspDefinitionOutput` — never a terminal answer. Requires `[lsp].enabled = true` in config; diagnostics/pre-checks only run for `[lsp].extensions`. Code: `src/runtime/orchestration/tool_round.rs`, `src/runtime/lsp/manager.rs`, `src/core/config.rs`.
+- **`web_fetch`**: `ExecutionKind::Immediate`. Fetches a URL over HTTPS, strips HTML tags, truncates at 32 KB (`MAX_FETCH_BYTES`), and blocks private/loopback IP addresses. Not registered in `ToolRegistry` — dispatched directly by `handle_fetch_url()` in `command_handlers.rs`. `/fetch <url>` maps to `RuntimeRequest::FetchUrl { url }`. Code: `src/tools/core/web_fetch.rs`, `src/runtime/orchestration/command_handlers.rs`.
 
 ## Approval Flow
 
@@ -55,3 +56,15 @@ Prompt physics is owned by `src/runtime/protocol/prompt_physics.rs`. `THUNK.md` 
 ## Custom Commands
 
 User-defined commands can be wired in `config.toml` under `[commands.<name>]`. Only `read_file` and `search_code` tools are permitted; `{input}` in the template is replaced with the user's argument. Parsed by `CustomCommandDef` in `src/core/config.rs`.
+
+## RuntimeRequest Variants Added in Phase 37–38
+
+These variants are not backed by `ToolRegistry` tools — they are handled inline in `engine.rs` or delegated to handler methods extracted into separate files.
+
+- **`FetchUrl { url }`** → `handle_fetch_url()` in `command_handlers.rs`. Source: `/fetch <url>`.
+- **`PlanCreate { goal }`**, **`PlanApprove`**, **`PlanAbandon`**, **`PlanStatus`** → `handle_plan_create/approve/abandon/status()` in `plan_handlers.rs`. Source: `/plan <goal>|approve|abandon|status`.
+- **`TaskExecute { id }`**, **`TaskComplete { id, summary }`**, **`TaskBlock { id, reason }`**, **`TaskStatus`** → `handle_task_execute/complete/block/status()` in `plan_handlers.rs`. Source: `/task execute|complete|block|status`.
+- **`IndexEmbed`** → `handle_index_embed()` in `embed_handlers.rs`. Starts a chunked embed loop over top-2000 symbols. Source: `/index embed`.
+- **`IndexEmbedChunk`** → `handle_index_embed_chunk()` in `embed_handlers.rs`. Internal only — never constructed from TUI code. Drives the chunked embed loop; state owned by `Runtime::pending_embed` (`PendingEmbedState`).
+- **`InvestigationDepthToggle { depth }`** → `handle_depth_toggle()` in `command_handlers.rs`. Source: `/depth shallow|normal|deep`.
+- **`RetrievalLog { n }`** → `handle_retrieval_log()` in `command_handlers.rs`. Source: `/retrieval log [n]`.

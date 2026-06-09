@@ -37,3 +37,24 @@
 - **Malformed tool syntax is corrected once, then bounded**: `malformed_block_triggers_correction_and_retries()` shows one malformed block corrected; `repeated_malformed_write_syntax_terminals_deterministically()` shows the second violation terminating with `RepeatedMalformedToolSyntax`. Code: `src/runtime/tests/tool_round.rs`, `src/runtime/tests/finalization.rs`.
 - **Garbled edit repair is handled separately**: `edit_repair_correction_injected_on_garbled_repair_after_failure()` and `repeated_garbled_edit_repair_terminals_without_surfacing_malformed_block()` show the `EDIT_REPAIR_CORRECTION` path and the `RepeatedGarbledEditRepair` terminal. Code: `src/runtime/tests/approval.rs`.
 - **Mutation resolver failure is terminal**: `mutation_resolver_failure_terminates_immediately()` shows a write outside the project root ending as `MutationFailed` without executing later search steps. Code: `src/runtime/tests/finalization.rs`.
+
+## Phase 38 Additions
+
+### Hybrid Search (Vector Augmentation)
+
+- `try_vector_augment()` is a free function in `src/runtime/orchestration/tool_round.rs:1306`. It is called inside `run_tool_round()` after a keyword search returns results, when `retrieval_config.vector_weight > 0.0` and an embedding provider is configured.
+- `merge_keyword_vector()` at `tool_round.rs:1421` blends keyword match scores with vector similarity scores using `vector_weight` from `RetrievalConfig` in `src/core/config.rs`. The merged score is `(1.0 - vector_weight) * kw_score + vector_weight * vec_score`.
+- Vector results are queried from the `index_embeddings` table (populated by `/index embed`) and merged into the existing keyword candidate list. The merge is advisory — keyword-only results are still valid if vector augmentation is unavailable.
+
+### Vector Embeddings
+
+- `EmbeddingProvider` trait and `OllamaEmbeddingProvider` implementation live in `src/runtime/index/embeddings.rs`.
+- `/index embed` maps to `RuntimeRequest::IndexEmbed`, dispatched to `handle_index_embed()` in `src/runtime/orchestration/embed_handlers.rs`. It caps the symbol set to 2000, chunks them, and drives a loop via `RuntimeRequest::IndexEmbedChunk` (internal only, never from TUI).
+- Embeddings are stored in the `index_embeddings` SQLite table (schema v8+). The model name is stored alongside each embedding for invalidation.
+
+### Retrieval Quality Logging
+
+- `RetrievalLogStore` and `RetrievalLogEntry` live in `src/storage/retrieval/store.rs`. Each `RetrievalLogEntry` records `project_root`, `strategy`, `candidates_found`, `reads_accepted`, `evidence_outcome`, `hops_taken`, and `vector_augmented`.
+- Entries are written by `write_retrieval_log()` in `src/runtime/orchestration/retrieval_log_writer.rs` at the end of each investigation turn.
+- The `retrieval_log` SQLite table (schema v9) stores the log; indexed on `(project_root, id DESC)` for per-project queries.
+- `/retrieval log [n]` maps to `RuntimeRequest::RetrievalLog { n }`, dispatched to `handle_retrieval_log()` in `command_handlers.rs`. It shows the last N entries (default 10) for the current project root.

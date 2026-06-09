@@ -4,7 +4,7 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 1124 passing via `just verify`
+Test baseline: 1238 passing via `just verify`
 Never make commits — user commits manually.
 
 ## Current Phase State
@@ -13,7 +13,9 @@ Never make commits — user commits manually.
 - Phase 34: COMPLETE — LSP pre-check, write-then-verify, self-correction, transactions
 - Phase 35: COMPLETE — git tool layer, /branch, /commit, /diff, tools/ reorganization
 - Phase 36: COMPLETE — .thunk/ migration, abilities, skills, /ability, /skill, prompt physics injection
-- Phase 37: ACTIVE — planning, task workflows, /plan, /task, /agent, web fetch, thinking trace
+- Phase 37: COMPLETE — planning, task workflows, /plan, /task, /agent, web fetch, thinking trace
+- Phase 38: COMPLETE — vector/embedding layer, retrieval quality logging, /depth, /retrieval
+- Phase 39: ACTIVE — code extraction, module reorganization, documentation sync
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model

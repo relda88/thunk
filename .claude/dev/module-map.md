@@ -3,16 +3,17 @@
 Dependency order (bottom → top): `core/` → `storage/` / `tools/` → `runtime/` → `app/` → `tui/`
 
 ## src/core/
-Owns `AppError`, `Result`, `Config` and all sub-configs (`LlmConfig`, `ProjectConfig`, `LspConfig`, `PromptPhysicsSettings`, provider configs, `CustomCommandDef`, etc.), and `load()`.
+Owns `AppError`, `Result`, `Config` and all sub-configs (`LlmConfig`, `ProjectConfig`, `LspConfig`, `PromptPhysicsSettings`, `RetrievalConfig`, provider configs, `CustomCommandDef`, etc.), and `load()`.
 Also the known exception: `error.rs` imports `ToolError` from `tools/` for the `From<ToolError>` impl — tracked as tech debt.
 Key files: `src/core/config.rs`, `src/core/error.rs`, `src/core/mod.rs`
 
 ## src/tools/
-Owns concrete filesystem and Git actions, registration, approval contracts, and the `PendingAction` / `PendingTransaction` / `PendingApprovalStage` / `RiskLevel` types.
+Owns concrete filesystem, Git, and web-fetch actions, registration, approval contracts, and the `PendingAction` / `PendingTransaction` / `PendingApprovalStage` / `RiskLevel` types.
 Must not parse assistant text, own conversation mutations, or decide investigation correctness.
 `default_registry()` registers only `read_file` and `list_dir`.
 `ToolRegistry::with_project_root()` adds `search_code`, `git_status`, `git_diff`, `git_log`, `git_branch`, `edit_file`, `write_file`, `shell`.
-Key files: `src/tools/mod.rs`, `src/tools/registry.rs`, `src/tools/types.rs`, `src/tools/*.rs`
+`web_fetch` is not registered in `ToolRegistry` — it is dispatched directly by `handle_fetch_url()` in `command_handlers.rs`.
+Key files: `src/tools/mod.rs`, `src/tools/registry.rs`, `src/tools/types.rs`, `src/tools/core/web_fetch.rs` (`WebFetchTool` — private IP blocking, HTML stripping, 32 KB cap), `src/tools/core/*.rs`, `src/tools/git/*.rs`, `src/tools/search/`
 
 ## src/runtime/lsp/
 Owns the LSP server lifecycle, JSON-RPC transport, and definition/hover queries.
@@ -21,35 +22,40 @@ Owns the LSP server lifecycle, JSON-RPC transport, and definition/hover queries.
 Key files: `src/runtime/lsp/manager.rs`, `src/runtime/lsp/session.rs`, `src/runtime/lsp/transport.rs`, `src/runtime/lsp/protocol.rs`, `src/runtime/lsp/types.rs`
 
 ## src/runtime/index/
-Owns project symbol and import extraction for the persistent index.
+Owns project symbol and import extraction for the persistent index, and the embedding provider abstraction.
 The extractor feeds `SymbolStore`; it does not own SQLite access or runtime dispatch policy.
-Key files: `src/runtime/index/extractor.rs`, `src/runtime/index/types.rs`, `src/runtime/index/mod.rs`
+Key files: `src/runtime/index/extractor.rs`, `src/runtime/index/types.rs`, `src/runtime/index/mod.rs`, `src/runtime/index/embeddings.rs` (`EmbeddingProvider` trait, `OllamaEmbeddingProvider`)
 
 ## src/runtime/investigation/
 Owns turn classification, investigation state, evidence gates, candidate selection, anchor state, and `InvestigationGraph`.
 `InvestigationGraph` (petgraph) records import and definition edges; `promoted_candidates()` is advisory.
-Key files: `src/runtime/investigation/investigation.rs`, `src/runtime/investigation/graph.rs`, `src/runtime/investigation/anchors.rs`, `src/runtime/investigation/tool_surface.rs`, `src/runtime/investigation/prompt_analysis.rs`, `src/runtime/investigation/search_query.rs`
+Key files: `src/runtime/investigation/investigation.rs`, `src/runtime/investigation/graph.rs`, `src/runtime/investigation/anchors.rs`, `src/runtime/investigation/tool_surface.rs`, `src/runtime/investigation/prompt_analysis.rs`, `src/runtime/investigation/search_query.rs`, `src/runtime/investigation/classify.rs` (symbol definition classification: `looks_like_definition`, `is_exact_symbol_definition`, `is_declaration_line`)
 
 ## src/runtime/orchestration/
 Owns request dispatch, the turn loop, tool round execution, generation, and context management.
 Split across multiple files — no file owns more than one concern.
 Key files:
 - `engine.rs` — `Runtime::handle()`, submit/approve/reject dispatch, turn loop, `execute_and_handle()`, `execute_transaction()`, verification/correction loop
-- `tool_round.rs` — `run_tool_round()`, search budget, non-candidate enforcement, LSP intercept, transaction collection
+- `tool_round.rs` — `run_tool_round()`, search budget, non-candidate enforcement, LSP intercept, transaction collection, `try_vector_augment()`, `merge_keyword_vector()`
 - `generation.rs` — `run_generate_turn()`, snapshot hint injection, prompt-physics refresh/recency injection
-- `command_handlers.rs` — `CommandTool` allowlist for slash-command dispatch
+- `command_handlers.rs` — `CommandTool` allowlist for slash-command dispatch, `handle_fetch_url()`, `handle_retrieval_log()`, `handle_depth_toggle()`
 - `turn_state.rs` — `TurnContext`, `TurnState`, `AnswerPhaseKind`, `PendingRuntimeCall`
 - `engine_guards.rs` — `usage_lookup_is_broad()`, `extract_claimed_paths()`
 - `context_policy.rs` — `ContextPolicy` derived from `BackendCapabilities.context_window_tokens`
 - `context_cap.rs` — `cap_tool_result_blocks()`, `estimate_generation_prompt_chars()`
 - `anchor_resolution.rs` — `run_last_read_file_anchor()`, `run_last_search_anchor()`
 - `telemetry.rs` — `TurnPerformance`, context usage telemetry, `GenerationRoundLabel/Cause`
+- `answer_guard.rs` — `check_protocol_violations()`, `check_evidence_and_admission_gates()` (extracted from engine.rs)
+- `answer_admission.rs` — `check_correction_echo()` (extracted from engine.rs)
+- `retrieval_log_writer.rs` — `write_retrieval_log()` (extracted from engine.rs)
+- `plan_handlers.rs` — `handle_plan_create/approve/abandon/status()`, `handle_task_execute/complete/block/status()` (extracted from command_handlers.rs)
+- `embed_handlers.rs` — `handle_index_embed()`, `handle_index_embed_chunk()`, `PendingEmbedState` (extracted from command_handlers.rs)
 
 ## src/runtime/protocol/
 Owns the wire protocol between model text and typed tool inputs/results.
 `tool_codec/` is a module (not a single file): `tool_parser.rs`, `tool_renderer.rs`, `tool_detector.rs`.
 Must not dispatch tools, resolve paths, enforce surfaces, or decide answer admissibility.
-Key files: `src/runtime/protocol/tool_codec/mod.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/prompt_physics.rs`, `src/runtime/protocol/response_text.rs`
+Key files: `src/runtime/protocol/tool_codec/mod.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/prompt_physics.rs`, `src/runtime/protocol/response_text.rs`, `src/runtime/protocol/agent_prompts.rs`, `src/runtime/protocol/plan_parser.rs`
 
 ## src/runtime/project/
 Owns path confinement types: `ProjectRoot`, `ProjectPath`, `ProjectScope`, `ResolvedToolInput`, `resolve()`.
@@ -63,10 +69,10 @@ Interacts with `runtime/` only through `GenerateRequest`, `BackendEvent`, and `B
 Key files: `src/llm/backend.rs`, `src/llm/providers/mod.rs`, `src/llm/providers/*.rs`
 
 ## src/storage/
-Owns SQLite schema (v5), CRUD for saved sessions, and persistent symbol/import index storage.
-Schema: `sessions` table with `project_root`, `last_read_file`, `last_search_query`, `last_search_scope`; `session_messages` table keyed by `(session_id, seq)`; `index_symbols`, `index_imports`, and `file_metadata` tables for the persistent index.
+Owns SQLite schema (v9), CRUD for saved sessions, persistent symbol/import index storage, plan/task storage, vector embedding storage, and retrieval quality logging.
+Schema: `sessions`, `session_messages`, `index_symbols`, `index_imports`, `file_metadata`, `plans`, `plan_tasks`, `index_embeddings`, `retrieval_log` tables.
 Must not know the system prompt, runtime correction policy, or tool semantics.
-Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src/storage/session/types.rs`, `src/storage/index/store.rs`, `src/storage/index/types.rs`
+Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src/storage/session/types.rs`, `src/storage/index/store.rs`, `src/storage/index/types.rs`, `src/storage/tasks/store.rs` (`TaskStore`), `src/storage/tasks/types.rs` (`PlanRecord`, `TaskRecord`, `PlanStatus`, `TaskStatus`), `src/storage/retrieval/store.rs` (`RetrievalLogStore`, `RetrievalLogEntry`)
 
 ## src/app/
 Owns bootstrap, config loading, path discovery, backend construction, tool-registry construction, session restore, autosave, event logging.
