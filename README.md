@@ -2,7 +2,7 @@
 
 Local-first, personal AI coding assistant CLI focused on local-first workflows, modular architecture, privacy, and real coding actions.
 
-> Version 0.23.71
+> Version 0.23.72
 
 ---
 

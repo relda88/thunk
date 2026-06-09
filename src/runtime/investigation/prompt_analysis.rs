@@ -86,7 +86,9 @@ fn natural_language_code_lookup_requires_investigation(text: &str) -> bool {
     let has_lookup_verb = contains_word(&lower, "find")
         || contains_word(&lower, "where")
         || contains_word(&lower, "locate")
-        || contains_word(&lower, "search");
+        || contains_word(&lower, "search")
+        || contains_word(&lower, "trace")
+        || contains_word(&lower, "follow");
     if !has_lookup_verb {
         return false;
     }
@@ -143,6 +145,13 @@ fn natural_language_code_lookup_requires_investigation(text: &str) -> bool {
         "appears",
         "filtered",
         "rendered",
+        // architectural traversal / relational verbs: "find how X reaches Y", "find how X interacts with Y"
+        "reaches",
+        "reach",
+        "interacts",
+        "interact",
+        "connects",
+        "connect",
     ]
     .iter()
     .any(|term| contains_word(&lower, term))
@@ -1095,6 +1104,29 @@ mod tests {
         assert!(!prompt_requires_investigation(
             "Where is the project summary?"
         ));
+    }
+
+    #[test]
+    fn prompt_requires_investigation_detects_cross_layer_traversal() {
+        assert!(prompt_requires_investigation(
+            "Find how the CLI dispatch layer reaches the storage layer in sandbox/"
+        ));
+        assert!(prompt_requires_investigation(
+            "Find how the task service interacts with the repository in sandbox/"
+        ));
+        assert!(prompt_requires_investigation(
+            "trace how the request reaches the backend"
+        ));
+        assert!(prompt_requires_investigation(
+            "follow how the command connects to the handler"
+        ));
+    }
+
+    #[test]
+    fn prompt_requires_investigation_rejects_non_code_reach_phrasing() {
+        assert!(!prompt_requires_investigation("trace the logs"));
+        assert!(!prompt_requires_investigation("follow the instructions"));
+        assert!(!prompt_requires_investigation("follow up on the PR"));
     }
 
     #[test]
