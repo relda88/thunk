@@ -88,6 +88,11 @@ impl ModelBackend for LlamaCppBackend {
         on_event: &mut dyn FnMut(BackendEvent),
     ) -> Result<()> {
         let config = self.config.clone();
+        let grammar = if request.tool_call_mode && config.use_grammar {
+            Some(native::TOOL_CALL_GRAMMAR)
+        } else {
+            None
+        };
         let prompt = format_messages(&request.messages);
         self.last_prompt = Some(prompt.clone());
         on_event(BackendEvent::PromptAssembled(prompt.clone()));
@@ -103,7 +108,7 @@ impl ModelBackend for LlamaCppBackend {
                 elapsed_ms: t.elapsed().as_millis() as u64,
             });
         }
-        run_generation(loaded, &config, &prompt, on_event)
+        run_generation(loaded, &config, &prompt, grammar, on_event)
     }
 }
 

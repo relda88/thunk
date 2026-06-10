@@ -162,6 +162,10 @@ pub struct Runtime {
     active_ability: Option<AbilityContent>,
     /// Active response style skill for this session. Loaded at toggle time; None = no skill set.
     active_skill: Option<SkillContent>,
+    /// Session-scoped constrained output. When true, tool-call turns on
+    /// supported backends use grammar-constrained or JSON-mode generation.
+    /// Initialized from backend config; overridable via /constrain on|off.
+    constrained_output: bool,
     /// Whether /fetch is enabled. Read from config.web_fetch.enabled at startup.
     web_fetch_enabled: bool,
     /// Session identity. Used by plan handlers to key TaskStore queries.
@@ -241,6 +245,7 @@ impl Runtime {
             thunk_dir,
             active_ability: None,
             active_skill: None,
+            constrained_output: config.llama_cpp.use_grammar || config.ollama.constrained_output,
             web_fetch_enabled: config.web_fetch.enabled,
             session_id,
             pending_plan: None,
@@ -282,6 +287,11 @@ impl Runtime {
 
     pub fn with_prompt_physics_enabled(mut self) -> Self {
         self.prompt_physics.enabled = true;
+        self
+    }
+
+    pub fn with_constrained_output(mut self) -> Self {
+        self.constrained_output = true;
         self
     }
 
@@ -419,6 +429,9 @@ impl Runtime {
                 self.handle_depth_toggle(depth, on_event)
             }
             RuntimeRequest::RetrievalLog { n } => self.handle_retrieval_log(n, on_event),
+            RuntimeRequest::ConstrainedOutputToggle { enabled } => {
+                self.handle_constrained_output_toggle(enabled, on_event)
+            }
         }
     }
 
@@ -1361,6 +1374,7 @@ impl Runtime {
                         project_snapshot_hint.as_deref(),
                         ctx.investigation_mode,
                         &self.prompt_physics,
+                        self.constrained_output,
                         &mut perf_on_event,
                     ) {
                         Ok(Some(r)) => r,

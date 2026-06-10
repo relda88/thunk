@@ -919,6 +919,45 @@ impl Runtime {
         }
     }
 
+    pub(super) fn handle_constrained_output_toggle(
+        &mut self,
+        enabled: Option<bool>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match enabled {
+            Some(true) => {
+                self.constrained_output = true;
+                trace_runtime_decision(
+                    on_event,
+                    "constrained_output_toggled",
+                    &[("enabled", "true".into())],
+                );
+                on_event(RuntimeEvent::SystemMessage(
+                    "constrained output: enabled".to_string(),
+                ));
+            }
+            Some(false) => {
+                self.constrained_output = false;
+                trace_runtime_decision(
+                    on_event,
+                    "constrained_output_toggled",
+                    &[("enabled", "false".into())],
+                );
+                on_event(RuntimeEvent::SystemMessage(
+                    "constrained output: disabled".to_string(),
+                ));
+            }
+            None => {
+                let status = if self.constrained_output {
+                    "constrained output: enabled"
+                } else {
+                    "constrained output: disabled"
+                };
+                on_event(RuntimeEvent::SystemMessage(status.to_string()));
+            }
+        }
+    }
+
     pub(super) fn handle_ability_toggle(
         &mut self,
         name: Option<String>,

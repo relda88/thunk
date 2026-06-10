@@ -86,11 +86,15 @@ impl Message {
 #[derive(Debug, Clone)]
 pub struct GenerateRequest {
     pub messages: Vec<Message>,
+    pub tool_call_mode: bool,
 }
 
 impl GenerateRequest {
     pub fn new(messages: Vec<Message>) -> Self {
-        Self { messages }
+        Self {
+            messages,
+            tool_call_mode: false,
+        }
     }
 }
 

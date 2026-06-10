@@ -15,6 +15,7 @@ mod anchors;
 mod approval;
 mod branch_commands;
 mod commit_command;
+mod constrained_decoding;
 mod context_threshold;
 mod diff_command;
 mod engine;

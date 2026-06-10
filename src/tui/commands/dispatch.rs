@@ -116,6 +116,9 @@ fn resolve_command(cmd: Command) -> CommandAction {
             CommandAction::Runtime(RuntimeRequest::InvestigationDepthToggle { depth })
         }
         Command::RetrievalLog { n } => CommandAction::Runtime(RuntimeRequest::RetrievalLog { n }),
+        Command::ConstrainedOutput(enabled) => {
+            CommandAction::Runtime(RuntimeRequest::ConstrainedOutputToggle { enabled })
+        }
     }
 }
 

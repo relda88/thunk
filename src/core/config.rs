@@ -363,6 +363,8 @@ pub struct LlamaCppConfig {
     pub max_tokens: usize,
     pub temperature: f32,
     pub show_native_logs: bool,
+    /// Enable GBNF grammar enforcement for tool-call generation turns. Default: false.
+    pub use_grammar: bool,
 }
 
 /// Default llama.cpp config with no model path and reasonable defaults for other parameters
@@ -376,6 +378,7 @@ impl Default for LlamaCppConfig {
             max_tokens: 512,
             temperature: 0.7,
             show_native_logs: false,
+            use_grammar: false,
         }
     }
 }
@@ -412,6 +415,8 @@ pub struct OllamaConfig {
     pub base_url: String,
     pub max_tokens: u32,
     pub temperature: f32,
+    /// Enable JSON mode for tool-call generation turns. Default: false.
+    pub constrained_output: bool,
 }
 
 impl Default for OllamaConfig {
@@ -421,6 +426,7 @@ impl Default for OllamaConfig {
             base_url: "http://localhost:11434".to_string(),
             max_tokens: 512,
             temperature: 0.2,
+            constrained_output: false,
         }
     }
 }
@@ -716,6 +722,7 @@ mod tests {
             max_tokens: 128,
             temperature: 0.5,
             show_native_logs: false,
+            use_grammar: false,
         };
 
         let resolved = config.resolve_paths(Path::new("/tmp/project"));

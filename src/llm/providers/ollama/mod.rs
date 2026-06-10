@@ -72,7 +72,7 @@ impl ModelBackend for OllamaBackend {
             messages.insert(0, json!({ "role": "system", "content": merged }));
         }
 
-        let body = json!({
+        let mut body = json!({
             "model": self.config.model,
             "messages": messages,
             "stream": true,
@@ -81,6 +81,9 @@ impl ModelBackend for OllamaBackend {
                 "temperature": self.config.temperature,
             }
         });
+        if request.tool_call_mode && self.config.constrained_output {
+            body["format"] = json!("json");
+        }
 
         on_event(BackendEvent::PromptAssembled(body.to_string()));
 
@@ -157,6 +160,55 @@ mod tests {
     use super::*;
     use crate::core::config::OllamaConfig;
     use crate::llm::backend::{BackendEvent, GenerateRequest, Message, ModelBackend};
+
+    #[test]
+    fn tool_call_mode_adds_format_json_to_body() {
+        let config = OllamaConfig {
+            base_url: "http://127.0.0.1:1".to_string(),
+            model: "test".to_string(),
+            constrained_output: true,
+            ..OllamaConfig::default()
+        };
+        let mut backend = OllamaBackend::new(config);
+        let request = GenerateRequest {
+            messages: vec![Message::user("hi")],
+            tool_call_mode: true,
+        };
+        let mut assembled: Option<String> = None;
+        let _ = backend.generate(request, &mut |e| {
+            if let BackendEvent::PromptAssembled(s) = e {
+                assembled = Some(s);
+            }
+        });
+        let body: serde_json::Value =
+            serde_json::from_str(&assembled.expect("PromptAssembled must fire")).unwrap();
+        assert_eq!(body["format"], serde_json::json!("json"));
+    }
+
+    #[test]
+    fn synthesis_mode_omits_format_json() {
+        let config = OllamaConfig {
+            base_url: "http://127.0.0.1:1".to_string(),
+            model: "test".to_string(),
+            constrained_output: true,
+            ..OllamaConfig::default()
+        };
+        let mut backend = OllamaBackend::new(config);
+        // tool_call_mode: false — synthesis turn, must not have format field
+        let request = GenerateRequest::new(vec![Message::user("hi")]);
+        let mut assembled: Option<String> = None;
+        let _ = backend.generate(request, &mut |e| {
+            if let BackendEvent::PromptAssembled(s) = e {
+                assembled = Some(s);
+            }
+        });
+        let body: serde_json::Value =
+            serde_json::from_str(&assembled.expect("PromptAssembled must fire")).unwrap();
+        assert!(
+            body.get("format").is_none(),
+            "synthesis turn must not include format field"
+        );
+    }
 
     #[test]
     fn prompt_assembled_emitted_before_status_changed() {

@@ -75,6 +75,9 @@ pub enum Command {
     RetrievalLog {
         n: Option<usize>,
     },
+    /// /constrain on|off — session-scoped constrained output toggle.
+    /// None = query current status.
+    ConstrainedOutput(Option<bool>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -280,6 +283,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             }
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/constrain" => match arg {
+            Some("on") => Some(Ok(Command::ConstrainedOutput(Some(true)))),
+            Some("off") => Some(Ok(Command::ConstrainedOutput(Some(false)))),
+            Some("status") | None => Some(Ok(Command::ConstrainedOutput(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -305,6 +314,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/clear",
         "/commit",
         "/compact",
+        "/constrain",
         "/diff",
         "/context",
         "/depth",
@@ -432,6 +442,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/plan",
             description: "create a structured plan from a goal (/plan <goal>)",
+        },
+        LauncherCommand {
+            name: "/constrain",
+            description: "enable, disable, or check constrained output (grammar/JSON mode)",
         },
         LauncherCommand {
             name: "/prompt-physics",
@@ -979,5 +993,37 @@ mod tests {
     #[test]
     fn parses_plan_abandon() {
         assert_eq!(parse("/plan abandon"), Some(Ok(Command::PlanAbandon)));
+    }
+
+    #[test]
+    fn parses_constrain_on() {
+        assert_eq!(
+            parse("/constrain on"),
+            Some(Ok(Command::ConstrainedOutput(Some(true))))
+        );
+    }
+
+    #[test]
+    fn parses_constrain_off() {
+        assert_eq!(
+            parse("/constrain off"),
+            Some(Ok(Command::ConstrainedOutput(Some(false))))
+        );
+    }
+
+    #[test]
+    fn parses_constrain_status() {
+        assert_eq!(
+            parse("/constrain status"),
+            Some(Ok(Command::ConstrainedOutput(None)))
+        );
+    }
+
+    #[test]
+    fn parses_constrain_bare() {
+        assert_eq!(
+            parse("/constrain"),
+            Some(Ok(Command::ConstrainedOutput(None)))
+        );
     }
 }

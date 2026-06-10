@@ -20,6 +20,7 @@ pub(super) fn run_generate_turn(
     project_snapshot_hint: Option<&str>,
     investigation_mode: InvestigationMode,
     prompt_physics: &PromptPhysicsConfig,
+    constrained_output: bool,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
     let mut messages = conversation.pruned_snapshot();
@@ -74,7 +75,10 @@ pub(super) fn run_generate_turn(
             );
         }
     }
-    let request = GenerateRequest::new(messages);
+    let request = GenerateRequest {
+        messages,
+        tool_call_mode: constrained_output && tool_surface != ToolSurface::MutationEnabled,
+    };
     let mut response = String::new();
 
     let result = backend.generate(request, &mut |event| match event {

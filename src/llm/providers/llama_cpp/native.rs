@@ -136,10 +136,25 @@ pub(super) fn load_model(config: &LlamaCppConfig, model_path: &Path) -> Result<L
     })
 }
 
+/// GBNF grammar constraining llama.cpp output to valid thunk tool-call syntax.
+/// Covers single-line bracket calls and zero-argument static calls only.
+/// Block-form calls (edit_file, write_file) are excluded — constrained decoding
+/// is disabled on MutationEnabled surface where block forms are expected.
+pub(super) const TOOL_CALL_GRAMMAR: &str = r#"root        ::= pre-text tool-call
+pre-text    ::= [^\[]*
+tool-call   ::= named-call | static-call
+named-call  ::= "[" tool-name ": " arg "]"
+tool-name   ::= "read_file" | "list_dir" | "search_code" | "write_file" | "shell"
+arg         ::= [^\]]+
+static-call ::= "[" static-name "]"
+static-name ::= "git_status" | "git_diff" | "git_diff_staged" | "git_log" | "git_branch"
+"#;
+
 pub(super) fn run_generation(
     loaded: &mut LoadedLlama,
     config: &LlamaCppConfig,
     prompt: &str,
+    grammar: Option<&str>,
     on_event: &mut dyn FnMut(BackendEvent),
 ) -> Result<()> {
     use std::time::Instant;
@@ -214,8 +229,18 @@ pub(super) fn run_generation(
         elapsed_ms: t_prefill_start.elapsed().as_millis() as u64,
     });
 
-    let mut sampler =
-        LlamaSampler::chain_simple([LlamaSampler::temp(temperature), LlamaSampler::dist(0)]);
+    let mut sampler_parts = vec![LlamaSampler::temp(temperature), LlamaSampler::dist(0)];
+    if let Some(gbnf) = grammar {
+        match LlamaSampler::grammar(&loaded.model, gbnf, "root") {
+            Ok(g) => sampler_parts.insert(0, g),
+            Err(e) => {
+                eprintln!(
+                    "[thunk] GBNF grammar compile failed, falling back to unconstrained: {e}"
+                );
+            }
+        }
+    }
+    let mut sampler = LlamaSampler::chain_simple(sampler_parts);
 
     on_event(BackendEvent::StatusChanged(BackendStatus::Generating));
     let mut generated = 0usize;
