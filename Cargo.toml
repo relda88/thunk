@@ -22,6 +22,7 @@ thiserror = "1"
 toml = "0.8"
 ureq = { version = "2", features = ["tls"] }
 mpatch = "1.6.4"
+similar = "2"
 
 [features]
 local = ["llama-cpp-2", "llama-cpp-sys-2"]

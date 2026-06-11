@@ -1,4 +1,5 @@
 mod conversation;
+pub(crate) mod diff;
 pub(crate) mod index;
 mod investigation;
 pub(crate) mod lsp;

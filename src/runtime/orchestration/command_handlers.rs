@@ -1069,12 +1069,15 @@ impl Runtime {
         };
 
         fn gen_id() -> String {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let count = COUNTER.fetch_add(1, Ordering::Relaxed);
             let nanos = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
+                .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0);
-            let unique = nanos ^ (std::process::id() as u128);
-            format!("{:016x}", unique & 0xFFFF_FFFF_FFFF_FFFF)
+            let unique = nanos.wrapping_add(count) ^ (std::process::id() as u64);
+            format!("{unique:016x}")
         }
 
         let seq_id = gen_id();
@@ -1172,9 +1175,26 @@ impl Runtime {
             return;
         }
 
-        on_event(RuntimeEvent::SystemMessage(
-            "Sequence approved — executing first step".to_string(),
-        ));
+        let summary = {
+            let s = self.edit_store.as_ref().expect("already checked above");
+            match s.get_sequence(&sequence_id) {
+                Ok(Some(seq)) => {
+                    let n = seq.steps.len();
+                    let mut lines = vec![format!("Refactor sequence approved — {n} steps")];
+                    for step in &seq.steps {
+                        lines.push(format!("{}. {}", step.position + 1, step.file.display()));
+                    }
+                    lines.push(String::new());
+                    lines.push(
+                        "Type /refactor status to check progress, /refactor abort to cancel."
+                            .to_string(),
+                    );
+                    lines.join("\n")
+                }
+                _ => "Sequence approved — executing first step".to_string(),
+            }
+        };
+        on_event(RuntimeEvent::SystemMessage(summary));
         self.handle_sequence_execute_step(on_event);
     }
 
@@ -1295,10 +1315,12 @@ impl Runtime {
             let _ = store.advance(&sequence_id);
         }
 
+        let diff_preview = crate::runtime::diff::render_diff(&original, &patched);
         on_event(RuntimeEvent::SystemMessage(format!(
-            "Step {} applied and verified: {}",
+            "Step {} applied and verified: {}\n{}",
             step.position,
-            step.file.display()
+            step.file.display(),
+            diff_preview
         )));
 
         // Best-effort git checkpoint — errors do not abort the sequence.
@@ -1359,12 +1381,24 @@ impl Runtime {
 
         match store.get_sequence(&sequence_id) {
             Ok(Some(seq)) => {
+                use crate::storage::tasks::StepStatus;
                 let total = seq.steps.len();
                 let status = seq.status.as_str();
-                on_event(RuntimeEvent::SystemMessage(format!(
-                    "{} — step {}/{} ({})",
-                    seq.goal, seq.current_idx, total, status
-                )));
+                let mut lines = vec![
+                    format!("Refactor: {}", seq.goal),
+                    format!("Step {}/{} — {}", seq.current_idx, total, status),
+                ];
+                for step in &seq.steps {
+                    let indicator = if step.status == StepStatus::Verified {
+                        '✓'
+                    } else if step.position == seq.current_idx {
+                        '→'
+                    } else {
+                        '·'
+                    };
+                    lines.push(format!("  {} {}", indicator, step.file.display()));
+                }
+                on_event(RuntimeEvent::SystemMessage(lines.join("\n")));
             }
             Ok(None) => {
                 on_event(RuntimeEvent::SystemMessage(
@@ -1731,5 +1765,126 @@ impl Runtime {
             ));
         }
         on_event(RuntimeEvent::SystemMessage(lines.join("\n")));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use rusqlite::Connection;
+
+    use crate::runtime::types::RuntimeEvent;
+    use crate::storage::tasks::{
+        EditSequence, EditSequenceStore, EditStep, SequenceStatus, StepStatus,
+    };
+
+    fn make_test_store() -> EditSequenceStore {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS edit_sequences (
+                id TEXT PRIMARY KEY, task_id TEXT, goal TEXT NOT NULL,
+                current_idx INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending', snapshot_ref TEXT
+             );
+             CREATE TABLE IF NOT EXISTS edit_steps (
+                id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL,
+                position INTEGER NOT NULL, file TEXT NOT NULL,
+                search TEXT NOT NULL, replace TEXT NOT NULL,
+                verification_cmd TEXT, status TEXT NOT NULL DEFAULT 'pending'
+             );",
+        )
+        .unwrap();
+        EditSequenceStore::new(conn)
+    }
+
+    fn make_test_sequence(id: &str, goal: &str, files: &[&str]) -> EditSequence {
+        EditSequence {
+            id: id.to_string(),
+            task_id: None,
+            goal: goal.to_string(),
+            steps: files
+                .iter()
+                .enumerate()
+                .map(|(i, f)| EditStep {
+                    id: format!("{id}-step{i}"),
+                    sequence_id: id.to_string(),
+                    position: i,
+                    file: PathBuf::from(f),
+                    search: String::new(),
+                    replace: String::new(),
+                    verification_cmd: None,
+                    status: StepStatus::Pending,
+                })
+                .collect(),
+            current_idx: 0,
+            status: SequenceStatus::Planning,
+            snapshot_ref: None,
+        }
+    }
+
+    #[test]
+    fn handle_sequence_approve_summary_contains_step_count_and_files() {
+        let mut runtime = crate::runtime::tests::make_runtime(vec![] as Vec<String>);
+        let store = make_test_store();
+        let seq = make_test_sequence("seq1", "test refactor", &["src/alpha.rs", "src/beta.rs"]);
+        store.create_sequence(&seq).unwrap();
+        runtime.edit_store = Some(store);
+        runtime.active_sequence_id = Some("seq1".to_string());
+
+        let mut events = Vec::new();
+        runtime.handle_sequence_approve(&mut |e| events.push(e));
+
+        let first_system_msg = events.iter().find_map(|e| {
+            if let RuntimeEvent::SystemMessage(msg) = e {
+                Some(msg.clone())
+            } else {
+                None
+            }
+        });
+        let msg = first_system_msg.expect("expected a SystemMessage");
+        assert!(msg.contains("2 steps"), "missing step count: {msg}");
+        assert!(msg.contains("src/alpha.rs"), "missing first file: {msg}");
+        assert!(msg.contains("src/beta.rs"), "missing second file: {msg}");
+    }
+
+    #[test]
+    fn handle_sequence_status_shows_step_indicators() {
+        let mut runtime = crate::runtime::tests::make_runtime(vec![] as Vec<String>);
+        let store = make_test_store();
+        let mut seq =
+            make_test_sequence("seq2", "test goal", &["src/a.rs", "src/b.rs", "src/c.rs"]);
+        seq.steps[0].status = StepStatus::Verified;
+        seq.current_idx = 1;
+        store.create_sequence(&seq).unwrap();
+        runtime.edit_store = Some(store);
+        runtime.active_sequence_id = Some("seq2".to_string());
+
+        let mut events = Vec::new();
+        runtime.handle_sequence_status(&mut |e| events.push(e));
+
+        let system_msgs: Vec<String> = events
+            .iter()
+            .filter_map(|e| {
+                if let RuntimeEvent::SystemMessage(msg) = e {
+                    Some(msg.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let combined = system_msgs.join("\n");
+        assert!(
+            combined.contains('✓'),
+            "missing verified indicator: {combined}"
+        );
+        assert!(
+            combined.contains('→'),
+            "missing current indicator: {combined}"
+        );
+        assert!(
+            combined.contains('·'),
+            "missing pending indicator: {combined}"
+        );
     }
 }
