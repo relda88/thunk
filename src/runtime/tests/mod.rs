@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::core::config::Config;
-use crate::llm::backend::{BackendCapabilities, BackendEvent, GenerateRequest, ModelBackend};
+use crate::llm::backend::{
+    BackendCapabilities, BackendEvent, ConstrainedMode, GenerateRequest, ModelBackend,
+};
 use crate::tools::default_registry;
 
 pub use super::{

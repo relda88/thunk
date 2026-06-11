@@ -82,18 +82,27 @@ impl Message {
     }
 }
 
+/// Constrained decoding mode for a generation call.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum ConstrainedMode {
+    #[default]
+    None,
+    ToolCall,
+    Edit,
+}
+
 /// Input to a model generation call.
 #[derive(Debug, Clone)]
 pub struct GenerateRequest {
     pub messages: Vec<Message>,
-    pub tool_call_mode: bool,
+    pub constrained_mode: ConstrainedMode,
 }
 
 impl GenerateRequest {
     pub fn new(messages: Vec<Message>) -> Self {
         Self {
             messages,
-            tool_call_mode: false,
+            constrained_mode: ConstrainedMode::None,
         }
     }
 }

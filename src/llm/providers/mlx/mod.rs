@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use crate::core::config::MlxConfig;
 use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
-    BackendCapabilities, BackendEvent, BackendStatus, GenerateRequest, ModelBackend,
+    BackendCapabilities, BackendEvent, BackendStatus, ConstrainedMode, GenerateRequest,
+    ModelBackend,
 };
 
 pub struct MlxBackend {
@@ -55,7 +56,7 @@ impl ModelBackend for MlxBackend {
             "stream_options": {"include_usage": true},
         });
 
-        if request.tool_call_mode && self.config.constrained_output {
+        if request.constrained_mode == ConstrainedMode::ToolCall && self.config.constrained_output {
             body["response_format"] = json!({"type": "json_object"});
         }
 
@@ -110,7 +111,9 @@ impl ModelBackend for MlxBackend {
 mod tests {
     use super::*;
     use crate::core::config::MlxConfig;
-    use crate::llm::backend::{BackendEvent, GenerateRequest, Message, ModelBackend};
+    use crate::llm::backend::{
+        BackendEvent, ConstrainedMode, GenerateRequest, Message, ModelBackend,
+    };
 
     fn backend_with_constrained(constrained_output: bool) -> MlxBackend {
         MlxBackend::new(MlxConfig {
@@ -123,12 +126,12 @@ mod tests {
 
     fn tool_call_request() -> GenerateRequest {
         let mut r = GenerateRequest::new(vec![Message::user("hi")]);
-        r.tool_call_mode = true;
+        r.constrained_mode = ConstrainedMode::ToolCall;
         r
     }
 
     #[test]
-    fn constrained_output_and_tool_call_mode_injects_response_format() {
+    fn constrained_output_and_tool_call_injects_response_format() {
         let mut backend = backend_with_constrained(true);
         let mut assembled: Option<String> = None;
         let _ = backend.generate(tool_call_request(), &mut |e| {
@@ -163,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_mode_false_omits_response_format_even_when_constrained() {
+    fn constrained_mode_none_omits_response_format_even_when_constrained() {
         let mut backend = backend_with_constrained(true);
         let request = GenerateRequest::new(vec![Message::user("hi")]);
         let mut assembled: Option<String> = None;
@@ -176,7 +179,7 @@ mod tests {
             serde_json::from_str(&assembled.expect("PromptAssembled must fire")).unwrap();
         assert!(
             body["response_format"].is_null(),
-            "response_format must be absent when tool_call_mode is false"
+            "response_format must be absent when constrained_mode is None"
         );
     }
 }

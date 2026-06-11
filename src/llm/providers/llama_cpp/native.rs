@@ -150,6 +150,16 @@ static-call ::= "[" static-name "]"
 static-name ::= "git_status" | "git_diff" | "git_diff_staged" | "git_log" | "git_branch"
 "#;
 
+/// GBNF grammar constraining llama.cpp output to an Aider-style SEARCH/REPLACE block.
+/// Covers a single edit block per emission. Both search and replace sections allow
+/// arbitrary line content. Active only on MutationEnabled surface.
+pub(super) const EDIT_GRAMMAR: &str = r#"root           ::= pre-text edit-block
+pre-text       ::= line*
+edit-block     ::= "<<<<<<< SEARCH\n" section* "=======\n" section* ">>>>>>> REPLACE\n"
+section        ::= line
+line           ::= [^\n]* "\n"
+"#;
+
 pub(super) fn run_generation(
     loaded: &mut LoadedLlama,
     config: &LlamaCppConfig,

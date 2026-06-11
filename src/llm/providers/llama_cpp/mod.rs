@@ -4,8 +4,8 @@ mod prompt;
 use crate::core::config::LlamaCppConfig;
 use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
-    BackendCapabilities, BackendEvent, BackendStatus, BackendTimingStage, GenerateRequest,
-    ModelBackend,
+    BackendCapabilities, BackendEvent, BackendStatus, BackendTimingStage, ConstrainedMode,
+    GenerateRequest, ModelBackend,
 };
 
 use native::{load_model, run_generation, LoadedLlama};
@@ -88,10 +88,22 @@ impl ModelBackend for LlamaCppBackend {
         on_event: &mut dyn FnMut(BackendEvent),
     ) -> Result<()> {
         let config = self.config.clone();
-        let grammar = if request.tool_call_mode && config.use_grammar {
-            Some(native::TOOL_CALL_GRAMMAR)
-        } else {
-            None
+        let grammar = match request.constrained_mode {
+            ConstrainedMode::ToolCall => {
+                if config.use_grammar {
+                    Some(native::TOOL_CALL_GRAMMAR)
+                } else {
+                    None
+                }
+            }
+            ConstrainedMode::Edit => {
+                if config.use_grammar {
+                    Some(native::EDIT_GRAMMAR)
+                } else {
+                    None
+                }
+            }
+            ConstrainedMode::None => None,
         };
         let prompt = format_messages(&request.messages);
         self.last_prompt = Some(prompt.clone());

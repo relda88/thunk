@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 use crate::core::config::OllamaConfig;
 use crate::core::error::{AppError, Result};
 use crate::llm::backend::{
-    BackendCapabilities, BackendEvent, BackendStatus, GenerateRequest, ModelBackend, Role,
+    BackendCapabilities, BackendEvent, BackendStatus, ConstrainedMode, GenerateRequest,
+    ModelBackend, Role,
 };
 
 pub struct OllamaBackend {
@@ -81,7 +82,7 @@ impl ModelBackend for OllamaBackend {
                 "temperature": self.config.temperature,
             }
         });
-        if request.tool_call_mode && self.config.constrained_output {
+        if request.constrained_mode == ConstrainedMode::ToolCall && self.config.constrained_output {
             body["format"] = json!("json");
         }
 
@@ -159,10 +160,12 @@ impl ModelBackend for OllamaBackend {
 mod tests {
     use super::*;
     use crate::core::config::OllamaConfig;
-    use crate::llm::backend::{BackendEvent, GenerateRequest, Message, ModelBackend};
+    use crate::llm::backend::{
+        BackendEvent, ConstrainedMode, GenerateRequest, Message, ModelBackend,
+    };
 
     #[test]
-    fn tool_call_mode_adds_format_json_to_body() {
+    fn constrained_tool_call_adds_format_json_to_body() {
         let config = OllamaConfig {
             base_url: "http://127.0.0.1:1".to_string(),
             model: "test".to_string(),
@@ -172,7 +175,7 @@ mod tests {
         let mut backend = OllamaBackend::new(config);
         let request = GenerateRequest {
             messages: vec![Message::user("hi")],
-            tool_call_mode: true,
+            constrained_mode: ConstrainedMode::ToolCall,
         };
         let mut assembled: Option<String> = None;
         let _ = backend.generate(request, &mut |e| {
@@ -194,7 +197,7 @@ mod tests {
             ..OllamaConfig::default()
         };
         let mut backend = OllamaBackend::new(config);
-        // tool_call_mode: false — synthesis turn, must not have format field
+        // constrained_mode: None — synthesis turn, must not have format field
         let request = GenerateRequest::new(vec![Message::user("hi")]);
         let mut assembled: Option<String> = None;
         let _ = backend.generate(request, &mut |e| {

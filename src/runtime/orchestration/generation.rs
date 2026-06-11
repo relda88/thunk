@@ -1,5 +1,7 @@
 use crate::core::error::Result;
-use crate::llm::backend::{BackendEvent, BackendStatus, GenerateRequest, Message, ModelBackend};
+use crate::llm::backend::{
+    BackendEvent, BackendStatus, ConstrainedMode, GenerateRequest, Message, ModelBackend,
+};
 
 use super::super::conversation::Conversation;
 use super::super::investigation::investigation::InvestigationMode;
@@ -83,7 +85,11 @@ pub(super) fn run_generate_turn(
     }
     let request = GenerateRequest {
         messages,
-        tool_call_mode: constrained_output && tool_surface != ToolSurface::MutationEnabled,
+        constrained_mode: match (constrained_output, tool_surface) {
+            (true, ToolSurface::MutationEnabled) => ConstrainedMode::Edit,
+            (true, _) => ConstrainedMode::ToolCall,
+            _ => ConstrainedMode::None,
+        },
     };
     let mut response = String::new();
 
