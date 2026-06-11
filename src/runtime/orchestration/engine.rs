@@ -1802,9 +1802,17 @@ impl Runtime {
         let mut cmd_parts = cmd.split_whitespace();
         let program = cmd_parts.next()?;
         let args: Vec<&str> = cmd_parts.collect();
+        let is_cargo = program == "cargo";
+        let final_args: Vec<&str> = if is_cargo {
+            let mut a = args.clone();
+            a.push("--message-format=json");
+            a
+        } else {
+            args.clone()
+        };
         on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
         match std::process::Command::new(program)
-            .args(&args)
+            .args(&final_args)
             .current_dir(self.project_root.path())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -1814,16 +1822,31 @@ impl Runtime {
                 let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
                 combined.push_str(&String::from_utf8_lossy(&out.stderr));
                 if combined.len() > 4000 {
-                    combined.truncate(4000);
-                    combined.push_str("\n[output truncated]");
+                    let boundary = combined
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .filter(|&i| i <= 4000)
+                        .last()
+                        .unwrap_or(0);
+                    combined.truncate(boundary);
                 }
-                if out.status.success() {
-                    on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
-                    self.correction_attempts = 0;
-                    None
+                let output_for_correction = if is_cargo {
+                    let diagnostics = crate::runtime::diagnostics::parse_diagnostics(&combined);
+                    if diagnostics.is_empty() {
+                        on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                        self.correction_attempts = 0;
+                        return None;
+                    }
+                    crate::runtime::diagnostics::format_diagnostics(&diagnostics)
                 } else {
-                    Some(combined)
-                }
+                    if combined.trim().is_empty() {
+                        on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                        self.correction_attempts = 0;
+                        return None;
+                    }
+                    combined
+                };
+                Some(output_for_correction)
             }
             Err(_) => {
                 on_event(RuntimeEvent::SystemMessage(format!("{cmd}: unavailable")));

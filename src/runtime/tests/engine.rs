@@ -1922,3 +1922,76 @@ fn providers_use_unknown_name_emits_error_system_message() {
         "unknown provider must not emit Failed"
     );
 }
+
+#[test]
+fn non_cargo_verify_passes_raw_output_unchanged() {
+    // A non-cargo verify command that produces non-empty output must pass the raw text
+    // through to the correction message without JSON parsing.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let data_file = tmp.path().join("data.txt");
+    fs::write(&data_file, "hello world\n").unwrap();
+
+    let abs_path = data_file.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00hello world\x00hello there");
+
+    // "echo failure-marker" exits 0 but produces non-empty output — the non-cargo path
+    // treats any non-empty output as a failure requiring correction.
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("echo failure-marker".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not panic: {events:?}");
+    let has_raw_output = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("failure-marker")));
+    assert!(
+        has_raw_output,
+        "non-cargo verify raw output must appear in correction SystemMessage: {events:?}"
+    );
+}
+
+#[test]
+fn verify_returning_none_does_not_inject_correction() {
+    // When run_verify_command returns None (empty output), no correction must be
+    // injected — confirmed by the absence of any "manual fix required" SystemMessage.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let data_file = tmp.path().join("data.txt");
+    fs::write(&data_file, "hello world\n").unwrap();
+
+    let abs_path = data_file.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00hello world\x00hello there");
+
+    // "true" always exits 0 with no output — run_verify_command must return None.
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("true".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not panic: {events:?}");
+    let has_correction = events.iter().any(
+        |e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("manual fix required")),
+    );
+    assert!(
+        !has_correction,
+        "verify returning None must not inject correction: {events:?}"
+    );
+}
