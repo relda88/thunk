@@ -1,4 +1,4 @@
-use mpatch::{parse_patches, patch_content_str, ApplyOptions};
+use mpatch::{patch_content_str, ApplyOptions};
 
 #[derive(Debug)]
 pub enum PatchError {
@@ -23,12 +23,11 @@ impl std::fmt::Display for PatchError {
     }
 }
 
+/// Applies a single-hunk patch to `original` using mpatch's auto-detection.
+/// `patch_text` may be a unified diff, a markdown-fenced diff, or a conflict-marker
+/// block (`<<<<<<< SEARCH … ======= … >>>>>>> REPLACE`).
+/// `patch_content_str` validates "exactly one patch" internally via `parse_auto`.
 pub fn apply_patch(original: &str, patch_text: &str) -> Result<String, PatchError> {
-    let patches = parse_patches(patch_text).map_err(|e| PatchError::ParseError(e.to_string()))?;
-    if patches.len() != 1 {
-        return Err(PatchError::MultiplePatches);
-    }
-
     patch_content_str(patch_text, Some(original), &ApplyOptions::default()).map_err(|e| {
         use mpatch::OneShotError;
         match e {

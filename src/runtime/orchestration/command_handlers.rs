@@ -1181,6 +1181,7 @@ impl Runtime {
     pub(super) fn handle_sequence_execute_step(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         use std::process::Stdio;
 
+        use crate::runtime::patch::{apply_patch, PatchError};
         use crate::storage::tasks::{SequenceStatus, StepStatus};
 
         let sequence_id = match self.active_sequence_id.clone() {
@@ -1235,26 +1236,33 @@ impl Runtime {
             }
         };
 
-        let patched = if step.search.is_empty() {
-            // Empty search means append-only step — append replace text.
-            format!("{original}{}", step.replace)
-        } else if let Some(pos) = original.find(&step.search) {
-            let mut result =
-                String::with_capacity(original.len() - step.search.len() + step.replace.len());
-            result.push_str(&original[..pos]);
-            result.push_str(&step.replace);
-            result.push_str(&original[pos + step.search.len()..]);
-            result
-        } else {
-            on_event(RuntimeEvent::Failed {
-                message: format!(
-                    "Step {} search text not found in {} — anchor not found",
-                    step.position,
-                    step.file.display()
-                ),
-            });
-            self.handle_sequence_abort(on_event);
-            return;
+        let patch_text = format!(
+            "<<<<<<< SEARCH\n{}\n=======\n{}\n>>>>>>> REPLACE\n",
+            step.search, step.replace
+        );
+
+        let patched = match apply_patch(&original, &patch_text) {
+            Ok(p) => p,
+            Err(e) => {
+                let detail = match &e {
+                    PatchError::AnchorNotFound => "search text not found in file".to_string(),
+                    PatchError::AmbiguousAnchor => {
+                        "search text matches multiple locations".to_string()
+                    }
+                    PatchError::MultiplePatches => "expected exactly one patch block".to_string(),
+                    PatchError::ParseError(msg) => format!("parse error: {msg}"),
+                };
+                on_event(RuntimeEvent::Failed {
+                    message: format!(
+                        "Step {} patch failed ({}): {}",
+                        step.position,
+                        step.file.display(),
+                        detail
+                    ),
+                });
+                self.handle_sequence_abort(on_event);
+                return;
+            }
         };
 
         if let Err(e) = std::fs::write(&step.file, &patched) {

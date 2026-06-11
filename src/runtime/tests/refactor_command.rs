@@ -147,7 +147,14 @@ fn sequence_execute_step_applies_patch_and_advances() {
     let mut runtime = make_runtime_in(Vec::<&str>::new(), tmp_dir.path());
     attach_edit_store(&mut runtime, &db);
 
-    let seq = make_sequence_with_step("seq1", "step1", &target_file, "fn old_fn()", "fn new_fn()");
+    // search must match the exact line content so mpatch can anchor the hunk
+    let seq = make_sequence_with_step(
+        "seq1",
+        "step1",
+        &target_file,
+        "fn old_fn() {}",
+        "fn new_fn() {}",
+    );
     runtime
         .edit_store
         .as_ref()
@@ -167,7 +174,7 @@ fn sequence_execute_step_applies_patch_and_advances() {
     );
 
     let patched = std::fs::read_to_string(&target_file).unwrap();
-    assert!(patched.contains("fn new_fn()"), "file should be patched");
+    assert!(patched.contains("fn new_fn() {}"), "file should be patched");
 
     // Pointer must have advanced — get_current_step returns None (sequence done).
     let step = runtime
