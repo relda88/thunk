@@ -294,6 +294,7 @@ pub struct Config {
     pub llama_cpp: LlamaCppConfig,
     pub openai: OpenAiConfig,
     pub ollama: OllamaConfig,
+    pub mlx: MlxConfig,
     pub openrouter: OpenRouterConfig,
     pub groq: GroqConfig,
     pub lsp: LspConfig,
@@ -425,6 +426,30 @@ impl Default for OllamaConfig {
             model: "gemma3:1b".to_string(),
             base_url: "http://localhost:11434".to_string(),
             max_tokens: 512,
+            temperature: 0.2,
+            constrained_output: false,
+        }
+    }
+}
+
+/// MLX provider configuration (local OpenAI-compatible server, e.g. mlx-lm)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MlxConfig {
+    pub base_url: String,
+    pub model: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    /// Enable JSON mode for tool-call generation turns. Default: false.
+    pub constrained_output: bool,
+}
+
+impl Default for MlxConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:8080".to_string(),
+            model: String::new(),
+            max_tokens: 2048,
             temperature: 0.2,
             constrained_output: false,
         }

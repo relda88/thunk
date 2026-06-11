@@ -1,6 +1,7 @@
 mod groq;
 #[cfg(feature = "local")]
 mod llama_cpp;
+mod mlx;
 mod mock;
 mod ollama;
 mod openai;
@@ -14,6 +15,7 @@ use crate::llm::backend::ModelBackend;
 pub use llama_cpp::LlamaCppBackend;
 
 use groq::GroqBackend;
+use mlx::MlxBackend;
 use mock::MockBackend;
 use ollama::OllamaBackend;
 use openai::OpenAiBackend;
@@ -68,6 +70,10 @@ fn make_groq(config: &Config) -> Result<Box<dyn ModelBackend>> {
     Ok(Box::new(GroqBackend::new(config.groq.clone(), api_key)))
 }
 
+fn make_mlx(config: &Config) -> Result<Box<dyn ModelBackend>> {
+    Ok(Box::new(MlxBackend::new(config.mlx.clone())))
+}
+
 #[cfg(feature = "local")]
 const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
     ("mock", make_mock),
@@ -76,6 +82,7 @@ const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
     ("ollama", make_ollama),
     ("openrouter", make_openrouter),
     ("groq", make_groq),
+    ("mlx", make_mlx),
 ];
 
 #[cfg(not(feature = "local"))]
@@ -85,6 +92,7 @@ const BACKEND_REGISTRY: &[(&str, BackendFactory)] = &[
     ("ollama", make_ollama),
     ("openrouter", make_openrouter),
     ("groq", make_groq),
+    ("mlx", make_mlx),
 ];
 
 pub fn build_backend(config: &Config) -> Result<Box<dyn ModelBackend>> {
