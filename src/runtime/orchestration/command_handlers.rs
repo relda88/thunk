@@ -553,6 +553,7 @@ impl Runtime {
         self.pending_action = None;
         self.pending_plan = None;
         self.pending_embed = None;
+        self.active_sequence_id = None;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,
@@ -1120,6 +1121,254 @@ impl Runtime {
             "Refactor sequence created: {n} steps across {file_count} file{}",
             if file_count == 1 { "" } else { "s" }
         )));
+    }
+
+    pub(super) fn handle_sequence_approve(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        use crate::storage::tasks::SequenceStatus;
+
+        let store = match &self.edit_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::Failed {
+                    message: "No edit store configured".to_string(),
+                });
+                return;
+            }
+        };
+
+        let sequence_id = if let Some(id) = &self.active_sequence_id {
+            id.clone()
+        } else {
+            match store.get_latest_sequence() {
+                Ok(Some(seq)) => {
+                    let id = seq.id.clone();
+                    self.active_sequence_id = Some(id.clone());
+                    id
+                }
+                Ok(None) => {
+                    on_event(RuntimeEvent::Failed {
+                        message: "No refactor sequence found".to_string(),
+                    });
+                    return;
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::Failed {
+                        message: format!("Failed to load sequence: {e}"),
+                    });
+                    return;
+                }
+            }
+        };
+
+        let store = match &self.edit_store {
+            Some(s) => s,
+            None => return,
+        };
+
+        if let Err(e) = store.update_sequence_status(&sequence_id, SequenceStatus::Approved) {
+            on_event(RuntimeEvent::Failed {
+                message: format!("Failed to approve sequence: {e}"),
+            });
+            return;
+        }
+
+        on_event(RuntimeEvent::SystemMessage(
+            "Sequence approved — executing first step".to_string(),
+        ));
+        self.handle_sequence_execute_step(on_event);
+    }
+
+    pub(super) fn handle_sequence_execute_step(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        use std::process::Stdio;
+
+        use crate::storage::tasks::{SequenceStatus, StepStatus};
+
+        let sequence_id = match self.active_sequence_id.clone() {
+            Some(id) => id,
+            None => {
+                on_event(RuntimeEvent::Failed {
+                    message: "No active sequence".to_string(),
+                });
+                return;
+            }
+        };
+
+        let store = match &self.edit_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::Failed {
+                    message: "No edit store configured".to_string(),
+                });
+                return;
+            }
+        };
+
+        let step = match store.get_current_step(&sequence_id) {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                // All steps done — sequence complete.
+                if let Some(store) = &self.edit_store {
+                    let _ = store.update_sequence_status(&sequence_id, SequenceStatus::Completed);
+                }
+                self.active_sequence_id = None;
+                on_event(RuntimeEvent::SystemMessage(
+                    "Refactor sequence complete".to_string(),
+                ));
+                return;
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::Failed {
+                    message: format!("Failed to load step: {e}"),
+                });
+                return;
+            }
+        };
+
+        let original = match std::fs::read_to_string(&step.file) {
+            Ok(s) => s,
+            Err(e) => {
+                on_event(RuntimeEvent::Failed {
+                    message: format!("Failed to read {}: {e}", step.file.display()),
+                });
+                self.handle_sequence_abort(on_event);
+                return;
+            }
+        };
+
+        let patched = if step.search.is_empty() {
+            // Empty search means append-only step — append replace text.
+            format!("{original}{}", step.replace)
+        } else if let Some(pos) = original.find(&step.search) {
+            let mut result =
+                String::with_capacity(original.len() - step.search.len() + step.replace.len());
+            result.push_str(&original[..pos]);
+            result.push_str(&step.replace);
+            result.push_str(&original[pos + step.search.len()..]);
+            result
+        } else {
+            on_event(RuntimeEvent::Failed {
+                message: format!(
+                    "Step {} search text not found in {} — anchor not found",
+                    step.position,
+                    step.file.display()
+                ),
+            });
+            self.handle_sequence_abort(on_event);
+            return;
+        };
+
+        if let Err(e) = std::fs::write(&step.file, &patched) {
+            on_event(RuntimeEvent::Failed {
+                message: format!("Failed to write {}: {e}", step.file.display()),
+            });
+            self.handle_sequence_abort(on_event);
+            return;
+        }
+
+        if let Some(verify_cmd) = self.verify_command.clone() {
+            if let Some(error_output) = self.run_verify_command(&verify_cmd, on_event) {
+                // Restore original on verify failure.
+                let _ = std::fs::write(&step.file, &original);
+                on_event(RuntimeEvent::Failed {
+                    message: format!(
+                        "Verify failed for step {} — file restored\n{}",
+                        step.position,
+                        error_output.trim()
+                    ),
+                });
+                self.handle_sequence_abort(on_event);
+                return;
+            }
+        }
+
+        // Mark step verified and advance pointer.
+        if let Some(store) = &self.edit_store {
+            let _ = store.update_step_status(&step.id, StepStatus::Verified);
+            let _ = store.advance(&sequence_id);
+        }
+
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "Step {} applied and verified: {}",
+            step.position,
+            step.file.display()
+        )));
+
+        // Best-effort git checkpoint — errors do not abort the sequence.
+        let root = self.project_root.path().to_path_buf();
+        let file_str = step.file.to_string_lossy().into_owned();
+        let commit_msg = format!("thunk: apply step {}", step.position);
+        let _ = std::process::Command::new("git")
+            .args(["add", &file_str])
+            .current_dir(&root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["commit", "-m", &commit_msg])
+            .current_dir(&root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+    }
+
+    pub(super) fn handle_sequence_abort(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        use crate::storage::tasks::SequenceStatus;
+
+        let sequence_id = match self.active_sequence_id.take() {
+            Some(id) => id,
+            None => return,
+        };
+
+        if let Some(store) = &self.edit_store {
+            let _ = store.update_sequence_status(&sequence_id, SequenceStatus::Failed);
+        }
+
+        on_event(RuntimeEvent::SystemMessage(
+            "Refactor sequence aborted".to_string(),
+        ));
+    }
+
+    pub(super) fn handle_sequence_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let sequence_id = match &self.active_sequence_id {
+            Some(id) => id.clone(),
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "No active refactor sequence".to_string(),
+                ));
+                return;
+            }
+        };
+
+        let store = match &self.edit_store {
+            Some(s) => s,
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "No edit store configured".to_string(),
+                ));
+                return;
+            }
+        };
+
+        match store.get_sequence(&sequence_id) {
+            Ok(Some(seq)) => {
+                let total = seq.steps.len();
+                let status = seq.status.as_str();
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "{} — step {}/{} ({})",
+                    seq.goal, seq.current_idx, total, status
+                )));
+            }
+            Ok(None) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "Sequence not found".to_string(),
+                ));
+            }
+            Err(e) => {
+                on_event(RuntimeEvent::Failed {
+                    message: format!("Failed to load sequence: {e}"),
+                });
+            }
+        }
     }
 
     pub(super) fn handle_ability_toggle(

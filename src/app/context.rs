@@ -226,6 +226,10 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::ConstrainedOutputToggle { .. } => "constrained_output_toggle",
         RuntimeRequest::CompressToggle { .. } => "compress_toggle",
         RuntimeRequest::Refactor { .. } => "refactor",
+        RuntimeRequest::SequenceApprove => "sequence_approve",
+        RuntimeRequest::SequenceExecuteStep => "sequence_execute_step",
+        RuntimeRequest::SequenceAbort => "sequence_abort",
+        RuntimeRequest::SequenceStatus => "sequence_status",
     }
 }
 

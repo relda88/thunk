@@ -138,6 +138,9 @@ pub struct Runtime {
     pub(crate) task_store: Option<TaskStore>,
     /// Edit sequence store. `None` when no db_path was supplied (e.g. in tests).
     pub(crate) edit_store: Option<EditSequenceStore>,
+    /// ID of the sequence currently being executed. Set by handle_sequence_approve,
+    /// cleared on Completed or Failed. None = no active sequence.
+    pub(crate) active_sequence_id: Option<String>,
     /// Set to true after the first on-demand index build attempt this session.
     /// Ensures the trigger fires at most once per session.
     pub(super) index_triggered: bool,
@@ -239,6 +242,7 @@ impl Runtime {
             retrieval_config: config.retrieval.clone(),
             task_store: None,
             edit_store: None,
+            active_sequence_id: None,
             index_triggered: false,
             context_75_warned: false,
             prompt_physics,
@@ -446,6 +450,10 @@ impl Runtime {
                 self.handle_compress_toggle(enabled, on_event)
             }
             RuntimeRequest::Refactor { target } => self.handle_refactor(target, on_event),
+            RuntimeRequest::SequenceApprove => self.handle_sequence_approve(on_event),
+            RuntimeRequest::SequenceExecuteStep => self.handle_sequence_execute_step(on_event),
+            RuntimeRequest::SequenceAbort => self.handle_sequence_abort(on_event),
+            RuntimeRequest::SequenceStatus => self.handle_sequence_status(on_event),
         }
     }
 

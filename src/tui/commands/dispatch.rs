@@ -125,6 +125,9 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::Refactor(goal) => {
             CommandAction::Runtime(RuntimeRequest::Refactor { target: goal })
         }
+        Command::RefactorApprove => CommandAction::Runtime(RuntimeRequest::SequenceApprove),
+        Command::RefactorAbort => CommandAction::Runtime(RuntimeRequest::SequenceAbort),
+        Command::RefactorStatus => CommandAction::Runtime(RuntimeRequest::SequenceStatus),
     }
 }
 

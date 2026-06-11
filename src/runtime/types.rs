@@ -296,6 +296,16 @@ pub enum RuntimeRequest {
     Refactor {
         target: Option<String>,
     },
+    /// /refactor approve — approve the latest Planning sequence and begin executing steps.
+    /// Sets sequence status to Approved/InProgress and applies step 0.
+    SequenceApprove,
+    /// /refactor (step) — execute the next pending step in the active sequence.
+    /// Applies the stored search/replace patch, verifies, and advances the pointer.
+    SequenceExecuteStep,
+    /// /refactor abort — mark the active sequence as Failed and clear runtime state.
+    SequenceAbort,
+    /// /refactor status — show the active sequence goal and step progress.
+    SequenceStatus,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

@@ -45,7 +45,7 @@ pub(crate) enum SequenceStatus {
 }
 
 impl SequenceStatus {
-    fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             SequenceStatus::Planning => "planning",
             SequenceStatus::Approved => "approved",
@@ -243,6 +243,59 @@ impl EditSequenceStore {
         Ok(())
     }
 
+    pub(crate) fn update_sequence_status(
+        &self,
+        sequence_id: &str,
+        status: SequenceStatus,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE edit_sequences SET status = ?1 WHERE id = ?2",
+                params![status.as_str(), sequence_id],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
+    pub(crate) fn get_latest_sequence(&self) -> Result<Option<EditSequence>> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT id, task_id, goal, current_idx, status, snapshot_ref
+                 FROM edit_sequences ORDER BY rowid DESC LIMIT 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let (seq_id, task_id, goal, current_idx, status_str, snapshot_ref) = match row {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let steps = self.load_steps(&seq_id)?;
+
+        Ok(Some(EditSequence {
+            id: seq_id,
+            task_id,
+            goal,
+            steps,
+            current_idx: current_idx as usize,
+            status: SequenceStatus::from_str(&status_str),
+            snapshot_ref,
+        }))
+    }
+
     fn load_steps(&self, sequence_id: &str) -> Result<Vec<EditStep>> {
         let mut stmt = self
             .conn
@@ -270,5 +323,98 @@ impl EditSequenceStore {
             .map_err(|e| AppError::Storage(e.to_string()))?;
 
         Ok(steps)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn make_store() -> EditSequenceStore {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS edit_sequences (
+                id TEXT PRIMARY KEY, task_id TEXT, goal TEXT NOT NULL,
+                current_idx INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending', snapshot_ref TEXT
+             );
+             CREATE TABLE IF NOT EXISTS edit_steps (
+                id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL,
+                position INTEGER NOT NULL, file TEXT NOT NULL,
+                search TEXT NOT NULL, replace TEXT NOT NULL,
+                verification_cmd TEXT, status TEXT NOT NULL DEFAULT 'pending'
+             );",
+        )
+        .unwrap();
+        EditSequenceStore::new(conn)
+    }
+
+    fn make_sequence(id: &str, goal: &str) -> EditSequence {
+        EditSequence {
+            id: id.to_string(),
+            task_id: None,
+            goal: goal.to_string(),
+            steps: vec![EditStep {
+                id: format!("{id}-step0"),
+                sequence_id: id.to_string(),
+                position: 0,
+                file: std::path::PathBuf::from("src/lib.rs"),
+                search: "fn old".to_string(),
+                replace: "fn new".to_string(),
+                verification_cmd: None,
+                status: StepStatus::Pending,
+            }],
+            current_idx: 0,
+            status: SequenceStatus::Planning,
+            snapshot_ref: None,
+        }
+    }
+
+    #[test]
+    fn update_sequence_status_changes_status() {
+        let store = make_store();
+        let seq = make_sequence("seq1", "refactor auth");
+        store.create_sequence(&seq).unwrap();
+
+        store
+            .update_sequence_status("seq1", SequenceStatus::Approved)
+            .unwrap();
+
+        let loaded = store.get_sequence("seq1").unwrap().unwrap();
+        assert_eq!(loaded.status, SequenceStatus::Approved);
+    }
+
+    #[test]
+    fn get_latest_sequence_returns_most_recent() {
+        let store = make_store();
+        store
+            .create_sequence(&make_sequence("seq-a", "first goal"))
+            .unwrap();
+        store
+            .create_sequence(&make_sequence("seq-b", "second goal"))
+            .unwrap();
+
+        let latest = store.get_latest_sequence().unwrap().unwrap();
+        assert_eq!(latest.id, "seq-b");
+        assert_eq!(latest.goal, "second goal");
+    }
+
+    #[test]
+    fn get_latest_sequence_returns_none_when_empty() {
+        let store = make_store();
+        assert!(store.get_latest_sequence().unwrap().is_none());
+    }
+
+    #[test]
+    fn get_latest_sequence_loads_steps() {
+        let store = make_store();
+        store
+            .create_sequence(&make_sequence("seq1", "goal"))
+            .unwrap();
+
+        let seq = store.get_latest_sequence().unwrap().unwrap();
+        assert_eq!(seq.steps.len(), 1);
+        assert_eq!(seq.steps[0].search, "fn old");
     }
 }

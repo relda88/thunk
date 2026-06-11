@@ -84,6 +84,12 @@ pub enum Command {
     Compress(Option<bool>),
     /// Decompose a refactor goal into an edit sequence. None = bare /refactor with no goal.
     Refactor(Option<String>),
+    /// /refactor approve — approve the latest sequence and begin executing steps.
+    RefactorApprove,
+    /// /refactor abort — abort the active sequence and mark it Failed.
+    RefactorAbort,
+    /// /refactor status — show active sequence goal and step progress.
+    RefactorStatus,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -301,10 +307,15 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") | None => Some(Ok(Command::Compress(None))),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
-        "/refactor" => {
-            let goal = arg.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-            Some(Ok(Command::Refactor(goal)))
-        }
+        "/refactor" => match arg {
+            Some("approve") => Some(Ok(Command::RefactorApprove)),
+            Some("abort") => Some(Ok(Command::RefactorAbort)),
+            Some("status") => Some(Ok(Command::RefactorStatus)),
+            arg => {
+                let goal = arg.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                Some(Ok(Command::Refactor(goal)))
+            }
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -350,6 +361,9 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/quit",
         "/read",
         "/refactor",
+        "/refactor approve",
+        "/refactor abort",
+        "/refactor status",
         "/reject",
         "/retrieval",
         "/search",
@@ -468,6 +482,18 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/refactor",
             description: "Decompose a refactor goal into an edit sequence",
+        },
+        LauncherCommand {
+            name: "/refactor approve",
+            description: "Approve the latest refactor sequence and begin executing steps",
+        },
+        LauncherCommand {
+            name: "/refactor abort",
+            description: "Abort the active refactor sequence",
+        },
+        LauncherCommand {
+            name: "/refactor status",
+            description: "Show active refactor sequence goal and step progress",
         },
         LauncherCommand {
             name: "/constrain",
@@ -1092,5 +1118,31 @@ mod tests {
     #[test]
     fn parses_refactor_bare() {
         assert_eq!(parse("/refactor"), Some(Ok(Command::Refactor(None))));
+    }
+
+    #[test]
+    fn parses_refactor_approve() {
+        assert_eq!(
+            parse("/refactor approve"),
+            Some(Ok(Command::RefactorApprove))
+        );
+    }
+
+    #[test]
+    fn parses_refactor_abort() {
+        assert_eq!(parse("/refactor abort"), Some(Ok(Command::RefactorAbort)));
+    }
+
+    #[test]
+    fn parses_refactor_status() {
+        assert_eq!(parse("/refactor status"), Some(Ok(Command::RefactorStatus)));
+    }
+
+    #[test]
+    fn parses_refactor_goal_not_confused_with_subcommands() {
+        assert_eq!(
+            parse("/refactor extract helpers"),
+            Some(Ok(Command::Refactor(Some("extract helpers".to_string()))))
+        );
     }
 }
