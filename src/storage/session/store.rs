@@ -107,7 +107,8 @@ impl SessionStore {
         Ok(Some(SavedSession { meta, messages }))
     }
 
-    /// Loads the most recently updated session. Returns None if there are no sessions.
+    // deferred: global session management UI
+    #[allow(dead_code)]
     pub fn load_most_recent(&self) -> Result<Option<SavedSession>> {
         let id = self
             .conn
@@ -195,7 +196,8 @@ impl SessionStore {
         tx.commit().map_err(|e| AppError::Storage(e.to_string()))
     }
 
-    /// Lists all sessions ordered by most recently updated.
+    // deferred: global session management UI
+    #[allow(dead_code)]
     pub fn list(&self) -> Result<Vec<SessionMeta>> {
         self.conn
             .prepare(
@@ -222,7 +224,8 @@ impl SessionStore {
             .map_err(|e| AppError::Storage(e.to_string()))
     }
 
-    /// Deletes a session and all its messages.
+    // deferred: global session management UI
+    #[allow(dead_code)]
     pub fn delete(&self, id: &str) -> Result<()> {
         let tx = self
             .conn

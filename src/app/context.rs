@@ -125,6 +125,7 @@ impl AppContext {
     }
 
     /// Initializes the AppContext by building a Runtime and loading the session history and anchors.
+    #[allow(clippy::too_many_arguments)] // builder for multi-component context
     pub fn build(
         config: &Config,
         project_root: ProjectRoot,

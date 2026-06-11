@@ -6,6 +6,8 @@ use rusqlite::{params, Connection};
 use super::types::{ExtractedSymbol, ImportEdge};
 use crate::core::error::{AppError, Result};
 
+// deferred: typed symbol query API
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct SymbolRecord {
     pub(crate) name: String,
@@ -209,30 +211,6 @@ impl SymbolStore {
         Ok(())
     }
 
-    pub(crate) fn lookup_imports(&self, project_root: &str, file: &str) -> Result<Vec<ImportEdge>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT from_file, to_file FROM index_imports \
-                 WHERE project_root = ?1 AND from_file = ?2",
-            )
-            .map_err(|e| AppError::Storage(e.to_string()))?;
-
-        let rows = stmt
-            .query_map(params![project_root, file], |row| {
-                Ok(ImportEdge {
-                    from_file: row.get(0)?,
-                    to_file: row.get(1)?,
-                })
-            })
-            .map_err(|e| AppError::Storage(e.to_string()))?;
-
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
-        }
-        Ok(out)
-    }
     pub(crate) fn all_imports(&self, project_root: &str) -> Result<Vec<ImportEdge>> {
         let mut stmt = self
             .conn
@@ -618,27 +596,6 @@ mod tests {
             all.is_empty(),
             "must not return edges for a different project root"
         );
-    }
-
-    #[test]
-    fn upsert_imports_and_lookup_roundtrip() {
-        let store = in_memory();
-        let edges = vec![
-            ImportEdge {
-                from_file: "src/a.rs".to_string(),
-                to_file: "src/b.rs".to_string(),
-            },
-            ImportEdge {
-                from_file: "src/a.rs".to_string(),
-                to_file: "src/c.rs".to_string(),
-            },
-        ];
-        store.upsert_imports("root", &edges).unwrap();
-        let results = store.lookup_imports("root", "src/a.rs").unwrap();
-        assert_eq!(results.len(), 2);
-        let targets: Vec<&str> = results.iter().map(|e| e.to_file.as_str()).collect();
-        assert!(targets.contains(&"src/b.rs"));
-        assert!(targets.contains(&"src/c.rs"));
     }
 
     #[test]

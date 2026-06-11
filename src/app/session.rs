@@ -23,6 +23,7 @@ impl ActiveSession {
 
     /// Opens the session database and returns the active session, previously stored messages,
     /// and restored anchor state. Returns empty messages and None anchors if no prior session exists.
+    #[allow(clippy::type_complexity)] // returns session + history + anchor triple
     pub fn open_or_restore(
         db_path: &Path,
         project_root: &ProjectRoot,

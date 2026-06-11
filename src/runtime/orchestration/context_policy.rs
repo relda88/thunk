@@ -1,3 +1,4 @@
+use super::super::conversation::LIVE_TRIM_THRESHOLD;
 use crate::llm::backend::BackendCapabilities;
 
 /// Policy values derived once from backend capabilities at construction time.
@@ -13,7 +14,7 @@ impl ContextPolicy {
     pub(super) fn from_capabilities(caps: BackendCapabilities) -> Self {
         match caps.context_window_tokens {
             Some(t) if t >= 16_384 => Self {
-                trim_threshold: 40,
+                trim_threshold: LIVE_TRIM_THRESHOLD,
                 tool_result_max_lines: 200,
             },
             Some(t) if t >= 8_192 => Self {
@@ -29,7 +30,7 @@ impl ContextPolicy {
                 tool_result_max_lines: 40,
             },
             None => Self {
-                trim_threshold: 40,
+                trim_threshold: LIVE_TRIM_THRESHOLD,
                 tool_result_max_lines: 200,
             },
         }

@@ -3,7 +3,6 @@ use mpatch::{patch_content_str, ApplyOptions};
 #[derive(Debug)]
 pub enum PatchError {
     ParseError(String),
-    AmbiguousAnchor,
     AnchorNotFound,
     MultiplePatches,
 }
@@ -12,9 +11,6 @@ impl std::fmt::Display for PatchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PatchError::ParseError(msg) => write!(f, "parse error: {msg}"),
-            PatchError::AmbiguousAnchor => {
-                write!(f, "ambiguous anchor: multiple candidate locations")
-            }
             PatchError::AnchorNotFound => write!(f, "anchor not found in target content"),
             PatchError::MultiplePatches => {
                 write!(f, "expected exactly one patch, found zero or multiple")

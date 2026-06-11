@@ -10,7 +10,6 @@ pub(crate) enum SymbolKind {
     Impl,
     Class,
     Interface,
-    Unknown,
 }
 
 impl SymbolKind {
@@ -26,23 +25,6 @@ impl SymbolKind {
             SymbolKind::Impl => "Impl",
             SymbolKind::Class => "Class",
             SymbolKind::Interface => "Interface",
-            SymbolKind::Unknown => "Unknown",
-        }
-    }
-
-    pub(crate) fn from_str(s: &str) -> Self {
-        match s {
-            "Function" => SymbolKind::Function,
-            "Struct" => SymbolKind::Struct,
-            "Enum" => SymbolKind::Enum,
-            "Trait" => SymbolKind::Trait,
-            "TypeAlias" => SymbolKind::TypeAlias,
-            "Constant" => SymbolKind::Constant,
-            "Static" => SymbolKind::Static,
-            "Impl" => SymbolKind::Impl,
-            "Class" => SymbolKind::Class,
-            "Interface" => SymbolKind::Interface,
-            _ => SymbolKind::Unknown,
         }
     }
 }
@@ -60,14 +42,6 @@ impl SymbolConfidence {
             SymbolConfidence::High => "High",
             SymbolConfidence::Medium => "Medium",
             SymbolConfidence::Low => "Low",
-        }
-    }
-
-    pub(crate) fn from_str(s: &str) -> Self {
-        match s {
-            "High" => SymbolConfidence::High,
-            "Low" => SymbolConfidence::Low,
-            _ => SymbolConfidence::Medium,
         }
     }
 }

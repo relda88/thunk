@@ -45,10 +45,14 @@ impl SymbolPool {
             .unwrap_or(" ")
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.symbols.len()
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.ids.clear();
         self.symbols.clear();

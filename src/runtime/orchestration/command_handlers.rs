@@ -1266,9 +1266,6 @@ impl Runtime {
             Err(e) => {
                 let detail = match &e {
                     PatchError::AnchorNotFound => "search text not found in file".to_string(),
-                    PatchError::AmbiguousAnchor => {
-                        "search text matches multiple locations".to_string()
-                    }
                     PatchError::MultiplePatches => "expected exactly one patch block".to_string(),
                     PatchError::ParseError(msg) => format!("parse error: {msg}"),
                 };

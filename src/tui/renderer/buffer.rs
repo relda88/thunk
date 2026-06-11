@@ -42,6 +42,8 @@ impl CellBuffer {
         self.height
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.cells.fill(self.blank);
     }
@@ -62,6 +64,8 @@ impl CellBuffer {
         self.cells[idx] = cell;
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, cell: Cell) {
         for row in y..y.saturating_add(height).min(self.height) {
             for col in x..x.saturating_add(width).min(self.width) {

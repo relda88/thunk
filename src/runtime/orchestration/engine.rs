@@ -299,21 +299,25 @@ impl Runtime {
         self
     }
 
+    #[cfg(test)]
     pub fn with_prompt_physics_enabled(mut self) -> Self {
         self.prompt_physics.enabled = true;
         self
     }
 
+    #[cfg(test)]
     pub fn with_constrained_output(mut self) -> Self {
         self.constrained_output = true;
         self
     }
 
+    #[cfg(test)]
     pub fn with_verify_command(mut self, cmd: Option<String>) -> Self {
         self.verify_command = cmd;
         self
     }
 
+    #[cfg(test)]
     pub fn with_max_correction_attempts(mut self, n: u32) -> Self {
         self.max_correction_attempts = n;
         self
@@ -1998,7 +2002,6 @@ impl TurnContext {
             }
         }
         Ok(TurnContext {
-            original_user_prompt: original_user_prompt.map(str::to_string),
             retrieval_intent,
             requested_read_path,
             direct_read_mode,

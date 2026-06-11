@@ -15,6 +15,7 @@ use super::super::types::{Activity, RuntimeEvent};
 /// buffers the assistant response into conversation history, then returns the
 /// complete response text, or None if the backend produced no output. Assistant
 /// message events are emitted only after runtime admission.
+#[allow(clippy::too_many_arguments)] // orchestration function wiring backend, conversation, and policy
 pub(super) fn run_generate_turn(
     backend: &mut dyn ModelBackend,
     conversation: &mut Conversation,

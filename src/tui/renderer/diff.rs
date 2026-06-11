@@ -25,6 +25,8 @@ impl PatchWriter {
         Self { last_style: None }
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub fn reset_style(&mut self) {
         self.last_style = None;
     }

@@ -1,3 +1,5 @@
+// deferred: session history / audit logging
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanStatus {
     Draft,
@@ -16,6 +18,8 @@ impl PlanStatus {
         }
     }
 
+    // deferred: session history / audit logging
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "active" => Self::Active,
@@ -54,6 +58,8 @@ impl TaskStatus {
     }
 }
 
+// deferred: session history / audit logging
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PlanRecord {
     pub id: String,
@@ -65,6 +71,8 @@ pub struct PlanRecord {
     pub updated_at: String,
 }
 
+// deferred: session history / audit logging
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TaskRecord {
     pub id: String,

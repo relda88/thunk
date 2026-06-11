@@ -27,6 +27,8 @@ pub(crate) struct EngineLocalEscalation {
 pub(crate) enum TurnSignal {
     Continue,
     Finish,
+    // deferred: async suspend flow
+    #[allow(dead_code)]
     Suspend,
 }
 
@@ -46,7 +48,6 @@ pub(crate) struct PendingRuntimeCall {
 }
 
 pub(crate) struct TurnContext {
-    pub(crate) original_user_prompt: Option<String>,
     pub(crate) retrieval_intent: RetrievalIntent,
     pub(crate) requested_read_path: Option<String>,
     pub(crate) direct_read_mode: Option<DirectReadMode>,

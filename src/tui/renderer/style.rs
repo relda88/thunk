@@ -43,21 +43,29 @@ impl PackedStyle {
         self
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub const fn with_dim(mut self) -> Self {
         self.0 |= DIM_FLAG << FLAG_SHIFT;
         self
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub const fn with_italic(mut self) -> Self {
         self.0 |= ITALIC_FLAG << FLAG_SHIFT;
         self
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub const fn with_underline(mut self) -> Self {
         self.0 |= UNDERLINE_FLAG << FLAG_SHIFT;
         self
     }
 
+    // deferred: renderer utility API
+    #[allow(dead_code)]
     pub const fn with_reverse(mut self) -> Self {
         self.0 |= REVERSE_FLAG << FLAG_SHIFT;
         self

@@ -27,6 +27,8 @@ const SPINNER: [char; 4] = ['-', '\\', '|', '/'];
 const MAX_INPUT_ROWS: usize = 6;
 
 pub(crate) struct RenderStats {
+    // deferred: render performance metrics
+    #[allow(dead_code)]
     pub(crate) changed_cells: usize,
 }
 

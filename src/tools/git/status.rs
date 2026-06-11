@@ -195,6 +195,7 @@ fn parse_git_status_output(stdout: &str, capture_truncated: bool) -> GitStatusOu
     }
 }
 
+#[allow(clippy::type_complexity)] // branch parsing returns optional (local, remote, ahead, behind)
 fn parse_branch_line(
     line: &str,
 ) -> Option<(Option<String>, Option<String>, Option<u32>, Option<u32>)> {

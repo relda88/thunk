@@ -15,6 +15,8 @@ pub enum Role {
 pub enum MessageKind {
     Normal,
     Dimmed,
+    // deferred: alert message type
+    #[allow(dead_code)]
     Alert,
     Error,
 }
@@ -23,6 +25,8 @@ pub enum MessageKind {
 pub(crate) struct DirtySections(u8);
 
 impl DirtySections {
+    // deferred: header region selective re-render
+    #[allow(dead_code)]
     pub(crate) const HEADER: Self = Self(0b0001);
     pub(crate) const TRANSCRIPT: Self = Self(0b0010);
     pub(crate) const INPUT: Self = Self(0b0100);

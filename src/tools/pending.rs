@@ -60,23 +60,6 @@ pub enum PendingApprovalStage {
 }
 
 impl PendingApprovalStage {
-    /// Returns the first (or only) action for backward-compatible single-action callers.
-    pub fn action(&self) -> &PendingAction {
-        match self {
-            Self::AwaitingPreCheck(tx) | Self::PreCheckComplete(tx) => tx.first(),
-        }
-    }
-
-    /// Consumes the stage and returns the first (or only) action.
-    /// Use `into_transaction()` when multi-action handling is needed.
-    pub fn into_action(self) -> PendingAction {
-        match self {
-            Self::AwaitingPreCheck(tx) | Self::PreCheckComplete(tx) => {
-                tx.actions.into_iter().next().unwrap()
-            }
-        }
-    }
-
     /// Consumes the stage and returns the full transaction.
     pub fn into_transaction(self) -> PendingTransaction {
         match self {

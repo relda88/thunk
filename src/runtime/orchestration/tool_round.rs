@@ -188,6 +188,7 @@ pub(crate) enum ToolRoundOutcome {
 /// `last_call_key` carries the fingerprint of the most recently executed call across
 /// rounds. If the current call matches it, a cycle error is injected instead of
 /// dispatching. The key is updated after every non-cycle, non-approval dispatch.
+#[allow(clippy::too_many_arguments)] // orchestration function wiring tool dispatch, investigation state, and policy
 pub(crate) fn run_tool_round(
     project_root: &ProjectRoot,
     registry: &ToolRegistry,

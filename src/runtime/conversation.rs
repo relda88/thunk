@@ -2,7 +2,7 @@ use crate::llm::backend::{Message, Role};
 use crate::runtime::protocol::tool_codec::is_tool_call_message;
 
 /// Trigger live trimming when the conversation exceeds this many messages.
-const LIVE_TRIM_THRESHOLD: usize = 40;
+pub(crate) const LIVE_TRIM_THRESHOLD: usize = 40;
 /// Number of trailing messages to always preserve regardless of type.
 const LIVE_TRIM_KEEP_RECENT: usize = 10;
 /// Minimum real-turn age before a tool result is eligible for pruning.
