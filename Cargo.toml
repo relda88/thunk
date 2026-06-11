@@ -1,6 +1,6 @@
 [package]
 name = "thunk"
-version = "0.24.72"
+version = "0.25.72"
 edition = "2021"
 
 [dependencies]
@@ -21,6 +21,7 @@ serde_json = "1"
 thiserror = "1"
 toml = "0.8"
 ureq = { version = "2", features = ["tls"] }
+mpatch = "1.6.4"
 
 [features]
 local = ["llama-cpp-2", "llama-cpp-sys-2"]

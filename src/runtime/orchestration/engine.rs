@@ -904,90 +904,56 @@ impl Runtime {
                     if let Some(verify_cmd) = self.verify_command.clone() {
                         if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload)
                         {
-                            let mut cmd_parts = verify_cmd.split_whitespace();
-                            if let Some(program) = cmd_parts.next() {
-                                let args: Vec<&str> = cmd_parts.collect();
-                                on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
-                                match std::process::Command::new(program)
-                                    .args(&args)
-                                    .current_dir(self.project_root.path())
-                                    .stdout(std::process::Stdio::piped())
-                                    .stderr(std::process::Stdio::piped())
-                                    .output()
+                            if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
+                                if self.max_correction_attempts > 0
+                                    && self.correction_attempts < self.max_correction_attempts
                                 {
-                                    Ok(out) => {
-                                        let mut combined =
-                                            String::from_utf8_lossy(&out.stdout).into_owned();
-                                        combined.push_str(&String::from_utf8_lossy(&out.stderr));
-                                        if combined.len() > 4000 {
-                                            combined.truncate(4000);
-                                            combined.push_str("\n[output truncated]");
-                                        }
-                                        if out.status.success() {
-                                            on_event(RuntimeEvent::SystemMessage(format!(
-                                                "{verify_cmd}: ok"
-                                            )));
-                                            self.correction_attempts = 0;
-                                        } else if self.max_correction_attempts > 0
-                                            && self.correction_attempts
-                                                < self.max_correction_attempts
-                                        {
-                                            // Correction attempt: inject a correction prompt and
-                                            // re-enter the turn loop. The [runtime:correction]
-                                            // prefix is mandatory — it suppresses TurnContext
-                                            // surface/intent re-classification (engine.rs ~line 1641).
-                                            self.correction_attempts += 1;
-                                            on_event(RuntimeEvent::SystemMessage(format!(
-                                                "{verify_cmd}: failed — requesting correction \
-                                                 (attempt {}/{})",
-                                                self.correction_attempts,
-                                                self.max_correction_attempts
-                                            )));
-                                            let correction_prompt = format!(
-                                                "[runtime:correction] {verify_cmd} failed after \
-                                                 editing {}:\n{}\n\nEmit a corrective \
-                                                 [edit_file: ...] that fixes the error. \
-                                                 Do not include any other content.",
-                                                abs_path,
-                                                combined.trim()
-                                            );
-                                            self.conversation.push_user(correction_prompt);
-                                            on_event(RuntimeEvent::ActivityChanged(
-                                                Activity::Processing,
-                                            ));
-                                            self.run_turns(0, on_event);
-                                            if self.pending_action.is_some() {
-                                                // Corrective edit is pending approval — suspend
-                                                // here and let the next Approve call continue.
-                                                return;
-                                            }
-                                            // Model responded with prose instead of an edit.
-                                            // run_turns already called finish_with_runtime_answer
-                                            // for the prose answer, so we must not call it again.
-                                            on_event(RuntimeEvent::SystemMessage(format!(
-                                                "{verify_cmd}: failed after {} correction \
-                                                 attempt(s) — manual fix required\n{}",
-                                                self.correction_attempts,
-                                                combined.trim()
-                                            )));
-                                            self.correction_attempts = 0;
-                                            return;
-                                        } else {
-                                            // Corrections disabled or max attempts reached.
-                                            on_event(RuntimeEvent::SystemMessage(format!(
-                                                "{verify_cmd}: failed after {} correction \
-                                                 attempt(s) — manual fix required\n{}",
-                                                self.correction_attempts,
-                                                combined.trim()
-                                            )));
-                                            self.correction_attempts = 0;
-                                        }
+                                    // Correction attempt: inject a correction prompt and
+                                    // re-enter the turn loop. The [runtime:correction]
+                                    // prefix is mandatory — it suppresses TurnContext
+                                    // surface/intent re-classification (engine.rs ~line 1641).
+                                    self.correction_attempts += 1;
+                                    on_event(RuntimeEvent::SystemMessage(format!(
+                                        "{verify_cmd}: failed — requesting correction \
+                                         (attempt {}/{})",
+                                        self.correction_attempts, self.max_correction_attempts
+                                    )));
+                                    let correction_prompt = format!(
+                                        "[runtime:correction] {verify_cmd} failed after \
+                                         editing {}:\n{}\n\nEmit a corrective \
+                                         [edit_file: ...] that fixes the error. \
+                                         Do not include any other content.",
+                                        abs_path,
+                                        combined.trim()
+                                    );
+                                    self.conversation.push_user(correction_prompt);
+                                    on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
+                                    self.run_turns(0, on_event);
+                                    if self.pending_action.is_some() {
+                                        // Corrective edit is pending approval — suspend
+                                        // here and let the next Approve call continue.
+                                        return;
                                     }
-                                    Err(_) => {
-                                        on_event(RuntimeEvent::SystemMessage(format!(
-                                            "{verify_cmd}: unavailable"
-                                        )));
-                                    }
+                                    // Model responded with prose instead of an edit.
+                                    // run_turns already called finish_with_runtime_answer
+                                    // for the prose answer, so we must not call it again.
+                                    on_event(RuntimeEvent::SystemMessage(format!(
+                                        "{verify_cmd}: failed after {} correction \
+                                         attempt(s) — manual fix required\n{}",
+                                        self.correction_attempts,
+                                        combined.trim()
+                                    )));
+                                    self.correction_attempts = 0;
+                                    return;
+                                } else {
+                                    // Corrections disabled or max attempts reached.
+                                    on_event(RuntimeEvent::SystemMessage(format!(
+                                        "{verify_cmd}: failed after {} correction \
+                                         attempt(s) — manual fix required\n{}",
+                                        self.correction_attempts,
+                                        combined.trim()
+                                    )));
+                                    self.correction_attempts = 0;
                                 }
                             }
                         }
@@ -1139,41 +1105,11 @@ impl Runtime {
         // Step 3: Run verify_command if configured.
         // Correction loop is intentionally skipped for transactions.
         if let Some(verify_cmd) = self.verify_command.clone() {
-            let mut cmd_parts = verify_cmd.split_whitespace();
-            if let Some(program) = cmd_parts.next() {
-                let args: Vec<&str> = cmd_parts.collect();
-                on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
-                match std::process::Command::new(program)
-                    .args(&args)
-                    .current_dir(self.project_root.path())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .output()
-                {
-                    Ok(out) => {
-                        let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
-                        combined.push_str(&String::from_utf8_lossy(&out.stderr));
-                        if combined.len() > 4000 {
-                            combined.truncate(4000);
-                            combined.push_str("\n[output truncated]");
-                        }
-                        if out.status.success() {
-                            on_event(RuntimeEvent::SystemMessage(format!("{verify_cmd}: ok")));
-                            self.correction_attempts = 0;
-                        } else {
-                            on_event(RuntimeEvent::SystemMessage(format!(
-                                "{verify_cmd}: failed after transaction — \
-                                 manual fix required\n{}",
-                                combined.trim()
-                            )));
-                        }
-                    }
-                    Err(_) => {
-                        on_event(RuntimeEvent::SystemMessage(format!(
-                            "{verify_cmd}: unavailable"
-                        )));
-                    }
-                }
+            if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "{verify_cmd}: failed after transaction — manual fix required\n{}",
+                    combined.trim()
+                )));
             }
         }
 
@@ -1831,6 +1767,50 @@ impl Runtime {
         &mut self,
     ) -> std::io::Result<ProjectStructureSnapshot> {
         self.get_or_build_project_snapshot().cloned()
+    }
+
+    /// Runs `cmd` in the project root. Returns `None` on success or spawn error (both already
+    /// emitted via `on_event`). Returns `Some(combined_output)` on non-zero exit so the caller
+    /// can build a failure message; on success also resets `correction_attempts`.
+    fn run_verify_command(
+        &mut self,
+        cmd: &str,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) -> Option<String> {
+        let mut cmd_parts = cmd.split_whitespace();
+        let program = match cmd_parts.next() {
+            Some(p) => p,
+            None => return None,
+        };
+        let args: Vec<&str> = cmd_parts.collect();
+        on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
+        match std::process::Command::new(program)
+            .args(&args)
+            .current_dir(self.project_root.path())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+        {
+            Ok(out) => {
+                let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+                combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                if combined.len() > 4000 {
+                    combined.truncate(4000);
+                    combined.push_str("\n[output truncated]");
+                }
+                if out.status.success() {
+                    on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                    self.correction_attempts = 0;
+                    None
+                } else {
+                    Some(combined)
+                }
+            }
+            Err(_) => {
+                on_event(RuntimeEvent::SystemMessage(format!("{cmd}: unavailable")));
+                None
+            }
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::core::error::{AppError, Result};
 
-const CURRENT_VERSION: i32 = 9;
+const CURRENT_VERSION: i32 = 10;
 
 const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
@@ -115,6 +115,26 @@ const SCHEMA: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_retrieval_log_project
         ON retrieval_log (project_root, id DESC);
+
+    CREATE TABLE IF NOT EXISTS edit_sequences (
+        id           TEXT PRIMARY KEY,
+        task_id      TEXT,
+        goal         TEXT NOT NULL,
+        current_idx  INTEGER NOT NULL DEFAULT 0,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        snapshot_ref TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS edit_steps (
+        id               TEXT PRIMARY KEY,
+        sequence_id      TEXT NOT NULL,
+        position         INTEGER NOT NULL,
+        file             TEXT NOT NULL,
+        search           TEXT NOT NULL,
+        replace          TEXT NOT NULL,
+        verification_cmd TEXT,
+        status           TEXT NOT NULL DEFAULT 'pending'
+    );
 ";
 
 pub(crate) fn initialize(conn: &Connection) -> Result<()> {
@@ -170,6 +190,10 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
 
     if version < 9 {
         // retrieval_log table — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
+    }
+
+    if version < 10 {
+        // edit_sequences and edit_steps tables — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
     }
 
     if version < CURRENT_VERSION {

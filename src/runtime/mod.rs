@@ -3,6 +3,7 @@ pub(crate) mod index;
 mod investigation;
 pub(crate) mod lsp;
 mod orchestration;
+mod patch;
 mod paths;
 pub(crate) mod project;
 mod protocol;
@@ -16,6 +17,7 @@ pub(crate) use index::{
     extract_symbols, ExtractedSymbol, ImportEdge, SymbolConfidence, SymbolKind,
 };
 pub use orchestration::Runtime;
+pub use patch::PatchError;
 pub use project::ResolvedToolInput;
 #[allow(unused_imports)]
 pub use project::{resolve, PathResolutionError};
