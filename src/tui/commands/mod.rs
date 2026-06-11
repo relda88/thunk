@@ -82,6 +82,8 @@ pub enum Command {
     /// When enabled, injects only reasoning_effect instead of full invariants + specification.
     /// None = query current status.
     Compress(Option<bool>),
+    /// Decompose a refactor goal into an edit sequence. None = bare /refactor with no goal.
+    Refactor(Option<String>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -299,6 +301,10 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") | None => Some(Ok(Command::Compress(None))),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/refactor" => {
+            let goal = arg.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+            Some(Ok(Command::Refactor(goal)))
+        }
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -343,6 +349,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/providers",
         "/quit",
         "/read",
+        "/refactor",
         "/reject",
         "/retrieval",
         "/search",
@@ -457,6 +464,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/compress",
             description: "Toggle ability prompt compression (reasoning_effect only vs full block)",
+        },
+        LauncherCommand {
+            name: "/refactor",
+            description: "Decompose a refactor goal into an edit sequence",
         },
         LauncherCommand {
             name: "/constrain",
@@ -1066,5 +1077,20 @@ mod tests {
     #[test]
     fn parses_compress_bare() {
         assert_eq!(parse("/compress"), Some(Ok(Command::Compress(None))));
+    }
+
+    #[test]
+    fn parses_refactor_with_goal() {
+        assert_eq!(
+            parse("/refactor extract error handling"),
+            Some(Ok(Command::Refactor(Some(
+                "extract error handling".to_string()
+            ))))
+        );
+    }
+
+    #[test]
+    fn parses_refactor_bare() {
+        assert_eq!(parse("/refactor"), Some(Ok(Command::Refactor(None))));
     }
 }

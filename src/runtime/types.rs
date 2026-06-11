@@ -291,6 +291,11 @@ pub enum RuntimeRequest {
     CompressToggle {
         enabled: Option<bool>,
     },
+    /// Decompose a refactor goal into an ordered edit sequence via a one-shot planning turn.
+    /// Persists the sequence via EditSequenceStore. Never executes steps — Phase 42 owns execution.
+    Refactor {
+        target: Option<String>,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

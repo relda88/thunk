@@ -122,6 +122,9 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::Compress(enabled) => {
             CommandAction::Runtime(RuntimeRequest::CompressToggle { enabled })
         }
+        Command::Refactor(goal) => {
+            CommandAction::Runtime(RuntimeRequest::Refactor { target: goal })
+        }
     }
 }
 

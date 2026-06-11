@@ -1004,6 +1004,124 @@ impl Runtime {
         }
     }
 
+    pub(super) fn handle_refactor(
+        &mut self,
+        target: Option<String>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        use crate::llm::backend::{BackendEvent, GenerateRequest, Message};
+        use crate::storage::tasks::{EditSequence, EditStep, SequenceStatus, StepStatus};
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        if self.edit_store.is_none() {
+            on_event(RuntimeEvent::Failed {
+                message: "Edit store not initialized".to_string(),
+            });
+            return;
+        }
+
+        let goal = target.unwrap_or_else(|| "refactor the codebase".to_string());
+
+        let prompt = format!(
+            "Decompose the following refactor goal into an ordered list of single-file edit steps.\n\
+             Respond with a JSON array only. No prose, no markdown fences.\n\
+             Format: [{{\"file\": \"path/to/file.rs\", \"description\": \"what changes and why\"}}, ...]\n\
+             Limit to 10 steps maximum. Each step must target exactly one file.\n\n\
+             Goal: {goal}"
+        );
+
+        let mut messages = self.conversation.pruned_snapshot();
+        messages.push(Message::user(prompt));
+        let request = GenerateRequest::new(messages);
+        let mut raw = String::new();
+        if self
+            .backend
+            .generate(request, &mut |event| {
+                if let BackendEvent::TextDelta(chunk) = event {
+                    raw.push_str(&chunk);
+                }
+            })
+            .is_err()
+        {
+            on_event(RuntimeEvent::Failed {
+                message: format!("refactor: model generation failed\n{raw}"),
+            });
+            return;
+        }
+
+        #[derive(serde::Deserialize)]
+        struct RawStep {
+            file: String,
+            #[allow(dead_code)]
+            description: String,
+        }
+
+        let raw_steps: Vec<RawStep> = match serde_json::from_str(raw.trim()) {
+            Ok(v) => v,
+            Err(_) => {
+                on_event(RuntimeEvent::Failed {
+                    message: format!("refactor: failed to parse model response\n{}", raw.trim()),
+                });
+                return;
+            }
+        };
+
+        fn gen_id() -> String {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let unique = nanos ^ (std::process::id() as u128);
+            format!("{:016x}", unique & 0xFFFF_FFFF_FFFF_FFFF)
+        }
+
+        let seq_id = gen_id();
+        let steps: Vec<EditStep> = raw_steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| EditStep {
+                id: gen_id(),
+                sequence_id: seq_id.clone(),
+                position: i,
+                file: PathBuf::from(&s.file),
+                search: String::new(),
+                replace: String::new(),
+                verification_cmd: None,
+                status: StepStatus::Pending,
+            })
+            .collect();
+
+        let unique_files: std::collections::HashSet<_> =
+            raw_steps.iter().map(|s| &s.file).collect();
+        let n = steps.len();
+        let file_count = unique_files.len();
+
+        let sequence = EditSequence {
+            id: seq_id,
+            task_id: None,
+            goal: goal.clone(),
+            steps,
+            current_idx: 0,
+            status: SequenceStatus::Planning,
+            snapshot_ref: None,
+        };
+
+        if let Some(store) = &self.edit_store {
+            if let Err(e) = store.create_sequence(&sequence) {
+                on_event(RuntimeEvent::Failed {
+                    message: format!("refactor: failed to persist sequence: {e}"),
+                });
+                return;
+            }
+        }
+
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "Refactor sequence created: {n} steps across {file_count} file{}",
+            if file_count == 1 { "" } else { "s" }
+        )));
+    }
+
     pub(super) fn handle_ability_toggle(
         &mut self,
         name: Option<String>,

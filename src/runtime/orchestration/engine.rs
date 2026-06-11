@@ -5,7 +5,7 @@ use crate::llm::backend::ModelBackend;
 use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
 use crate::storage::retrieval::RetrievalLogStore;
-use crate::storage::tasks::TaskStore;
+use crate::storage::tasks::{EditSequenceStore, TaskStore};
 use crate::tools::{
     PendingAction, PendingApprovalStage, PendingTransaction, ToolInput, ToolOutput, ToolRegistry,
     ToolRunResult,
@@ -136,6 +136,8 @@ pub struct Runtime {
     pub(super) retrieval_config: RetrievalConfig,
     /// Plan/task store. `None` when no db_path was supplied (e.g. in tests).
     pub(crate) task_store: Option<TaskStore>,
+    /// Edit sequence store. `None` when no db_path was supplied (e.g. in tests).
+    pub(crate) edit_store: Option<EditSequenceStore>,
     /// Set to true after the first on-demand index build attempt this session.
     /// Ensures the trigger fires at most once per session.
     pub(super) index_triggered: bool,
@@ -236,6 +238,7 @@ impl Runtime {
             embedding_provider: None,
             retrieval_config: config.retrieval.clone(),
             task_store: None,
+            edit_store: None,
             index_triggered: false,
             context_75_warned: false,
             prompt_physics,
@@ -270,6 +273,12 @@ impl Runtime {
     /// Silently proceeds without a store if the path cannot be opened.
     pub fn with_task_store(mut self, db_path: &std::path::Path) -> Self {
         self.task_store = TaskStore::open(db_path).ok();
+        self
+    }
+
+    /// Attaches an `EditSequenceStore`. Returns `self` for chaining.
+    pub fn with_edit_store(mut self, store: EditSequenceStore) -> Self {
+        self.edit_store = Some(store);
         self
     }
 
@@ -436,6 +445,7 @@ impl Runtime {
             RuntimeRequest::CompressToggle { enabled } => {
                 self.handle_compress_toggle(enabled, on_event)
             }
+            RuntimeRequest::Refactor { target } => self.handle_refactor(target, on_event),
         }
     }
 

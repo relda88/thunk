@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -94,6 +94,11 @@ pub(crate) struct EditSequenceStore {
 }
 
 impl EditSequenceStore {
+    pub(crate) fn open(path: &Path) -> Result<Self> {
+        let conn = Connection::open(path).map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(Self { conn })
+    }
+
     pub(crate) fn new(conn: Connection) -> Self {
         Self { conn }
     }

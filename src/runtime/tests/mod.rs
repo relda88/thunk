@@ -35,6 +35,7 @@ mod plan_command;
 mod project_snapshot;
 mod prompt_physics;
 mod read_bounds;
+mod refactor_command;
 mod retrieval_log;
 mod scenarios;
 mod search_budget;

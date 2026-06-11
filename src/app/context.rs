@@ -4,6 +4,7 @@ use crate::logging::SessionLog;
 use crate::runtime::index::OllamaEmbeddingProvider;
 use crate::runtime::{ProjectRoot, Runtime, RuntimeEvent, RuntimeRequest};
 use crate::storage::session::SessionMeta;
+use crate::storage::tasks::EditSequenceStore;
 use crate::tools::ToolRegistry;
 
 use super::config::Config;
@@ -150,6 +151,9 @@ impl AppContext {
             runtime = runtime.with_symbol_store(path);
             runtime = runtime.with_task_store(path);
             runtime = runtime.with_retrieval_log_store(path);
+            if let Ok(store) = EditSequenceStore::open(path) {
+                runtime = runtime.with_edit_store(store);
+            }
         }
         if let Some(ref model) = config.retrieval.embedding_model {
             let provider =
@@ -221,6 +225,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::RetrievalLog { .. } => "retrieval_log",
         RuntimeRequest::ConstrainedOutputToggle { .. } => "constrained_output_toggle",
         RuntimeRequest::CompressToggle { .. } => "compress_toggle",
+        RuntimeRequest::Refactor { .. } => "refactor",
     }
 }
 
