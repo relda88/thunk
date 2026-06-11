@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::dirs::DEFAULT_SKIP_DIRS;
 use crate::runtime::project::ProjectRoot;
@@ -121,6 +121,60 @@ pub(crate) fn extract_imports(root: &ProjectRoot) -> Vec<ImportEdge> {
         }
     }
 
+    edges
+}
+
+pub(crate) fn extract_symbols_for_file(path: &Path, root: &ProjectRoot) -> Vec<ExtractedSymbol> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if !ext
+        .as_deref()
+        .map(|e| SOURCE_EXTENSIONS.contains(&e))
+        .unwrap_or(false)
+    {
+        return Vec::new();
+    }
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let rel = match path.strip_prefix(root.path()) {
+        Ok(r) => r.to_string_lossy().replace('\\', "/"),
+        Err(_) => return Vec::new(),
+    };
+    let mut symbols = Vec::new();
+    #[cfg(feature = "tree-sitter-parsing")]
+    if let Some(ts_symbols) = super::tree_sitter_parser::parse_file(path, &content, root.path()) {
+        return ts_symbols;
+    }
+    extract_from_file(&content, &rel, &mut symbols);
+    symbols
+}
+
+pub(crate) fn extract_imports_for_file(path: &Path, root: &ProjectRoot) -> Vec<ImportEdge> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if !ext
+        .as_deref()
+        .map(|e| SOURCE_EXTENSIONS.contains(&e))
+        .unwrap_or(false)
+    {
+        return Vec::new();
+    }
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let rel = match path.strip_prefix(root.path()) {
+        Ok(r) => r.to_string_lossy().replace('\\', "/"),
+        Err(_) => return Vec::new(),
+    };
+    let mut edges = Vec::new();
+    extract_imports_from_file(&content, &rel, &mut edges);
     edges
 }
 

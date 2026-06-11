@@ -848,6 +848,11 @@ impl Runtime {
         match self.registry.execute_approved(&pending) {
             Ok(output) => {
                 self.invalidate_project_snapshot_if_needed(&output);
+                if matches!(tool_name.as_str(), "edit_file" | "write_file") {
+                    if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
+                        self.rebuild_index_for_file(std::path::Path::new(&abs_path), on_event);
+                    }
+                }
                 let summary = tool_codec::render_compact_summary(&output);
                 let final_answer = mutation_complete_final_answer(&tool_name, &summary);
                 on_event(RuntimeEvent::ToolCallFinished {
@@ -1068,6 +1073,12 @@ impl Runtime {
             match self.registry.execute_approved(action) {
                 Ok(output) => {
                     self.invalidate_project_snapshot_if_needed(&output);
+                    if matches!(action.tool_name.as_str(), "edit_file" | "write_file") {
+                        if let Some(abs_path) = extract_absolute_path_from_payload(&action.payload)
+                        {
+                            self.rebuild_index_for_file(std::path::Path::new(&abs_path), on_event);
+                        }
+                    }
                     let summary = tool_codec::render_compact_summary(&output);
                     on_event(RuntimeEvent::ToolCallFinished {
                         name: action.tool_name.clone(),

@@ -810,6 +810,58 @@ impl Runtime {
         }
     }
 
+    pub(super) fn rebuild_index_for_file(
+        &mut self,
+        abs_path: &std::path::Path,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        let store = match &self.symbol_store {
+            Some(s) => s,
+            None => return,
+        };
+        let project_root = self.project_root.path().to_string_lossy().to_string();
+        if store.is_empty(&project_root).unwrap_or(true) {
+            return;
+        }
+        let file_path = match abs_path.strip_prefix(self.project_root.path()) {
+            Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+            Err(_) => return,
+        };
+        let symbols = crate::runtime::index::extract_symbols_for_file(abs_path, &self.project_root);
+        let edges = crate::runtime::index::extract_imports_for_file(abs_path, &self.project_root);
+        if let Err(e) = store.delete_embeddings_for_file(&project_root, &file_path) {
+            trace_runtime_decision(
+                on_event,
+                "storage_warning",
+                &[
+                    ("op", "delete_embeddings_for_file".into()),
+                    ("err", e.to_string()),
+                ],
+            );
+        }
+        if let Err(e) = store.upsert_symbols_for_file(&project_root, &file_path, &symbols) {
+            trace_runtime_decision(
+                on_event,
+                "storage_warning",
+                &[
+                    ("op", "upsert_symbols_for_file".into()),
+                    ("err", e.to_string()),
+                ],
+            );
+        }
+        if let Err(e) = store.upsert_imports_for_file(&project_root, &file_path, &edges) {
+            trace_runtime_decision(
+                on_event,
+                "storage_warning",
+                &[
+                    ("op", "upsert_imports_for_file".into()),
+                    ("err", e.to_string()),
+                ],
+            );
+        }
+        trace_runtime_decision(on_event, "index_rebuilt_for_file", &[("path", file_path)]);
+    }
+
     pub(super) fn handle_providers_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let current = self.config.llm.provider.as_str();
         let providers = [
@@ -1289,6 +1341,8 @@ impl Runtime {
             self.handle_sequence_abort(on_event);
             return;
         }
+
+        self.rebuild_index_for_file(&step.file, on_event);
 
         if let Some(verify_cmd) = self.verify_command.clone() {
             if let Some(error_output) = self.run_verify_command(&verify_cmd, on_event) {
@@ -1882,6 +1936,44 @@ mod tests {
         assert!(
             combined.contains('·'),
             "missing pending indicator: {combined}"
+        );
+    }
+
+    #[test]
+    fn rebuild_index_for_file_no_op_when_store_is_none() {
+        let mut runtime = crate::runtime::tests::make_runtime(vec![] as Vec<String>);
+        // make_runtime has symbol_store = None by default.
+        let mut events: Vec<RuntimeEvent> = Vec::new();
+        runtime.rebuild_index_for_file(std::path::Path::new("/nonexistent/src/lib.rs"), &mut |e| {
+            events.push(e)
+        });
+        let failed = events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::Failed { .. }));
+        assert!(!failed, "rebuild must not emit Failed when store is None");
+    }
+
+    #[test]
+    fn rebuild_index_for_file_no_op_when_store_is_empty() {
+        let tmp_db = tempfile::NamedTempFile::new().unwrap();
+        let mut runtime = crate::runtime::tests::make_runtime(vec![] as Vec<String>)
+            .with_symbol_store(tmp_db.path());
+        let mut events: Vec<RuntimeEvent> = Vec::new();
+        // Store is initialized but empty (no symbols), so is_empty() returns true → bail.
+        runtime.rebuild_index_for_file(std::path::Path::new("/nonexistent/src/lib.rs"), &mut |e| {
+            events.push(e)
+        });
+        let failed = events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::Failed { .. }));
+        assert!(!failed, "rebuild must not emit Failed when store is empty");
+        // No SystemMessage either — rebuild is entirely silent on the empty-store path.
+        let system_msg = events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(_)));
+        assert!(
+            !system_msg,
+            "rebuild must not emit SystemMessage when store is empty"
         );
     }
 }

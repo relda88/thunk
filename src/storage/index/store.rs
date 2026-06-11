@@ -88,6 +88,86 @@ impl SymbolStore {
         Ok(())
     }
 
+    pub(crate) fn upsert_symbols_for_file(
+        &self,
+        project_root: &str,
+        file_path: &str,
+        symbols: &[ExtractedSymbol],
+    ) -> Result<()> {
+        let now = now_str();
+        self.conn
+            .execute(
+                "DELETE FROM index_symbols WHERE project_root = ?1 AND file_path = ?2",
+                params![project_root, file_path],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        for sym in symbols {
+            self.conn
+                .execute(
+                    "INSERT INTO index_symbols \
+                     (project_root, name, kind, file_path, line, col, signature, confidence, updated_at, parent_scope) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        project_root,
+                        sym.name,
+                        sym.kind.as_str(),
+                        sym.file_path,
+                        sym.line as i64,
+                        sym.col as i64,
+                        sym.signature,
+                        sym.confidence.as_str(),
+                        now,
+                        sym.parent_scope,
+                    ],
+                )
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn upsert_imports_for_file(
+        &self,
+        project_root: &str,
+        file_path: &str,
+        edges: &[ImportEdge],
+    ) -> Result<()> {
+        let now = now_str();
+        self.conn
+            .execute(
+                "DELETE FROM index_imports WHERE project_root = ?1 AND from_file = ?2",
+                params![project_root, file_path],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        for edge in edges {
+            self.conn
+                .execute(
+                    "INSERT INTO index_imports (project_root, from_file, to_file, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![project_root, edge.from_file, edge.to_file, now],
+                )
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Deletes embeddings for all symbols in `file_path`. Must be called before
+    /// `upsert_symbols_for_file` — the subquery depends on the symbol rows still existing.
+    pub(crate) fn delete_embeddings_for_file(
+        &self,
+        project_root: &str,
+        file_path: &str,
+    ) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM index_embeddings \
+                 WHERE project_root = ?1 \
+                 AND symbol_id IN (SELECT id FROM index_symbols WHERE project_root = ?1 AND file_path = ?2)",
+                params![project_root, file_path],
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(())
+    }
+
     pub(crate) fn lookup_symbol(
         &self,
         project_root: &str,
@@ -724,5 +804,100 @@ mod tests {
         let results = store.cosine_search("root", &query, 5).unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0], "src/foo.rs");
+    }
+
+    fn make_symbol_in(name: &str, file: &str) -> ExtractedSymbol {
+        ExtractedSymbol {
+            name: name.to_string(),
+            kind: SymbolKind::Function,
+            file_path: file.to_string(),
+            line: 1,
+            col: 1,
+            signature: format!("pub fn {name}()"),
+            confidence: SymbolConfidence::High,
+            parent_scope: None,
+        }
+    }
+
+    #[test]
+    fn upsert_symbols_for_file_is_idempotent() {
+        let store = in_memory();
+        // Seed one symbol in a different file so the project is non-empty.
+        store
+            .upsert_symbols_for_file(
+                "root",
+                "src/bar.rs",
+                &[make_symbol_in("bar_fn", "src/bar.rs")],
+            )
+            .unwrap();
+        // Upsert for the target file twice with identical content.
+        store
+            .upsert_symbols_for_file(
+                "root",
+                "src/foo.rs",
+                &[make_symbol_in("foo_fn", "src/foo.rs")],
+            )
+            .unwrap();
+        store
+            .upsert_symbols_for_file(
+                "root",
+                "src/foo.rs",
+                &[make_symbol_in("foo_fn", "src/foo.rs")],
+            )
+            .unwrap();
+        // Must be exactly 2 — bar's symbol + foo's symbol, no doubling.
+        assert_eq!(store.symbol_count("root").unwrap(), 2);
+    }
+
+    #[test]
+    fn delete_embeddings_for_file_leaves_other_files() {
+        let store = in_memory();
+        // Insert symbols for two different files.
+        store
+            .upsert_symbols_for_file(
+                "root",
+                "src/foo.rs",
+                &[make_symbol_in("foo_fn", "src/foo.rs")],
+            )
+            .unwrap();
+        store
+            .upsert_symbols_for_file(
+                "root",
+                "src/bar.rs",
+                &[make_symbol_in("bar_fn", "src/bar.rs")],
+            )
+            .unwrap();
+        let (foo_id, bar_id) = {
+            let mut stmt = store
+                .conn
+                .prepare(
+                    "SELECT id, file_path FROM index_symbols \
+                     WHERE project_root = 'root' ORDER BY id",
+                )
+                .unwrap();
+            let pairs: Vec<(i64, String)> = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            assert_eq!(pairs.len(), 2);
+            (pairs[0].0, pairs[1].0)
+        };
+        store
+            .upsert_embeddings(
+                "root",
+                &[
+                    (foo_id, vec![1.0f32, 0.0], "m".to_string()),
+                    (bar_id, vec![0.0f32, 1.0], "m".to_string()),
+                ],
+            )
+            .unwrap();
+        assert_eq!(store.embedding_count("root").unwrap(), 2);
+        // Delete only foo's embeddings.
+        store
+            .delete_embeddings_for_file("root", "src/foo.rs")
+            .unwrap();
+        // bar's embedding must survive.
+        assert_eq!(store.embedding_count("root").unwrap(), 1);
     }
 }
