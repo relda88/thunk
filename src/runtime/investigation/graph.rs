@@ -77,13 +77,8 @@ impl InvestigationGraph {
             let trimmed = line.trim_start();
 
             // Python: `import foo.bar.baz`
-            if trimmed.starts_with("import ") {
-                let rest = &trimmed["import ".len()..];
-                let module = rest
-                    .split(|c: char| c == ',' || c == ' ' || c == '#' || c == ';')
-                    .next()
-                    .unwrap_or("")
-                    .trim();
+            if let Some(rest) = trimmed.strip_prefix("import ") {
+                let module = rest.split([',', ' ', '#', ';']).next().unwrap_or("").trim();
                 if !module.is_empty() && !module.starts_with('.') {
                     let path = module.replace('.', "/");
                     if path.contains('/') {
@@ -109,8 +104,7 @@ impl InvestigationGraph {
             // the first component is not a known stdlib/crate-relative prefix.
             // In practice all current Rust imports are crate-relative or external, so
             // this branch records no candidates. Kept for future extension.
-            } else if trimmed.starts_with("use ") {
-                let rest = &trimmed["use ".len()..];
+            } else if let Some(rest) = trimmed.strip_prefix("use ") {
                 let component = rest
                     .split("::")
                     .next()

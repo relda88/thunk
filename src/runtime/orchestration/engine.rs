@@ -1372,7 +1372,7 @@ impl Runtime {
             return self.handle_no_tool_call(ctx, state, response, seeded_pre_generation, on_event);
         }
 
-        return self.dispatch_tool_round(ctx, state, calls, seeded_pre_generation, on_event);
+        self.dispatch_tool_round(ctx, state, calls, seeded_pre_generation, on_event)
     }
 
     fn dispatch_tool_round(
@@ -1800,10 +1800,7 @@ impl Runtime {
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) -> Option<String> {
         let mut cmd_parts = cmd.split_whitespace();
-        let program = match cmd_parts.next() {
-            Some(p) => p,
-            None => return None,
-        };
+        let program = cmd_parts.next()?;
         let args: Vec<&str> = cmd_parts.collect();
         on_event(RuntimeEvent::SystemMessage("verifying...".to_string()));
         match std::process::Command::new(program)
@@ -1853,9 +1850,7 @@ impl TurnContext {
         // Correction rounds are injected by the runtime after a cargo check failure.
         // They must be excluded from intent classification (no retrieval/mutation detection)
         // but must allow mutation so the model's corrective edit can go through the approval gate.
-        let is_correction_round = last_user
-            .as_deref()
-            .map_or(false, |c| c.starts_with("[runtime:correction]"));
+        let is_correction_round = last_user.is_some_and(|c| c.starts_with("[runtime:correction]"));
         let original_user_prompt = last_user.filter(|c| {
             !c.starts_with("=== tool_result:")
                 && !c.starts_with("=== tool_error:")

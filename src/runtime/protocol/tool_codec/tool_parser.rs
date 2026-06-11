@@ -438,7 +438,7 @@ fn find_label_line(block: &str, label: &str, start_at: usize) -> Option<(usize, 
 }
 
 fn trim_labeled_content(s: &str) -> String {
-    let s = s.trim_start_matches(|c| c == ' ' || c == '\t');
+    let s = s.trim_start_matches([' ', '\t']);
     trim_block_content(s)
 }
 

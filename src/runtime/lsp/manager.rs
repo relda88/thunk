@@ -57,7 +57,7 @@ impl LspManager {
     }
 
     pub fn is_running(&mut self) -> bool {
-        self.session.as_mut().map_or(false, |s| s.is_alive())
+        self.session.as_mut().is_some_and(|s| s.is_alive())
     }
 
     pub fn query_definition(

@@ -129,13 +129,8 @@ fn extract_imports_from_file(content: &str, file_path: &str, out: &mut Vec<Impor
         let trimmed = line.trim_start();
 
         // Python: `import foo.bar.baz`
-        if trimmed.starts_with("import ") {
-            let rest = &trimmed["import ".len()..];
-            let module = rest
-                .split(|c: char| c == ',' || c == ' ' || c == '#' || c == ';')
-                .next()
-                .unwrap_or("")
-                .trim();
+        if let Some(rest) = trimmed.strip_prefix("import ") {
+            let module = rest.split([',', ' ', '#', ';']).next().unwrap_or("").trim();
             if !module.is_empty() && !module.starts_with('.') {
                 let path = module.replace('.', "/");
                 if path.contains('/') {
@@ -167,8 +162,7 @@ fn extract_imports_from_file(content: &str, file_path: &str, out: &mut Vec<Impor
         // the first component is not a known stdlib/crate-relative prefix.
         // In practice all current Rust imports are crate-relative or external, so
         // this branch records no candidates. Kept for future extension.
-        } else if trimmed.starts_with("use ") {
-            let rest = &trimmed["use ".len()..];
+        } else if let Some(rest) = trimmed.strip_prefix("use ") {
             let component = rest
                 .split("::")
                 .next()
@@ -266,11 +260,7 @@ fn classify_line(line: &str, file_path: &str, line_no: usize) -> Option<Extracte
 
         let (name, confidence) = if matches!(kind, SymbolKind::Impl) {
             // "impl Foo" or "impl Trait for Foo" — take the last token before '{' or '<'.
-            let trimmed = rest
-                .split(|c| c == '{' || c == '<')
-                .next()
-                .unwrap_or(rest)
-                .trim();
+            let trimmed = rest.split(['{', '<']).next().unwrap_or(rest).trim();
             let name = trimmed.split_whitespace().last().unwrap_or("").to_string();
             if name.is_empty() {
                 continue;

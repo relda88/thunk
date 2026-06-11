@@ -448,7 +448,7 @@ fn path_from_bare_filename_explain_prompt(text: &str) -> Option<String> {
                     '`' | '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
                 )
             })
-            .trim_end_matches(|c: char| matches!(c, '.' | '?' | '!'));
+            .trim_end_matches(['.', '?', '!']);
 
         if stripped.is_empty() || stripped.contains('/') || stripped.contains('\\') {
             continue;
@@ -538,7 +538,7 @@ fn single_explicit_relative_file_path(text: &str) -> Option<String> {
                     '`' | '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '[' | ']' | '{' | '}'
                 )
             })
-            .trim_end_matches(|c: char| matches!(c, '.' | '?' | '!'));
+            .trim_end_matches(['.', '?', '!']);
 
         if !looks_like_explicit_relative_file_path(path) {
             continue;

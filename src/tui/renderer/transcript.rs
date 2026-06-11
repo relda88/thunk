@@ -27,7 +27,7 @@ impl Renderer {
                 }
             }
             let is_expanded = state.expanded_file_read
-                && state.last_file_read_index.map_or(false, |idx| i == idx)
+                && (state.last_file_read_index == Some(i))
                 && msg.role == Role::Assistant;
 
             let body_style = match msg.kind {

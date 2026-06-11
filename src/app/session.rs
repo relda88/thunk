@@ -315,7 +315,7 @@ fn extract_search_query(content: &str) -> Option<String> {
             let cleaned = query
                 .trim()
                 .trim_matches(|c: char| matches!(c, '`' | '"' | '\''))
-                .trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!' | '?'))
+                .trim_end_matches(['.', ',', ';', '!', '?'])
                 .trim();
             if !cleaned.is_empty() {
                 return Some(truncate_chars(cleaned, SUMMARY_ITEM_MAX_CHARS));
@@ -346,7 +346,7 @@ fn extract_file_references(content: &str) -> Vec<String> {
             .trim_start_matches("path:")
             .trim_start_matches("file:")
             .trim();
-        let cleaned = trimmed.trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!' | '?'));
+        let cleaned = trimmed.trim_end_matches(['.', ',', ';', '!', '?']);
         if cleaned.is_empty() || cleaned.contains("://") {
             continue;
         }

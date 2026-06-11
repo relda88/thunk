@@ -278,7 +278,7 @@ pub(crate) fn run_tool_round(
                     let best = investigation
                         .best_candidate_for_mode(investigation_mode)
                         .map(|s| s.to_string());
-                    let dispatch_possible = best.as_ref().map_or(false, |c| {
+                    let dispatch_possible = best.as_ref().is_some_and(|c| {
                         let normalized = normalize_evidence_path(c);
                         investigation.is_search_candidate_path(c)
                             && !reads_this_turn.contains(&normalized)
@@ -552,7 +552,7 @@ pub(crate) fn run_tool_round(
                     // candidate set, not already read this turn, and neither the per-turn
                     // read cap nor the per-investigation candidate-read cap is exhausted.
                     let dispatch_possible = attempts == 1
-                        && best.as_ref().map_or(false, |c| {
+                        && best.as_ref().is_some_and(|c| {
                             let normalized = normalize_evidence_path(c);
                             investigation.is_search_candidate_path(c)
                                 && !reads_this_turn.contains(&normalized)

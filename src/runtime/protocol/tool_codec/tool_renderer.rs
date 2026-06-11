@@ -306,7 +306,7 @@ fn render_search_results_grouped(
     for (file, group_matches) in groups {
         let total_in_file = group_matches.len();
         let shown = total_in_file.min(MAX_LINES_PER_FILE);
-        let is_exact_def = s.query.len() > 0
+        let is_exact_def = !s.query.is_empty()
             && group_matches
                 .iter()
                 .any(|m| is_exact_symbol_definition(&m.line, &s.query));

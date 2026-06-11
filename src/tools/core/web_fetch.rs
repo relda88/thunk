@@ -211,11 +211,10 @@ fn strip_html(html: &str) -> (String, String) {
                         | "th"
                 ) && !in_title
                     && skip_depth == 0
+                    && !last_was_space
                 {
-                    if !last_was_space {
-                        text.push(' ');
-                        last_was_space = true;
-                    }
+                    text.push(' ');
+                    last_was_space = true;
                 }
                 tag_buf.clear();
             } else {
@@ -234,16 +233,14 @@ fn strip_html(html: &str) -> (String, String) {
                 if skip_depth == 0 {
                     if in_title {
                         title.push(ec);
-                    } else {
-                        if ec == ' ' || ec == '\n' {
-                            if !last_was_space {
-                                text.push(' ');
-                                last_was_space = true;
-                            }
-                        } else {
-                            text.push(ec);
-                            last_was_space = false;
+                    } else if ec == ' ' || ec == '\n' {
+                        if !last_was_space {
+                            text.push(' ');
+                            last_was_space = true;
                         }
+                    } else {
+                        text.push(ec);
+                        last_was_space = false;
                     }
                 }
                 i += consumed;

@@ -102,7 +102,7 @@ impl Runtime {
         )));
 
         let chunk_size = 32;
-        let total_chunks = (symbols.len() + chunk_size - 1) / chunk_size;
+        let total_chunks = symbols.len().div_ceil(chunk_size);
         let total_symbols = symbols.len();
 
         self.pending_embed = Some(PendingEmbedState {

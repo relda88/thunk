@@ -83,12 +83,14 @@ impl Tool for ShellTool {
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let stdout = child.stdout.take().ok_or_else(|| {
-            ToolError::Io(Error::new(ErrorKind::Other, "failed to capture stdout"))
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            ToolError::Io(Error::new(ErrorKind::Other, "failed to capture stderr"))
-        })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| ToolError::Io(Error::other("failed to capture stdout")))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| ToolError::Io(Error::other("failed to capture stderr")))?;
 
         let stdout_reader = thread::spawn(move || read_all(stdout));
         let stderr_reader = thread::spawn(move || read_all(stderr));
@@ -130,12 +132,9 @@ impl Tool for ShellTool {
         };
 
         let _ = done_tx.send(());
-        timeout_thread.join().map_err(|_| {
-            ToolError::Io(Error::new(
-                ErrorKind::Other,
-                "shell timeout thread panicked",
-            ))
-        })?;
+        timeout_thread
+            .join()
+            .map_err(|_| ToolError::Io(Error::other("shell timeout thread panicked")))?;
 
         let mut combined = join_reader(stdout_reader)?;
         combined.extend(join_reader(stderr_reader)?);
@@ -174,7 +173,7 @@ fn read_all<R: Read>(mut reader: R) -> std::io::Result<Vec<u8>> {
 fn join_reader(handle: thread::JoinHandle<std::io::Result<Vec<u8>>>) -> Result<Vec<u8>, ToolError> {
     handle
         .join()
-        .map_err(|_| ToolError::Io(Error::new(ErrorKind::Other, "shell reader thread panicked")))?
+        .map_err(|_| ToolError::Io(Error::other("shell reader thread panicked")))?
         .map_err(ToolError::Io)
 }
 

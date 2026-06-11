@@ -177,11 +177,9 @@ pub(crate) fn initialize(conn: &Connection) -> Result<()> {
         // plans and plan_tasks tables — CREATE TABLE IF NOT EXISTS in SCHEMA handles migration
     }
 
-    if version < 7 {
-        if !has_column(conn, "index_symbols", "parent_scope")? {
-            conn.execute("ALTER TABLE index_symbols ADD COLUMN parent_scope TEXT", [])
-                .map_err(|e| AppError::Storage(e.to_string()))?;
-        }
+    if version < 7 && !has_column(conn, "index_symbols", "parent_scope")? {
+        conn.execute("ALTER TABLE index_symbols ADD COLUMN parent_scope TEXT", [])
+            .map_err(|e| AppError::Storage(e.to_string()))?;
     }
 
     if version < 8 {

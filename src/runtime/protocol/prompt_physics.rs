@@ -2,24 +2,13 @@ use super::abilities::AbilityContent;
 use super::skills::SkillContent;
 use crate::runtime::investigation::tool_surface::ToolSurface;
 
+#[derive(Default)]
 pub struct PromptPhysicsConfig {
     pub enabled: bool,
     pub compress_abilities: bool,
     pub thunk_md: Option<String>,
     pub active_ability: Option<AbilityContent>,
     pub active_skill: Option<SkillContent>,
-}
-
-impl Default for PromptPhysicsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            compress_abilities: false,
-            thunk_md: None,
-            active_ability: None,
-            active_skill: None,
-        }
-    }
 }
 
 pub fn primacy_anchor_block(config: &PromptPhysicsConfig) -> Option<String> {
