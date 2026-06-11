@@ -78,6 +78,10 @@ pub enum Command {
     /// /constrain on|off — session-scoped constrained output toggle.
     /// None = query current status.
     ConstrainedOutput(Option<bool>),
+    /// /compress on|off — session-scoped ability prompt compression toggle.
+    /// When enabled, injects only reasoning_effect instead of full invariants + specification.
+    /// None = query current status.
+    Compress(Option<bool>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -289,6 +293,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") | None => Some(Ok(Command::ConstrainedOutput(None))),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/compress" => match arg {
+            Some("on") => Some(Ok(Command::Compress(Some(true)))),
+            Some("off") => Some(Ok(Command::Compress(Some(false)))),
+            Some("status") | None => Some(Ok(Command::Compress(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -314,6 +324,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/clear",
         "/commit",
         "/compact",
+        "/compress",
         "/constrain",
         "/diff",
         "/context",
@@ -442,6 +453,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/plan",
             description: "create a structured plan from a goal (/plan <goal>)",
+        },
+        LauncherCommand {
+            name: "/compress",
+            description: "Toggle ability prompt compression (reasoning_effect only vs full block)",
         },
         LauncherCommand {
             name: "/constrain",
@@ -1025,5 +1040,31 @@ mod tests {
             parse("/constrain"),
             Some(Ok(Command::ConstrainedOutput(None)))
         );
+    }
+
+    #[test]
+    fn parses_compress_on() {
+        assert_eq!(
+            parse("/compress on"),
+            Some(Ok(Command::Compress(Some(true))))
+        );
+    }
+
+    #[test]
+    fn parses_compress_off() {
+        assert_eq!(
+            parse("/compress off"),
+            Some(Ok(Command::Compress(Some(false))))
+        );
+    }
+
+    #[test]
+    fn parses_compress_status() {
+        assert_eq!(parse("/compress status"), Some(Ok(Command::Compress(None))));
+    }
+
+    #[test]
+    fn parses_compress_bare() {
+        assert_eq!(parse("/compress"), Some(Ok(Command::Compress(None))));
     }
 }

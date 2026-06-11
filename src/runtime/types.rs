@@ -285,6 +285,12 @@ pub enum RuntimeRequest {
     ConstrainedOutputToggle {
         enabled: Option<bool>,
     },
+    /// Session-scoped ability prompt compression toggle. Some(true) enables, Some(false) disables,
+    /// None queries current status. When enabled, primacy anchor injects only reasoning_effect
+    /// instead of the full invariants + specification block. Does not mutate conversation.
+    CompressToggle {
+        enabled: Option<bool>,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

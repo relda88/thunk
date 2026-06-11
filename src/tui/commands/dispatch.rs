@@ -119,6 +119,9 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::ConstrainedOutput(enabled) => {
             CommandAction::Runtime(RuntimeRequest::ConstrainedOutputToggle { enabled })
         }
+        Command::Compress(enabled) => {
+            CommandAction::Runtime(RuntimeRequest::CompressToggle { enabled })
+        }
     }
 }
 

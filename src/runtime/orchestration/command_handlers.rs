@@ -958,6 +958,52 @@ impl Runtime {
         }
     }
 
+    pub(super) fn handle_compress_toggle(
+        &mut self,
+        enabled: Option<bool>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match enabled {
+            Some(true) => {
+                self.prompt_physics.compress_abilities = true;
+                trace_runtime_decision(
+                    on_event,
+                    "prompt_compression_toggled",
+                    &[("enabled", "true".into())],
+                );
+                let msg = if self.prompt_physics.active_ability.is_some() {
+                    "compression: enabled"
+                } else {
+                    "compression: enabled (no active ability — no-op)"
+                };
+                on_event(RuntimeEvent::SystemMessage(msg.to_string()));
+            }
+            Some(false) => {
+                self.prompt_physics.compress_abilities = false;
+                trace_runtime_decision(
+                    on_event,
+                    "prompt_compression_toggled",
+                    &[("enabled", "false".into())],
+                );
+                on_event(RuntimeEvent::SystemMessage(
+                    "compression: disabled".to_string(),
+                ));
+            }
+            None => {
+                let status = if self.prompt_physics.compress_abilities {
+                    if self.prompt_physics.active_ability.is_some() {
+                        "compression: enabled"
+                    } else {
+                        "compression: enabled (no active ability — no-op)"
+                    }
+                } else {
+                    "compression: disabled"
+                };
+                on_event(RuntimeEvent::SystemMessage(status.to_string()));
+            }
+        }
+    }
+
     pub(super) fn handle_ability_toggle(
         &mut self,
         name: Option<String>,

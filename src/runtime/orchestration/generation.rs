@@ -67,6 +67,12 @@ pub(super) fn run_generate_turn(
         if has_recency {
             components.push("recency");
         }
+        if has_primacy
+            && prompt_physics.compress_abilities
+            && prompt_physics.active_ability.is_some()
+        {
+            components.push("compression");
+        }
         if !components.is_empty() {
             trace_runtime_decision(
                 on_event,

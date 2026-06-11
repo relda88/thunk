@@ -4,6 +4,7 @@ use crate::runtime::investigation::tool_surface::ToolSurface;
 
 pub struct PromptPhysicsConfig {
     pub enabled: bool,
+    pub compress_abilities: bool,
     pub thunk_md: Option<String>,
     pub active_ability: Option<AbilityContent>,
     pub active_skill: Option<SkillContent>,
@@ -13,6 +14,7 @@ impl Default for PromptPhysicsConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            compress_abilities: false,
             thunk_md: None,
             active_ability: None,
             active_skill: None,
@@ -32,10 +34,17 @@ pub fn primacy_anchor_block(config: &PromptPhysicsConfig) -> Option<String> {
     }
 
     if let Some(ability) = &config.active_ability {
-        parts.push(format!(
-            "[ability: {}]\n{}\n\n{}\n[/ability: {}]",
-            ability.name, ability.invariants, ability.specification, ability.name,
-        ));
+        if config.compress_abilities {
+            parts.push(format!(
+                "[ability: {}]\n{}\n[/ability: {}]",
+                ability.name, ability.reasoning_effect, ability.name,
+            ));
+        } else {
+            parts.push(format!(
+                "[ability: {}]\n{}\n\n{}\n[/ability: {}]",
+                ability.name, ability.invariants, ability.specification, ability.name,
+            ));
+        }
     }
 
     if parts.is_empty() {
@@ -365,5 +374,70 @@ mod tests {
             ..Default::default()
         };
         assert!(periodic_refresh_message(&config).is_none());
+    }
+
+    #[test]
+    fn primacy_anchor_compressed_injects_reasoning_effect_only() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            compress_abilities: true,
+            active_ability: Some(AbilityContent {
+                name: "debug".into(),
+                invariants: "test invariants".into(),
+                specification: "test specification".into(),
+                reasoning_effect: "test reasoning effect".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = primacy_anchor_block(&config).unwrap();
+        assert!(result.contains("[ability: debug]"));
+        assert!(result.contains("[/ability: debug]"));
+        assert!(result.contains("test reasoning effect"));
+        assert!(
+            !result.contains("test invariants"),
+            "invariants must not appear when compressed"
+        );
+        assert!(
+            !result.contains("test specification"),
+            "specification must not appear when compressed"
+        );
+    }
+
+    #[test]
+    fn primacy_anchor_uncompressed_injects_full_block() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            compress_abilities: false,
+            active_ability: Some(AbilityContent {
+                name: "debug".into(),
+                invariants: "test invariants".into(),
+                specification: "test specification".into(),
+                reasoning_effect: "test reasoning effect".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let result = primacy_anchor_block(&config).unwrap();
+        assert!(result.contains("test invariants"));
+        assert!(result.contains("test specification"));
+        assert!(result.contains("[ability: debug]"));
+    }
+
+    #[test]
+    fn primacy_anchor_compress_flag_with_no_ability_is_noop() {
+        let config = PromptPhysicsConfig {
+            enabled: true,
+            compress_abilities: true,
+            thunk_md: Some("rules".into()),
+            active_ability: None,
+            ..Default::default()
+        };
+        let result = primacy_anchor_block(&config).unwrap();
+        assert!(result.contains("[project rules]"));
+        assert!(
+            !result.contains("[ability:"),
+            "no ability block when no ability active"
+        );
     }
 }

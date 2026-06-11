@@ -203,6 +203,7 @@ impl Runtime {
         let specs = registry.specs();
         let prompt_physics = PromptPhysicsConfig {
             enabled: config.prompt_physics.enabled,
+            compress_abilities: config.prompt_physics.compress_abilities,
             thunk_md,
             active_ability: None,
             active_skill: None,
@@ -431,6 +432,9 @@ impl Runtime {
             RuntimeRequest::RetrievalLog { n } => self.handle_retrieval_log(n, on_event),
             RuntimeRequest::ConstrainedOutputToggle { enabled } => {
                 self.handle_constrained_output_toggle(enabled, on_event)
+            }
+            RuntimeRequest::CompressToggle { enabled } => {
+                self.handle_compress_toggle(enabled, on_event)
             }
         }
     }

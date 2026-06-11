@@ -220,6 +220,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::InvestigationDepthToggle { .. } => "investigation_depth_toggle",
         RuntimeRequest::RetrievalLog { .. } => "retrieval_log",
         RuntimeRequest::ConstrainedOutputToggle { .. } => "constrained_output_toggle",
+        RuntimeRequest::CompressToggle { .. } => "compress_toggle",
     }
 }
 

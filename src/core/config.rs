@@ -195,15 +195,21 @@ impl Default for LspConfig {
 
 /// Prompt physics injection settings.
 /// Enabled by default — set `[prompt_physics]\nenabled = false` to opt out.
+/// Set `compress_abilities = true` to inject only reasoning_effect instead of full
+/// invariants + specification in the primacy anchor.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct PromptPhysicsSettings {
     pub enabled: bool,
+    pub compress_abilities: bool,
 }
 
 impl Default for PromptPhysicsSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            compress_abilities: false,
+        }
     }
 }
 
