@@ -1322,11 +1322,22 @@ impl Runtime {
                 }
             };
 
+            let mut before_syms: Vec<(String, String)> = Vec::new();
+            let seq_rel_path: Option<String> = step
+                .file
+                .strip_prefix(self.project_root.path())
+                .ok()
+                .map(|r| r.to_string_lossy().replace('\\', "/"));
             if let Some(store) = &self.symbol_store {
                 let project_root = self.project_root.path().to_string_lossy().to_string();
-                if let Ok(rel) = step.file.strip_prefix(self.project_root.path()) {
-                    let rel_path = rel.to_string_lossy().replace('\\', "/");
-                    if let Ok(importers) = store.importers_of(&project_root, &rel_path, 10) {
+                if let Some(ref rel_path) = seq_rel_path {
+                    before_syms = store
+                        .symbols_for_file(&project_root, rel_path)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|s| (s.name, s.signature))
+                        .collect();
+                    if let Ok(importers) = store.importers_of(&project_root, rel_path, 10) {
                         if !importers.is_empty() {
                             on_event(RuntimeEvent::SystemMessage(format!(
                                 "affects: {}",
@@ -1398,12 +1409,39 @@ impl Runtime {
             }
 
             let diff_preview = crate::runtime::diff::render_diff(&original, &patched);
-            on_event(RuntimeEvent::SystemMessage(format!(
-                "Step {} applied and verified: {}\n{}",
-                step.position,
-                step.file.display(),
-                diff_preview
-            )));
+            let sig_diff_part = if let Some(ref rel_path) = seq_rel_path {
+                if let Some(store) = &self.symbol_store {
+                    let root = self.project_root.path().to_string_lossy();
+                    let after_syms: Vec<(String, String)> = store
+                        .symbols_for_file(&root, rel_path)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|s| (s.name, s.signature))
+                        .collect();
+                    diff_symbol_signatures(&before_syms, &after_syms)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let step_msg = if let Some(sig_diff) = sig_diff_part {
+                format!(
+                    "Step {} applied and verified: {}\n{}\n{}",
+                    step.position,
+                    step.file.display(),
+                    diff_preview,
+                    sig_diff
+                )
+            } else {
+                format!(
+                    "Step {} applied and verified: {}\n{}",
+                    step.position,
+                    step.file.display(),
+                    diff_preview
+                )
+            };
+            on_event(RuntimeEvent::SystemMessage(step_msg));
 
             // Best-effort git checkpoint — errors do not abort the sequence.
             let root = self.project_root.path().to_path_buf();
@@ -1965,6 +2003,61 @@ fn toposort_steps(
         .collect()
 }
 
+pub(super) fn diff_symbol_signatures(
+    before: &[(String, String)],
+    after: &[(String, String)],
+) -> Option<String> {
+    use std::collections::HashMap;
+    let before_map: HashMap<&str, &str> = before
+        .iter()
+        .map(|(n, s)| (n.as_str(), s.as_str()))
+        .collect();
+    let after_map: HashMap<&str, &str> = after
+        .iter()
+        .map(|(n, s)| (n.as_str(), s.as_str()))
+        .collect();
+
+    let mut changed = Vec::new();
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+
+    for (name, before_sig) in &before_map {
+        match after_map.get(name) {
+            Some(after_sig) if after_sig != before_sig => {
+                changed.push(format!(
+                    "  {name}\n    before: {before_sig}\n    after:  {after_sig}"
+                ));
+            }
+            None => removed.push(name.to_string()),
+            _ => {}
+        }
+    }
+    for name in after_map.keys() {
+        if !before_map.contains_key(name) {
+            added.push(name.to_string());
+        }
+    }
+
+    if changed.is_empty() && added.is_empty() && removed.is_empty() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    if !changed.is_empty() {
+        changed.sort();
+        parts.push(format!("Signature changed:\n{}", changed.join("\n")));
+    }
+    if !added.is_empty() {
+        added.sort();
+        parts.push(format!("Added: {}", added.join(", ")));
+    }
+    if !removed.is_empty() {
+        removed.sort();
+        parts.push(format!("Removed: {}", removed.join(", ")));
+    }
+    Some(parts.join("\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -2211,5 +2304,49 @@ mod tests {
             vec!["src/a.rs", "src/b.rs"],
             "cycle must preserve original order"
         );
+    }
+
+    #[test]
+    fn diff_symbol_signatures_detects_changed_added_removed() {
+        let before = vec![
+            ("foo".to_string(), "pub fn foo()".to_string()),
+            ("bar".to_string(), "pub fn bar()".to_string()),
+            ("gone".to_string(), "pub fn gone()".to_string()),
+        ];
+        let after = vec![
+            ("foo".to_string(), "pub fn foo(x: u32)".to_string()),
+            ("bar".to_string(), "pub fn bar()".to_string()),
+            ("new_fn".to_string(), "pub fn new_fn()".to_string()),
+        ];
+        let result = super::diff_symbol_signatures(&before, &after).unwrap();
+        assert!(result.contains("foo"), "changed symbol must appear");
+        assert!(result.contains("pub fn foo()"), "before sig must appear");
+        assert!(
+            result.contains("pub fn foo(x: u32)"),
+            "after sig must appear"
+        );
+        assert!(result.contains("new_fn"), "added symbol must appear");
+        assert!(result.contains("gone"), "removed symbol must appear");
+        assert!(!result.contains("bar"), "unchanged symbol must not appear");
+    }
+
+    #[test]
+    fn diff_symbol_signatures_returns_none_when_unchanged() {
+        let syms = vec![
+            ("a".to_string(), "pub fn a()".to_string()),
+            ("b".to_string(), "pub fn b()".to_string()),
+        ];
+        assert!(
+            super::diff_symbol_signatures(&syms, &syms).is_none(),
+            "identical sets must return None"
+        );
+    }
+
+    #[test]
+    fn diff_symbol_signatures_all_added_for_empty_before() {
+        let after = vec![("new".to_string(), "pub fn new()".to_string())];
+        let result = super::diff_symbol_signatures(&[], &after).unwrap();
+        assert!(result.contains("new"));
+        assert!(result.contains("Added"));
     }
 }

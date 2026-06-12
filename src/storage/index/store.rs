@@ -203,6 +203,41 @@ impl SymbolStore {
         Ok(out)
     }
 
+    pub(crate) fn symbols_for_file(
+        &self,
+        project_root: &str,
+        file_path: &str,
+    ) -> Result<Vec<SymbolRecord>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT name, kind, file_path, line, col, signature, confidence, parent_scope \
+                 FROM index_symbols WHERE project_root = ?1 AND file_path = ?2",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![project_root, file_path], |row| {
+                Ok(SymbolRecord {
+                    name: row.get(0)?,
+                    kind: row.get(1)?,
+                    file_path: row.get(2)?,
+                    line: row.get::<_, i64>(3)? as usize,
+                    col: row.get::<_, i64>(4)? as usize,
+                    signature: row.get(5)?,
+                    confidence: row.get(6)?,
+                    parent_scope: row.get(7)?,
+                })
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+        Ok(out)
+    }
+
     pub(crate) fn is_empty(&self, project_root: &str) -> Result<bool> {
         let count: i64 = self
             .conn
@@ -635,6 +670,56 @@ mod tests {
         store.upsert_symbols("root", &[make_symbol("x")]).unwrap();
         let results = store.lookup_symbol("root", "nonexistent").unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn symbols_for_file_returns_only_matching_file() {
+        let store = in_memory();
+        let sym_a = ExtractedSymbol {
+            name: "foo".to_string(),
+            kind: SymbolKind::Function,
+            file_path: "src/foo.rs".to_string(),
+            line: 1,
+            col: 1,
+            signature: "pub fn foo()".to_string(),
+            confidence: SymbolConfidence::High,
+            parent_scope: None,
+        };
+        let sym_b = ExtractedSymbol {
+            name: "bar".to_string(),
+            kind: SymbolKind::Function,
+            file_path: "src/foo.rs".to_string(),
+            line: 5,
+            col: 1,
+            signature: "pub fn bar()".to_string(),
+            confidence: SymbolConfidence::High,
+            parent_scope: None,
+        };
+        let sym_other = ExtractedSymbol {
+            name: "baz".to_string(),
+            kind: SymbolKind::Function,
+            file_path: "src/bar.rs".to_string(),
+            line: 1,
+            col: 1,
+            signature: "pub fn baz()".to_string(),
+            confidence: SymbolConfidence::High,
+            parent_scope: None,
+        };
+        store
+            .upsert_symbols("root", &[sym_a, sym_b, sym_other])
+            .unwrap();
+        let results = store.symbols_for_file("root", "src/foo.rs").unwrap();
+        assert_eq!(results.len(), 2);
+        let mut names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, ["bar", "foo"]);
+        let none = store.symbols_for_file("root", "src/bar.rs").unwrap();
+        assert_eq!(none.len(), 1);
+        assert_eq!(none[0].name, "baz");
+        let empty = store
+            .symbols_for_file("root", "src/nonexistent.rs")
+            .unwrap();
+        assert!(empty.is_empty());
     }
 
     #[test]

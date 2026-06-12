@@ -858,9 +858,26 @@ impl Runtime {
             detail: None,
         }));
 
+        let mut before_syms: Vec<(String, String)> = Vec::new();
+        let mut single_rel_path: Option<String> = None;
         if matches!(tool_name.as_str(), "edit_file" | "write_file") {
             if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
                 let before = std::fs::read_to_string(&abs_path).unwrap_or_default();
+                if let Some(store) = &self.symbol_store {
+                    if let Ok(rel) =
+                        std::path::Path::new(&abs_path).strip_prefix(self.project_root.path())
+                    {
+                        let rel = rel.to_string_lossy().replace('\\', "/");
+                        let root = self.project_root.path().to_string_lossy();
+                        before_syms = store
+                            .symbols_for_file(&root, &rel)
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|s| (s.name, s.signature))
+                            .collect();
+                        single_rel_path = Some(rel);
+                    }
+                }
                 self.undo_stack.push((abs_path, before));
                 if self.undo_stack.len() > 5 {
                     self.undo_stack.remove(0);
@@ -874,6 +891,23 @@ impl Runtime {
                 if matches!(tool_name.as_str(), "edit_file" | "write_file") {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
                         self.rebuild_index_for_file(std::path::Path::new(&abs_path), on_event);
+                        if let Some(ref rel_path) = single_rel_path {
+                            if let Some(store) = &self.symbol_store {
+                                let root = self.project_root.path().to_string_lossy();
+                                let after_syms: Vec<(String, String)> = store
+                                    .symbols_for_file(&root, rel_path)
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .map(|s| (s.name, s.signature))
+                                    .collect();
+                                if let Some(diff) = command_handlers::diff_symbol_signatures(
+                                    &before_syms,
+                                    &after_syms,
+                                ) {
+                                    on_event(RuntimeEvent::SystemMessage(diff));
+                                }
+                            }
+                        }
                     }
                 }
                 let summary = tool_codec::render_compact_summary(&output);
@@ -1077,10 +1111,27 @@ impl Runtime {
         // Files that do not exist yet (write_file creating a new file) get an empty snapshot;
         // restoring them is a no-op if the write was the first action to fail.
         let mut snapshots: Vec<(String, String)> = Vec::new();
+        let mut before_syms_map: std::collections::HashMap<String, Vec<(String, String)>> =
+            std::collections::HashMap::new();
         for action in &tx.actions {
             if matches!(action.tool_name.as_str(), "edit_file" | "write_file") {
                 if let Some(abs_path) = extract_absolute_path_from_payload(&action.payload) {
                     let before = std::fs::read_to_string(&abs_path).unwrap_or_default();
+                    if let Some(store) = &self.symbol_store {
+                        if let Ok(rel) =
+                            std::path::Path::new(&abs_path).strip_prefix(self.project_root.path())
+                        {
+                            let rel = rel.to_string_lossy().replace('\\', "/");
+                            let root = self.project_root.path().to_string_lossy();
+                            let syms: Vec<(String, String)> = store
+                                .symbols_for_file(&root, &rel)
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|s| (s.name, s.signature))
+                                .collect();
+                            before_syms_map.insert(rel, syms);
+                        }
+                    }
                     snapshots.push((abs_path, before));
                 }
             }
@@ -1101,6 +1152,28 @@ impl Runtime {
                         if let Some(abs_path) = extract_absolute_path_from_payload(&action.payload)
                         {
                             self.rebuild_index_for_file(std::path::Path::new(&abs_path), on_event);
+                            if let Ok(rel) = std::path::Path::new(&abs_path)
+                                .strip_prefix(self.project_root.path())
+                            {
+                                let rel = rel.to_string_lossy().replace('\\', "/");
+                                if let Some(store) = &self.symbol_store {
+                                    let root = self.project_root.path().to_string_lossy();
+                                    let after_syms: Vec<(String, String)> = store
+                                        .symbols_for_file(&root, &rel)
+                                        .unwrap_or_default()
+                                        .into_iter()
+                                        .map(|s| (s.name, s.signature))
+                                        .collect();
+                                    let before =
+                                        before_syms_map.get(&rel).cloned().unwrap_or_default();
+                                    if let Some(diff) = command_handlers::diff_symbol_signatures(
+                                        &before,
+                                        &after_syms,
+                                    ) {
+                                        on_event(RuntimeEvent::SystemMessage(diff));
+                                    }
+                                }
+                            }
                         }
                     }
                     let summary = tool_codec::render_compact_summary(&output);
