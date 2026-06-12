@@ -329,6 +329,8 @@ pub enum RuntimeEvent {
     ApprovalRequired {
         pending: PendingAction,
         evidence: Vec<String>,
+        /// Files that import the mutation target — informational only, never gates approval.
+        impact: Vec<String>,
     },
     /// Fired when multiple mutating tools in a single turn require grouped approval.
     /// The turn is paused until RuntimeRequest::Approve or Reject is received.
@@ -336,6 +338,8 @@ pub enum RuntimeEvent {
     TransactionApprovalRequired {
         actions: Vec<PendingAction>,
         evidence: Vec<String>,
+        /// Files that import the mutation target — informational only, never gates approval.
+        impact: Vec<String>,
     },
     AnswerReady(AnswerSource),
     Failed {

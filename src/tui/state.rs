@@ -56,6 +56,9 @@ pub(crate) struct PendingApprovalState {
     /// For multi-file transactions: list of affected file paths (display form).
     /// Empty for single-action approvals.
     pub(crate) transaction_files: Vec<String>,
+    /// Files that import the mutation target — informational only, never gates approval.
+    /// Empty when no importers are known or index is unavailable.
+    pub(crate) impact: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -558,6 +561,7 @@ mod tests {
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
         assert!(state.pending_approval.is_some());
 

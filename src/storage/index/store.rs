@@ -316,6 +316,33 @@ impl SymbolStore {
         Ok(out)
     }
 
+    pub(crate) fn importers_of(
+        &self,
+        project_root: &str,
+        to_file: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT from_file FROM index_imports \
+                 WHERE project_root = ?1 AND to_file = ?2 LIMIT ?3",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![project_root, to_file, limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+        Ok(out)
+    }
+
     pub(crate) fn all_symbols_ranked(&self, project_root: &str) -> Result<Vec<(i64, String)>> {
         let mut stmt = self
             .conn
@@ -684,6 +711,38 @@ mod tests {
             all.is_empty(),
             "must not return edges for a different project root"
         );
+    }
+
+    #[test]
+    fn importers_of_returns_files_that_import_target() {
+        let store = in_memory();
+        let edges = vec![
+            ImportEdge {
+                from_file: "src/a.rs".to_string(),
+                to_file: "src/foo.rs".to_string(),
+            },
+            ImportEdge {
+                from_file: "src/b.rs".to_string(),
+                to_file: "src/foo.rs".to_string(),
+            },
+            ImportEdge {
+                from_file: "src/c.rs".to_string(),
+                to_file: "src/bar.rs".to_string(),
+            },
+        ];
+        store.upsert_imports("root", &edges).unwrap();
+
+        let importers = store.importers_of("root", "src/foo.rs", 10).unwrap();
+        assert_eq!(importers.len(), 2);
+        assert!(importers.contains(&"src/a.rs".to_string()));
+        assert!(importers.contains(&"src/b.rs".to_string()));
+
+        let none = store.importers_of("root", "src/bar.rs", 10).unwrap();
+        assert_eq!(none.len(), 1);
+        assert!(none.contains(&"src/c.rs".to_string()));
+
+        let empty = store.importers_of("root", "src/unknown.rs", 10).unwrap();
+        assert!(empty.is_empty());
     }
 
     #[test]

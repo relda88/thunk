@@ -203,6 +203,7 @@ impl Runtime {
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],
+                    impact: vec![],
                 });
             }
             Err(e) => {
@@ -442,6 +443,7 @@ impl Runtime {
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],
+                    impact: vec![],
                 });
             }
             Ok(ToolRunResult::Immediate(_)) => {
@@ -1309,6 +1311,21 @@ impl Runtime {
                     return;
                 }
             };
+
+            if let Some(store) = &self.symbol_store {
+                let project_root = self.project_root.path().to_string_lossy().to_string();
+                if let Ok(rel) = step.file.strip_prefix(self.project_root.path()) {
+                    let rel_path = rel.to_string_lossy().replace('\\', "/");
+                    if let Ok(importers) = store.importers_of(&project_root, &rel_path, 10) {
+                        if !importers.is_empty() {
+                            on_event(RuntimeEvent::SystemMessage(format!(
+                                "affects: {}",
+                                importers.join(", ")
+                            )));
+                        }
+                    }
+                }
+            }
 
             let patch_text = format!(
                 "<<<<<<< SEARCH\n{}\n=======\n{}\n>>>>>>> REPLACE\n",

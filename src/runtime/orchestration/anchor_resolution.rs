@@ -98,6 +98,7 @@ impl Runtime {
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],
+                    impact: vec![],
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
@@ -117,6 +118,7 @@ impl Runtime {
                 on_event(RuntimeEvent::TransactionApprovalRequired {
                     actions,
                     evidence: vec![],
+                    impact: vec![],
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
@@ -228,6 +230,7 @@ impl Runtime {
                 on_event(RuntimeEvent::ApprovalRequired {
                     pending,
                     evidence: vec![],
+                    impact: vec![],
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }

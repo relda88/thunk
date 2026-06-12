@@ -134,6 +134,7 @@ impl Renderer {
             1 + a.transaction_files.len().min(6) as u16
                 + a.evidence.len().min(4) as u16
                 + a.preview.len().min(4) as u16
+                + if a.impact.is_empty() { 0 } else { 1 }
                 + 1
         });
         let plan_rows: u16 = state
@@ -569,6 +570,16 @@ impl Renderer {
         }
         offset += evidence_count as u16;
 
+        if !approval.impact.is_empty() {
+            let joined = approval.impact.join(", ");
+            let display: String = format!("  ↳ affects: {joined}")
+                .chars()
+                .take(w as usize)
+                .collect();
+            self.paint(cur, 0, first_row + offset, &display, w, dim);
+            offset += 1;
+        }
+
         self.paint(
             cur,
             0,
@@ -836,6 +847,7 @@ mod tests {
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -871,6 +883,7 @@ mod tests {
             evidence: vec!["some evidence".to_string()],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -904,6 +917,7 @@ mod tests {
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -939,6 +953,7 @@ mod tests {
                 evidence: (0..count).map(|i| format!("ev{}", i)).collect(),
                 preview: vec![],
                 transaction_files: vec![],
+                impact: vec![],
             });
             let mut renderer = Renderer::new(80, 24);
             let mut out = Vec::<u8>::new();

@@ -1049,3 +1049,135 @@ fn transaction_rolls_back_on_failure() {
         "file_a.py must be rolled back to original content"
     );
 }
+
+#[test]
+fn edit_file_approval_carries_impact_when_importer_exists() {
+    use rusqlite::Connection;
+    use tempfile::{NamedTempFile, TempDir};
+
+    use crate::runtime::ProjectRoot;
+    use crate::storage::index::types::ImportEdge;
+    use crate::storage::index::SymbolStore;
+    use crate::storage::session::schema;
+
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(tmp.path().join("src/target.rs"), "fn foo() {}\n").unwrap();
+
+    // Initialize DB and seed an importer edge before the runtime opens it.
+    let db_file = NamedTempFile::new().unwrap();
+    {
+        let conn = Connection::open(db_file.path()).unwrap();
+        schema::initialize(&conn).unwrap();
+    }
+    let store = SymbolStore::open(db_file.path()).unwrap();
+    let canonical_root = tmp.path().canonicalize().unwrap();
+    let root_str = canonical_root.to_string_lossy().to_string();
+    store
+        .upsert_imports(
+            &root_str,
+            &[ImportEdge {
+                from_file: "src/importer.rs".to_string(),
+                to_file: "src/target.rs".to_string(),
+            }],
+        )
+        .unwrap();
+    drop(store);
+
+    let project_root = ProjectRoot::new(tmp.path().to_path_buf()).unwrap();
+    let mut rt = Runtime::new(
+        &Config::default(),
+        project_root.clone(),
+        Box::new(TestBackend::new(vec![
+            "[edit_file]\npath: src/target.rs\n---search---\nfn foo() {}\n---replace---\nfn bar() {}\n[/edit_file]",
+        ])),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+        tmp.path().to_path_buf(),
+        "test-impact".to_string(),
+    )
+    .with_symbol_store(db_file.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "replace foo with bar in src/target.rs".into(),
+        },
+    );
+
+    let impact = events.iter().find_map(|e| {
+        if let RuntimeEvent::ApprovalRequired { impact, .. } = e {
+            Some(impact.clone())
+        } else {
+            None
+        }
+    });
+
+    assert!(impact.is_some(), "expected ApprovalRequired event");
+    let impact = impact.unwrap();
+    assert!(
+        !impact.is_empty(),
+        "expected non-empty impact for file with known importer"
+    );
+    assert!(
+        impact.contains(&"src/importer.rs".to_string()),
+        "impact must list the importer file; got: {impact:?}"
+    );
+}
+
+#[test]
+fn edit_file_approval_has_empty_impact_when_no_importers() {
+    use rusqlite::Connection;
+    use tempfile::{NamedTempFile, TempDir};
+
+    use crate::runtime::ProjectRoot;
+    use crate::storage::index::SymbolStore;
+    use crate::storage::session::schema;
+
+    let tmp = TempDir::new().unwrap();
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(tmp.path().join("src/isolated.rs"), "fn foo() {}\n").unwrap();
+
+    let db_file = NamedTempFile::new().unwrap();
+    {
+        let conn = Connection::open(db_file.path()).unwrap();
+        schema::initialize(&conn).unwrap();
+    }
+    // No edges seeded — isolated.rs has no importers.
+    drop(SymbolStore::open(db_file.path()).unwrap());
+
+    let project_root = ProjectRoot::new(tmp.path().to_path_buf()).unwrap();
+    let mut rt = Runtime::new(
+        &Config::default(),
+        project_root.clone(),
+        Box::new(TestBackend::new(vec![
+            "[edit_file]\npath: src/isolated.rs\n---search---\nfn foo() {}\n---replace---\nfn bar() {}\n[/edit_file]",
+        ])),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+        tmp.path().to_path_buf(),
+        "test-no-impact".to_string(),
+    )
+    .with_symbol_store(db_file.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "replace foo with bar in src/isolated.rs".into(),
+        },
+    );
+
+    let impact = events.iter().find_map(|e| {
+        if let RuntimeEvent::ApprovalRequired { impact, .. } = e {
+            Some(impact.clone())
+        } else {
+            None
+        }
+    });
+
+    assert!(impact.is_some(), "expected ApprovalRequired event");
+    assert!(
+        impact.unwrap().is_empty(),
+        "expected empty impact for file with no importers"
+    );
+}

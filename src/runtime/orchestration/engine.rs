@@ -803,6 +803,7 @@ impl Runtime {
                                             on_event(RuntimeEvent::ApprovalRequired {
                                                 pending,
                                                 evidence,
+                                                impact: vec![],
                                             });
                                             return;
                                         }
@@ -1008,6 +1009,7 @@ impl Runtime {
                                     on_event(RuntimeEvent::ApprovalRequired {
                                         pending,
                                         evidence: vec![],
+                                        impact: vec![],
                                     });
                                 }
                                 Ok(ToolRunResult::Immediate(output)) => {
@@ -1225,6 +1227,32 @@ impl Runtime {
             },
             on_event,
         );
+    }
+
+    /// Returns the list of files that import the mutation target from the pending approval.
+    /// Only meaningful for edit_file and write_file; returns empty for all others.
+    /// Query failure degrades silently — never surfaces as Failed.
+    fn impact_for_pending(&self, pending: &PendingAction) -> Vec<String> {
+        if !matches!(pending.tool_name.as_str(), "edit_file" | "write_file") {
+            return vec![];
+        }
+        let Some(store) = &self.symbol_store else {
+            return vec![];
+        };
+        // Payload format: v2\x00{absolute_path}\x00...
+        let parts: Vec<&str> = pending.payload.splitn(3, '\x00').collect();
+        if parts.len() < 2 {
+            return vec![];
+        }
+        let abs_path = std::path::Path::new(parts[1]);
+        let rel_path = match abs_path.strip_prefix(self.project_root.path()) {
+            Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+            Err(_) => return vec![],
+        };
+        let project_root = self.project_root.path().to_string_lossy();
+        store
+            .importers_of(&project_root, &rel_path, 10)
+            .unwrap_or_default()
     }
 
     /// Runs the generate -> tool-round loop until the model produces a final answer,
@@ -1563,7 +1591,12 @@ impl Runtime {
                     PendingTransaction::single(pending.clone()),
                 ));
                 let evidence = state.investigation.evidence_summary();
-                on_event(RuntimeEvent::ApprovalRequired { pending, evidence });
+                let impact = self.impact_for_pending(&pending);
+                on_event(RuntimeEvent::ApprovalRequired {
+                    pending,
+                    evidence,
+                    impact,
+                });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
                 return TurnSignal::Finish;
             }
@@ -1586,7 +1619,11 @@ impl Runtime {
                         actions: actions.clone(),
                     }));
                 let evidence = state.investigation.evidence_summary();
-                on_event(RuntimeEvent::TransactionApprovalRequired { actions, evidence });
+                on_event(RuntimeEvent::TransactionApprovalRequired {
+                    actions,
+                    evidence,
+                    impact: vec![],
+                });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
                 return TurnSignal::Finish;
             }

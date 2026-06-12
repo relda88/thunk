@@ -348,6 +348,7 @@ mod tests {
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
@@ -372,6 +373,7 @@ mod tests {
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
         assert!(state.pending_approval.is_some());
         state.clear_messages();
@@ -408,6 +410,7 @@ mod tests {
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
+            impact: vec![],
         });
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WorkerCmd>();
