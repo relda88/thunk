@@ -1266,133 +1266,140 @@ impl Runtime {
             }
         };
 
-        let store = match &self.edit_store {
-            Some(s) => s,
-            None => {
-                on_event(RuntimeEvent::Failed {
-                    message: "No edit store configured".to_string(),
-                });
-                return;
-            }
-        };
-
-        let step = match store.get_current_step(&sequence_id) {
-            Ok(Some(s)) => s,
-            Ok(None) => {
-                // All steps done — sequence complete.
-                if let Some(store) = &self.edit_store {
-                    let _ = store.update_sequence_status(&sequence_id, SequenceStatus::Completed);
+        loop {
+            let store = match &self.edit_store {
+                Some(s) => s,
+                None => {
+                    on_event(RuntimeEvent::Failed {
+                        message: "No edit store configured".to_string(),
+                    });
+                    return;
                 }
-                self.active_sequence_id = None;
-                on_event(RuntimeEvent::SystemMessage(
-                    "Refactor sequence complete".to_string(),
-                ));
-                return;
-            }
-            Err(e) => {
+            };
+
+            let step = match store.get_current_step(&sequence_id) {
+                Ok(Some(s)) => s,
+                Ok(None) => {
+                    // All steps done — sequence complete.
+                    if let Some(store) = &self.edit_store {
+                        let _ =
+                            store.update_sequence_status(&sequence_id, SequenceStatus::Completed);
+                    }
+                    self.active_sequence_id = None;
+                    on_event(RuntimeEvent::SystemMessage(
+                        "Refactor sequence complete".to_string(),
+                    ));
+                    break;
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::Failed {
+                        message: format!("Failed to load step: {e}"),
+                    });
+                    return;
+                }
+            };
+
+            let original = match std::fs::read_to_string(&step.file) {
+                Ok(s) => s,
+                Err(e) => {
+                    on_event(RuntimeEvent::Failed {
+                        message: format!("Failed to read {}: {e}", step.file.display()),
+                    });
+                    self.handle_sequence_abort(on_event);
+                    return;
+                }
+            };
+
+            let patch_text = format!(
+                "<<<<<<< SEARCH\n{}\n=======\n{}\n>>>>>>> REPLACE\n",
+                step.search, step.replace
+            );
+
+            let patched = match apply_patch(&original, &patch_text) {
+                Ok(p) => p,
+                Err(e) => {
+                    let detail = match &e {
+                        PatchError::AnchorNotFound => "search text not found in file".to_string(),
+                        PatchError::MultiplePatches => {
+                            "expected exactly one patch block".to_string()
+                        }
+                        PatchError::ParseError(msg) => format!("parse error: {msg}"),
+                    };
+                    on_event(RuntimeEvent::Failed {
+                        message: format!(
+                            "Step {} patch failed ({}): {}",
+                            step.position,
+                            step.file.display(),
+                            detail
+                        ),
+                    });
+                    self.handle_sequence_abort(on_event);
+                    return;
+                }
+            };
+
+            if let Err(e) = std::fs::write(&step.file, &patched) {
                 on_event(RuntimeEvent::Failed {
-                    message: format!("Failed to load step: {e}"),
-                });
-                return;
-            }
-        };
-
-        let original = match std::fs::read_to_string(&step.file) {
-            Ok(s) => s,
-            Err(e) => {
-                on_event(RuntimeEvent::Failed {
-                    message: format!("Failed to read {}: {e}", step.file.display()),
-                });
-                self.handle_sequence_abort(on_event);
-                return;
-            }
-        };
-
-        let patch_text = format!(
-            "<<<<<<< SEARCH\n{}\n=======\n{}\n>>>>>>> REPLACE\n",
-            step.search, step.replace
-        );
-
-        let patched = match apply_patch(&original, &patch_text) {
-            Ok(p) => p,
-            Err(e) => {
-                let detail = match &e {
-                    PatchError::AnchorNotFound => "search text not found in file".to_string(),
-                    PatchError::MultiplePatches => "expected exactly one patch block".to_string(),
-                    PatchError::ParseError(msg) => format!("parse error: {msg}"),
-                };
-                on_event(RuntimeEvent::Failed {
-                    message: format!(
-                        "Step {} patch failed ({}): {}",
-                        step.position,
-                        step.file.display(),
-                        detail
-                    ),
-                });
-                self.handle_sequence_abort(on_event);
-                return;
-            }
-        };
-
-        if let Err(e) = std::fs::write(&step.file, &patched) {
-            on_event(RuntimeEvent::Failed {
-                message: format!("Failed to write {}: {e}", step.file.display()),
-            });
-            self.handle_sequence_abort(on_event);
-            return;
-        }
-
-        self.rebuild_index_for_file(&step.file, on_event);
-
-        if let Some(verify_cmd) = self.verify_command.clone() {
-            if let Some(error_output) = self.run_verify_command(&verify_cmd, on_event) {
-                // Restore original on verify failure.
-                let _ = std::fs::write(&step.file, &original);
-                on_event(RuntimeEvent::Failed {
-                    message: format!(
-                        "Verify failed for step {} — file restored\n{}",
-                        step.position,
-                        error_output.trim()
-                    ),
+                    message: format!("Failed to write {}: {e}", step.file.display()),
                 });
                 self.handle_sequence_abort(on_event);
                 return;
             }
+
+            self.rebuild_index_for_file(&step.file, on_event);
+
+            if let Some(verify_cmd) = self.verify_command.clone() {
+                if let Some(error_output) = self.run_verify_command(&verify_cmd, on_event) {
+                    // Restore current file before full transactional rollback.
+                    let _ = std::fs::write(&step.file, &original);
+                    on_event(RuntimeEvent::Failed {
+                        message: format!(
+                            "Verify failed for step {} — file restored\n{}",
+                            step.position,
+                            error_output.trim()
+                        ),
+                    });
+                    self.handle_sequence_abort(on_event);
+                    return;
+                }
+            }
+
+            // Mark step verified and advance pointer.
+            if let Some(store) = &self.edit_store {
+                let _ = store.update_step_status(&step.id, StepStatus::Verified);
+                let _ = store.advance(&sequence_id);
+            }
+
+            let diff_preview = crate::runtime::diff::render_diff(&original, &patched);
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "Step {} applied and verified: {}\n{}",
+                step.position,
+                step.file.display(),
+                diff_preview
+            )));
+
+            // Best-effort git checkpoint — errors do not abort the sequence.
+            let root = self.project_root.path().to_path_buf();
+            let file_str = step.file.to_string_lossy().into_owned();
+            let commit_msg = format!("thunk: apply step {}", step.position);
+            let _ = std::process::Command::new("git")
+                .args(["add", &file_str])
+                .current_dir(&root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
+            let _ = std::process::Command::new("git")
+                .args(["commit", "-m", &commit_msg])
+                .current_dir(&root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output();
         }
-
-        // Mark step verified and advance pointer.
-        if let Some(store) = &self.edit_store {
-            let _ = store.update_step_status(&step.id, StepStatus::Verified);
-            let _ = store.advance(&sequence_id);
-        }
-
-        let diff_preview = crate::runtime::diff::render_diff(&original, &patched);
-        on_event(RuntimeEvent::SystemMessage(format!(
-            "Step {} applied and verified: {}\n{}",
-            step.position,
-            step.file.display(),
-            diff_preview
-        )));
-
-        // Best-effort git checkpoint — errors do not abort the sequence.
-        let root = self.project_root.path().to_path_buf();
-        let file_str = step.file.to_string_lossy().into_owned();
-        let commit_msg = format!("thunk: apply step {}", step.position);
-        let _ = std::process::Command::new("git")
-            .args(["add", &file_str])
-            .current_dir(&root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
-        let _ = std::process::Command::new("git")
-            .args(["commit", "-m", &commit_msg])
-            .current_dir(&root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output();
     }
 
     pub(super) fn handle_sequence_abort(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        use std::process::Stdio;
+
         use crate::storage::tasks::SequenceStatus;
 
         let sequence_id = match self.active_sequence_id.take() {
@@ -1404,9 +1411,45 @@ impl Runtime {
             let _ = store.update_sequence_status(&sequence_id, SequenceStatus::Failed);
         }
 
-        on_event(RuntimeEvent::SystemMessage(
-            "Refactor sequence aborted".to_string(),
-        ));
+        // Attempt transactional rollback to the pre-sequence git snapshot.
+        let snapshot = self
+            .edit_store
+            .as_ref()
+            .and_then(|s| s.get_sequence(&sequence_id).ok().flatten())
+            .and_then(|seq| seq.snapshot_ref);
+
+        match snapshot {
+            Some(sha) => {
+                let root = self.project_root.path().to_path_buf();
+                let reset_output = std::process::Command::new("git")
+                    .args(["reset", "--hard", &sha])
+                    .current_dir(&root)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output();
+
+                match reset_output {
+                    Ok(out) if out.status.success() => {
+                        on_event(RuntimeEvent::SystemMessage(
+                            "Refactor sequence aborted — all applied steps rolled back via git reset"
+                                .to_string(),
+                        ));
+                    }
+                    _ => {
+                        on_event(RuntimeEvent::SystemMessage(
+                            "Refactor sequence aborted — rollback failed; applied edits remain, check git status"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            None => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "Refactor sequence aborted — no snapshot available; applied edits remain in place"
+                        .to_string(),
+                ));
+            }
+        }
     }
 
     pub(super) fn handle_sequence_status(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
