@@ -655,6 +655,25 @@ impl Runtime {
         Some(prompt::render_project_snapshot_hint(snapshot))
     }
 
+    fn maybe_render_test_coverage_hint(&self, tool_surface: ToolSurface) -> Option<String> {
+        if tool_surface != ToolSurface::MutationEnabled {
+            return None;
+        }
+        let store = self.symbol_store.as_ref()?;
+        let target_file = self.anchors.last_read_file()?;
+        let project_root_str = self.project_root.path().to_string_lossy();
+        let tests = store
+            .test_importers_of(&project_root_str, target_file, 5)
+            .ok()?;
+        if tests.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "[test coverage]\nTests referencing this file: {}\n[/test coverage]",
+            tests.join(", ")
+        ))
+    }
+
     fn invalidate_project_snapshot(&mut self) {
         self.project_snapshot_cache.invalidate();
     }
@@ -1339,11 +1358,17 @@ impl Runtime {
         } else {
             None
         };
+        let test_coverage_hint = if state.pending_runtime_call.is_none() && !is_correction_round {
+            self.maybe_render_test_coverage_hint(effective_surface)
+        } else {
+            None
+        };
         let prompt_chars = if state.turn_perf.is_enabled() {
             estimate_generation_prompt_chars(
                 &self.conversation,
                 effective_surface,
                 project_snapshot_hint.as_deref(),
+                test_coverage_hint.as_deref(),
             )
         } else {
             0
@@ -1376,6 +1401,7 @@ impl Runtime {
                         &mut self.conversation,
                         effective_surface,
                         project_snapshot_hint.as_deref(),
+                        test_coverage_hint.as_deref(),
                         ctx.investigation_mode,
                         &self.prompt_physics,
                         self.constrained_output,

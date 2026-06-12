@@ -21,6 +21,7 @@ pub(super) fn run_generate_turn(
     conversation: &mut Conversation,
     tool_surface: ToolSurface,
     project_snapshot_hint: Option<&str>,
+    test_coverage_hint: Option<&str>,
     investigation_mode: InvestigationMode,
     prompt_physics: &PromptPhysicsConfig,
     constrained_output: bool,
@@ -42,6 +43,9 @@ pub(super) fn run_generate_turn(
             .chain(tool_surface.mutation_tool_names().iter().copied()),
     )));
     if let Some(hint) = project_snapshot_hint {
+        messages.push(Message::system(hint.to_string()));
+    }
+    if let Some(hint) = test_coverage_hint {
         messages.push(Message::system(hint.to_string()));
     }
     let has_refresh =

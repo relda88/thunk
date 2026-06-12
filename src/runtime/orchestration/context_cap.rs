@@ -6,6 +6,7 @@ pub(crate) fn estimate_generation_prompt_chars(
     conversation: &Conversation,
     tool_surface: ToolSurface,
     project_snapshot_hint: Option<&str>,
+    test_coverage_hint: Option<&str>,
 ) -> usize {
     let hint = prompt::render_tool_surface_hint(
         tool_surface.as_str(),
@@ -20,6 +21,7 @@ pub(crate) fn estimate_generation_prompt_chars(
         .sum::<usize>()
         + hint.len()
         + project_snapshot_hint.map_or(0, str::len)
+        + test_coverage_hint.map_or(0, str::len)
 }
 
 /// Caps tool result blocks in an accumulated results string to `max_lines` content lines each.

@@ -343,6 +343,20 @@ impl SymbolStore {
         Ok(out)
     }
 
+    pub(crate) fn test_importers_of(
+        &self,
+        project_root: &str,
+        to_file: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let candidates = self.importers_of(project_root, to_file, limit * 4)?;
+        Ok(candidates
+            .into_iter()
+            .filter(|p| is_test_path(p))
+            .take(limit)
+            .collect())
+    }
+
     pub(crate) fn all_symbols_ranked(&self, project_root: &str) -> Result<Vec<(i64, String)>> {
         let mut stmt = self
             .conn
@@ -514,6 +528,10 @@ impl SymbolStore {
         }
         false
     }
+}
+
+fn is_test_path(path: &str) -> bool {
+    path.contains("tests/") || path.ends_with("_test.rs") || path.contains("/test_")
 }
 
 pub(crate) fn encode_embedding(v: &[f32]) -> Vec<u8> {
@@ -743,6 +761,54 @@ mod tests {
 
         let empty = store.importers_of("root", "src/unknown.rs", 10).unwrap();
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_importers_of_filters_to_test_paths() {
+        let store = in_memory();
+        let edges = vec![
+            ImportEdge {
+                from_file: "tests/foo.rs".to_string(),
+                to_file: "src/target.rs".to_string(),
+            },
+            ImportEdge {
+                from_file: "src/bar_test.rs".to_string(),
+                to_file: "src/target.rs".to_string(),
+            },
+            ImportEdge {
+                from_file: "src/test_baz.rs".to_string(),
+                to_file: "src/target.rs".to_string(),
+            },
+            ImportEdge {
+                from_file: "src/lib.rs".to_string(),
+                to_file: "src/target.rs".to_string(),
+            },
+        ];
+        store.upsert_imports("root", &edges).unwrap();
+
+        let tests = store
+            .test_importers_of("root", "src/target.rs", 10)
+            .unwrap();
+        assert_eq!(tests.len(), 3);
+        assert!(tests.contains(&"tests/foo.rs".to_string()));
+        assert!(tests.contains(&"src/bar_test.rs".to_string()));
+        assert!(tests.contains(&"src/test_baz.rs".to_string()));
+        assert!(!tests.contains(&"src/lib.rs".to_string()));
+    }
+
+    #[test]
+    fn test_importers_of_respects_limit() {
+        let store = in_memory();
+        let edges: Vec<ImportEdge> = (0..10)
+            .map(|i| ImportEdge {
+                from_file: format!("tests/test_{i}.rs"),
+                to_file: "src/target.rs".to_string(),
+            })
+            .collect();
+        store.upsert_imports("root", &edges).unwrap();
+
+        let tests = store.test_importers_of("root", "src/target.rs", 3).unwrap();
+        assert_eq!(tests.len(), 3);
     }
 
     #[test]
