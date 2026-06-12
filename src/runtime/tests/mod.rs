@@ -39,6 +39,7 @@ mod retrieval_log;
 mod scenarios;
 mod search_budget;
 mod search_guardrails;
+mod signature_impact;
 mod task_command;
 mod tool_round;
 mod tool_surface;

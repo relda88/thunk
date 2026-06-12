@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::core::config::{Config, InvestigationDepth, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
 use crate::runtime::index::EmbeddingProvider;
+use crate::storage::index::store::SymbolRecord;
 use crate::storage::index::SymbolStore;
 use crate::storage::retrieval::RetrievalLogStore;
 use crate::storage::tasks::{EditSequenceStore, TaskStore};
@@ -893,18 +894,79 @@ impl Runtime {
                         self.rebuild_index_for_file(std::path::Path::new(&abs_path), on_event);
                         if let Some(ref rel_path) = single_rel_path {
                             if let Some(store) = &self.symbol_store {
-                                let root = self.project_root.path().to_string_lossy();
-                                let after_syms: Vec<(String, String)> = store
-                                    .symbols_for_file(&root, rel_path)
-                                    .unwrap_or_default()
-                                    .into_iter()
-                                    .map(|s| (s.name, s.signature))
+                                let root = self.project_root.path().to_string_lossy().to_string();
+                                let after_recs: Vec<SymbolRecord> =
+                                    store.symbols_for_file(&root, rel_path).unwrap_or_default();
+                                let after_syms: Vec<(String, String)> = after_recs
+                                    .iter()
+                                    .map(|s| (s.name.clone(), s.signature.clone()))
                                     .collect();
-                                if let Some(diff) = command_handlers::diff_symbol_signatures(
-                                    &before_syms,
-                                    &after_syms,
-                                ) {
-                                    on_event(RuntimeEvent::SystemMessage(diff));
+                                if let Some((diff_msg, changed_names)) =
+                                    command_handlers::diff_symbol_signatures(
+                                        &before_syms,
+                                        &after_syms,
+                                    )
+                                {
+                                    let precise = if let Some(name) = changed_names.first() {
+                                        if let Some(sym) =
+                                            after_recs.iter().find(|r| &r.name == name)
+                                        {
+                                            if let Ok(src) = std::fs::read_to_string(&abs_path) {
+                                                if let Ok(locs) = self.lsp.query_references(
+                                                    std::path::Path::new(&abs_path),
+                                                    &src,
+                                                    sym.line,
+                                                    sym.col,
+                                                ) {
+                                                    let project_root = self.project_root.path();
+                                                    let filtered: Vec<String> = locs
+                                                        .into_iter()
+                                                        .filter_map(|loc| {
+                                                            loc.path
+                                                                .strip_prefix(project_root)
+                                                                .ok()
+                                                                .map(|rel| {
+                                                                    format!(
+                                                                        "  {}:{}",
+                                                                        rel.display(),
+                                                                        loc.line
+                                                                    )
+                                                                })
+                                                        })
+                                                        .collect();
+                                                    if !filtered.is_empty() {
+                                                        let total = filtered.len();
+                                                        let capped: Vec<String> =
+                                                            filtered.into_iter().take(10).collect();
+                                                        let header = if total > 10 {
+                                                            format!(
+                                                                "{total} call sites (showing 10):"
+                                                            )
+                                                        } else {
+                                                            format!("{total} call sites:")
+                                                        };
+                                                        Some(format!(
+                                                            "{header}\n{}",
+                                                            capped.join("\n")
+                                                        ))
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    };
+                                    on_event(RuntimeEvent::SystemMessage(
+                                        precise.unwrap_or(diff_msg),
+                                    ));
                                 }
                             }
                         }
@@ -1157,20 +1219,85 @@ impl Runtime {
                             {
                                 let rel = rel.to_string_lossy().replace('\\', "/");
                                 if let Some(store) = &self.symbol_store {
-                                    let root = self.project_root.path().to_string_lossy();
-                                    let after_syms: Vec<(String, String)> = store
-                                        .symbols_for_file(&root, &rel)
-                                        .unwrap_or_default()
-                                        .into_iter()
-                                        .map(|s| (s.name, s.signature))
+                                    let root =
+                                        self.project_root.path().to_string_lossy().to_string();
+                                    let after_recs: Vec<SymbolRecord> =
+                                        store.symbols_for_file(&root, &rel).unwrap_or_default();
+                                    let after_syms: Vec<(String, String)> = after_recs
+                                        .iter()
+                                        .map(|s| (s.name.clone(), s.signature.clone()))
                                         .collect();
                                     let before =
                                         before_syms_map.get(&rel).cloned().unwrap_or_default();
-                                    if let Some(diff) = command_handlers::diff_symbol_signatures(
-                                        &before,
-                                        &after_syms,
-                                    ) {
-                                        on_event(RuntimeEvent::SystemMessage(diff));
+                                    if let Some((diff_msg, changed_names)) =
+                                        command_handlers::diff_symbol_signatures(
+                                            &before,
+                                            &after_syms,
+                                        )
+                                    {
+                                        let precise = if let Some(name) = changed_names.first() {
+                                            if let Some(sym) =
+                                                after_recs.iter().find(|r| &r.name == name)
+                                            {
+                                                if let Ok(src) = std::fs::read_to_string(&abs_path)
+                                                {
+                                                    if let Ok(locs) = self.lsp.query_references(
+                                                        std::path::Path::new(&abs_path),
+                                                        &src,
+                                                        sym.line,
+                                                        sym.col,
+                                                    ) {
+                                                        let project_root = self.project_root.path();
+                                                        let filtered: Vec<String> = locs
+                                                            .into_iter()
+                                                            .filter_map(|loc| {
+                                                                loc.path
+                                                                    .strip_prefix(project_root)
+                                                                    .ok()
+                                                                    .map(|r| {
+                                                                        format!(
+                                                                            "  {}:{}",
+                                                                            r.display(),
+                                                                            loc.line
+                                                                        )
+                                                                    })
+                                                            })
+                                                            .collect();
+                                                        if !filtered.is_empty() {
+                                                            let total = filtered.len();
+                                                            let capped: Vec<String> = filtered
+                                                                .into_iter()
+                                                                .take(10)
+                                                                .collect();
+                                                            let header = if total > 10 {
+                                                                format!(
+                                                                    "{total} call sites (showing 10):"
+                                                                )
+                                                            } else {
+                                                                format!("{total} call sites:")
+                                                            };
+                                                            Some(format!(
+                                                                "{header}\n{}",
+                                                                capped.join("\n")
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+                                        on_event(RuntimeEvent::SystemMessage(
+                                            precise.unwrap_or(diff_msg),
+                                        ));
                                     }
                                 }
                             }

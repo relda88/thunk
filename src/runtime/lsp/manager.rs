@@ -97,6 +97,19 @@ impl LspManager {
         self.handle_session_result(result)
     }
 
+    pub fn query_references(
+        &mut self,
+        file_path: &Path,
+        source: &str,
+        line: usize,
+        column: usize,
+    ) -> Result<Vec<DefinitionLocation>> {
+        self.start()?;
+        let session = self.session.as_mut().expect("session set by start");
+        let result = session.references(file_path, source, line, column);
+        self.handle_session_result(result)
+    }
+
     /// Sends graceful shutdown to the server and clears the session. Idempotent.
     pub fn shutdown(&mut self) {
         if let Some(mut session) = self.session.take() {

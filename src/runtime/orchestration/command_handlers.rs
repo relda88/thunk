@@ -1323,6 +1323,7 @@ impl Runtime {
             };
 
             let mut before_syms: Vec<(String, String)> = Vec::new();
+            let mut importers: Vec<String> = Vec::new();
             let seq_rel_path: Option<String> = step
                 .file
                 .strip_prefix(self.project_root.path())
@@ -1337,13 +1338,14 @@ impl Runtime {
                         .into_iter()
                         .map(|s| (s.name, s.signature))
                         .collect();
-                    if let Ok(importers) = store.importers_of(&project_root, rel_path, 10) {
-                        if !importers.is_empty() {
-                            on_event(RuntimeEvent::SystemMessage(format!(
-                                "affects: {}",
-                                importers.join(", ")
-                            )));
-                        }
+                    importers = store
+                        .importers_of(&project_root, rel_path, 10)
+                        .unwrap_or_default();
+                    if !importers.is_empty() {
+                        on_event(RuntimeEvent::SystemMessage(format!(
+                            "affects: {}",
+                            importers.join(", ")
+                        )));
                     }
                 }
             }
@@ -1409,29 +1411,90 @@ impl Runtime {
             }
 
             let diff_preview = crate::runtime::diff::render_diff(&original, &patched);
-            let sig_diff_part = if let Some(ref rel_path) = seq_rel_path {
+            let call_site_info: Option<String> = if let Some(ref rel_path) = seq_rel_path {
                 if let Some(store) = &self.symbol_store {
-                    let root = self.project_root.path().to_string_lossy();
-                    let after_syms: Vec<(String, String)> = store
-                        .symbols_for_file(&root, rel_path)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|s| (s.name, s.signature))
+                    use crate::storage::index::store::SymbolRecord;
+                    let root = self.project_root.path().to_string_lossy().to_string();
+                    let after_recs: Vec<SymbolRecord> =
+                        store.symbols_for_file(&root, rel_path).unwrap_or_default();
+                    let after_syms: Vec<(String, String)> = after_recs
+                        .iter()
+                        .map(|s| (s.name.clone(), s.signature.clone()))
                         .collect();
-                    diff_symbol_signatures(&before_syms, &after_syms)
+                    if let Some((diff_msg, changed_names)) =
+                        diff_symbol_signatures(&before_syms, &after_syms)
+                    {
+                        let precise = if let Some(name) = changed_names.first() {
+                            if let Some(sym) = after_recs.iter().find(|r| &r.name == name) {
+                                if let Ok(locs) = self
+                                    .lsp
+                                    .query_references(&step.file, &patched, sym.line, sym.col)
+                                {
+                                    let project_root = self.project_root.path();
+                                    let filtered: Vec<String> = locs
+                                        .into_iter()
+                                        .filter_map(|loc| {
+                                            loc.path.strip_prefix(project_root).ok().map(|rel| {
+                                                format!("  {}:{}", rel.display(), loc.line)
+                                            })
+                                        })
+                                        .collect();
+                                    if !filtered.is_empty() {
+                                        let total = filtered.len();
+                                        let capped: Vec<String> =
+                                            filtered.into_iter().take(10).collect();
+                                        let header = if total > 10 {
+                                            format!("{total} call sites (showing 10):")
+                                        } else {
+                                            format!("{total} call sites:")
+                                        };
+                                        Some(format!("{header}\n{}", capped.join("\n")))
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        let fallback = if !importers.is_empty() {
+                            let total = importers.len();
+                            let capped: Vec<&String> = importers.iter().take(10).collect();
+                            let header = if total > 10 {
+                                format!("{total} affected files (showing 10):")
+                            } else {
+                                format!("{total} affected files:")
+                            };
+                            let list = capped
+                                .into_iter()
+                                .map(|f| format!("  {f}"))
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            Some(format!("{diff_msg}\n{header}\n{list}"))
+                        } else {
+                            Some(diff_msg)
+                        };
+                        Some(precise.unwrap_or_else(|| fallback.unwrap_or_default()))
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
             } else {
                 None
             };
-            let step_msg = if let Some(sig_diff) = sig_diff_part {
+            let step_msg = if let Some(info) = call_site_info {
                 format!(
                     "Step {} applied and verified: {}\n{}\n{}",
                     step.position,
                     step.file.display(),
                     diff_preview,
-                    sig_diff
+                    info
                 )
             } else {
                 format!(
@@ -2006,7 +2069,7 @@ fn toposort_steps(
 pub(super) fn diff_symbol_signatures(
     before: &[(String, String)],
     after: &[(String, String)],
-) -> Option<String> {
+) -> Option<(String, Vec<String>)> {
     use std::collections::HashMap;
     let before_map: HashMap<&str, &str> = before
         .iter()
@@ -2018,6 +2081,7 @@ pub(super) fn diff_symbol_signatures(
         .collect();
 
     let mut changed = Vec::new();
+    let mut changed_names: Vec<String> = Vec::new();
     let mut added = Vec::new();
     let mut removed = Vec::new();
 
@@ -2027,6 +2091,7 @@ pub(super) fn diff_symbol_signatures(
                 changed.push(format!(
                     "  {name}\n    before: {before_sig}\n    after:  {after_sig}"
                 ));
+                changed_names.push(name.to_string());
             }
             None => removed.push(name.to_string()),
             _ => {}
@@ -2055,7 +2120,7 @@ pub(super) fn diff_symbol_signatures(
         removed.sort();
         parts.push(format!("Removed: {}", removed.join(", ")));
     }
-    Some(parts.join("\n"))
+    Some((parts.join("\n"), changed_names))
 }
 
 #[cfg(test)]
@@ -2318,7 +2383,7 @@ mod tests {
             ("bar".to_string(), "pub fn bar()".to_string()),
             ("new_fn".to_string(), "pub fn new_fn()".to_string()),
         ];
-        let result = super::diff_symbol_signatures(&before, &after).unwrap();
+        let (result, names) = super::diff_symbol_signatures(&before, &after).unwrap();
         assert!(result.contains("foo"), "changed symbol must appear");
         assert!(result.contains("pub fn foo()"), "before sig must appear");
         assert!(
@@ -2328,6 +2393,14 @@ mod tests {
         assert!(result.contains("new_fn"), "added symbol must appear");
         assert!(result.contains("gone"), "removed symbol must appear");
         assert!(!result.contains("bar"), "unchanged symbol must not appear");
+        assert!(
+            names.contains(&"foo".to_string()),
+            "changed name must be tracked"
+        );
+        assert!(
+            !names.contains(&"bar".to_string()),
+            "unchanged must not be in names"
+        );
     }
 
     #[test]
@@ -2345,8 +2418,9 @@ mod tests {
     #[test]
     fn diff_symbol_signatures_all_added_for_empty_before() {
         let after = vec![("new".to_string(), "pub fn new()".to_string())];
-        let result = super::diff_symbol_signatures(&[], &after).unwrap();
+        let (result, names) = super::diff_symbol_signatures(&[], &after).unwrap();
         assert!(result.contains("new"));
         assert!(result.contains("Added"));
+        assert!(names.is_empty(), "no changed names for all-added case");
     }
 }

@@ -255,6 +255,63 @@ impl LspSession {
         Ok(hover)
     }
 
+    pub(super) fn references(
+        &mut self,
+        file_path: &Path,
+        source: &str,
+        line: usize,
+        column: usize,
+    ) -> Result<Vec<DefinitionLocation>> {
+        let file_uri = path_to_file_uri(file_path);
+        self.ensure_file_open(&file_uri, source)?;
+
+        let hover_positions = build_hover_positions(source, line, column)?;
+        let mut references = Vec::new();
+
+        for position in hover_positions {
+            for _ in 0..3 {
+                let utf16_col = line_column_to_utf16(source, position.line, position.column)?;
+                let id = self.next_id();
+                write_lsp_message(
+                    &mut self.stdin,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "method": "textDocument/references",
+                        "params": {
+                            "textDocument": { "uri": file_uri },
+                            "position": {
+                                "line": position.line.saturating_sub(1),
+                                "character": utf16_col
+                            },
+                            "context": { "includeDeclaration": false }
+                        }
+                    }),
+                )?;
+
+                match wait_for_definition_response(&self.rx, id, self.timeout)? {
+                    DefinitionResponse::Definitions(items) => {
+                        references = items;
+                    }
+                    DefinitionResponse::NoInfo => {}
+                    DefinitionResponse::RetryableError(ref msg) => {
+                        let _ = msg;
+                        std::thread::sleep(Duration::from_millis(75));
+                        continue;
+                    }
+                }
+
+                break;
+            }
+
+            if !references.is_empty() {
+                break;
+            }
+        }
+
+        Ok(references)
+    }
+
     pub(super) fn diagnostics(
         &mut self,
         file_path: &Path,
