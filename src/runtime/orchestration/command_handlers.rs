@@ -1150,6 +1150,16 @@ impl Runtime {
             })
             .collect();
 
+        let steps = if let Some(store) = &self.symbol_store {
+            let project_root_str = self.project_root.path().to_string_lossy().into_owned();
+            match store.all_imports(&project_root_str) {
+                Ok(edges) => toposort_steps(steps, &edges, self.project_root.path()),
+                Err(_) => steps,
+            }
+        } else {
+            steps
+        };
+
         let unique_files: std::collections::HashSet<_> =
             raw_steps.iter().map(|s| &s.file).collect();
         let n = steps.len();
@@ -1879,6 +1889,82 @@ impl Runtime {
     }
 }
 
+fn toposort_steps(
+    steps: Vec<crate::storage::tasks::EditStep>,
+    edges: &[crate::storage::index::types::ImportEdge],
+    project_root: &std::path::Path,
+) -> Vec<crate::storage::tasks::EditStep> {
+    let n = steps.len();
+    if n <= 1 {
+        return steps;
+    }
+
+    let normalized: Vec<String> = steps
+        .iter()
+        .map(|s| {
+            if let Ok(rel) = s.file.strip_prefix(project_root) {
+                rel.to_string_lossy().replace('\\', "/")
+            } else {
+                s.file.to_string_lossy().replace('\\', "/")
+            }
+        })
+        .collect();
+
+    // adj[i] = steps that must come AFTER step i (i is a dependency of adj[i])
+    let mut in_degree = vec![0usize; n];
+    let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
+
+    for edge in edges {
+        let from_idx = normalized.iter().position(|p| p == &edge.from_file);
+        let to_idx = normalized.iter().position(|p| p == &edge.to_file);
+        if let (Some(from_i), Some(to_i)) = (from_idx, to_idx) {
+            if from_i != to_i {
+                // from_i imports to_i => to_i is a dependency; to_i must run before from_i
+                adj[to_i].push(from_i);
+                in_degree[from_i] += 1;
+            }
+        }
+    }
+
+    let mut result_indices: Vec<usize> = Vec::with_capacity(n);
+    let mut available: Vec<usize> = (0..n).filter(|&i| in_degree[i] == 0).collect();
+
+    while !available.is_empty() {
+        available.sort_unstable();
+        let next = available.remove(0);
+        result_indices.push(next);
+        for &dep in &adj[next] {
+            in_degree[dep] -= 1;
+            if in_degree[dep] == 0 {
+                available.push(dep);
+            }
+        }
+    }
+
+    if result_indices.len() < n {
+        let in_result: std::collections::HashSet<usize> = result_indices.iter().copied().collect();
+        let cycle_count = n - in_result.len();
+        for i in 0..n {
+            if !in_result.contains(&i) {
+                result_indices.push(i);
+            }
+        }
+        if std::env::var_os(crate::runtime::trace::RUNTIME_TRACE_ENV).is_some() {
+            eprintln!("[runtime:trace] event=toposort_cycle steps_fell_back={cycle_count}");
+        }
+    }
+
+    result_indices
+        .into_iter()
+        .enumerate()
+        .map(|(new_pos, i)| {
+            let mut step = steps[i].clone();
+            step.position = new_pos;
+            step
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -2034,6 +2120,96 @@ mod tests {
         assert!(
             !system_msg,
             "rebuild must not emit SystemMessage when store is empty"
+        );
+    }
+
+    fn make_step(position: usize, file: &str) -> crate::storage::tasks::EditStep {
+        crate::storage::tasks::EditStep {
+            id: format!("step-{position}"),
+            sequence_id: "seq".to_string(),
+            position,
+            file: PathBuf::from(file),
+            search: String::new(),
+            replace: String::new(),
+            verification_cmd: None,
+            status: crate::storage::tasks::StepStatus::Pending,
+        }
+    }
+
+    fn make_edge(from: &str, to: &str) -> crate::storage::index::types::ImportEdge {
+        crate::storage::index::types::ImportEdge {
+            from_file: from.to_string(),
+            to_file: to.to_string(),
+        }
+    }
+
+    #[test]
+    fn toposort_steps_reorders_dependency_before_importer() {
+        // A imports C => C must execute before A; B has no edges
+        let steps = vec![
+            make_step(0, "src/a.rs"),
+            make_step(1, "src/b.rs"),
+            make_step(2, "src/c.rs"),
+        ];
+        let edges = vec![make_edge("src/a.rs", "src/c.rs")];
+        let root = PathBuf::from("/project");
+        let result = super::toposort_steps(steps, &edges, &root);
+
+        let files: Vec<&str> = result.iter().map(|s| s.file.to_str().unwrap()).collect();
+        let pos_a = files.iter().position(|&f| f == "src/a.rs").unwrap();
+        let pos_c = files.iter().position(|&f| f == "src/c.rs").unwrap();
+        assert!(
+            pos_c < pos_a,
+            "c (dependency) must come before a (importer); order: {files:?}"
+        );
+        // positions updated contiguously
+        for (i, step) in result.iter().enumerate() {
+            assert_eq!(step.position, i, "position must equal new index");
+        }
+    }
+
+    #[test]
+    fn toposort_steps_no_edges_preserves_original_order() {
+        let steps = vec![
+            make_step(0, "src/a.rs"),
+            make_step(1, "src/b.rs"),
+            make_step(2, "src/c.rs"),
+        ];
+        let root = PathBuf::from("/project");
+        let result = super::toposort_steps(steps, &[], &root);
+
+        let files: Vec<&str> = result.iter().map(|s| s.file.to_str().unwrap()).collect();
+        assert_eq!(
+            files,
+            vec!["src/a.rs", "src/b.rs", "src/c.rs"],
+            "no edges must preserve original order"
+        );
+        for (i, step) in result.iter().enumerate() {
+            assert_eq!(step.position, i);
+        }
+    }
+
+    #[test]
+    fn toposort_steps_cycle_falls_back_to_original_order() {
+        // A imports B AND B imports A — cycle; both must fall back, no panic
+        let steps = vec![make_step(0, "src/a.rs"), make_step(1, "src/b.rs")];
+        let edges = vec![
+            make_edge("src/a.rs", "src/b.rs"),
+            make_edge("src/b.rs", "src/a.rs"),
+        ];
+        let root = PathBuf::from("/project");
+        let result = super::toposort_steps(steps, &edges, &root);
+
+        assert_eq!(
+            result.len(),
+            2,
+            "all steps must be present after cycle fallback"
+        );
+        let files: Vec<&str> = result.iter().map(|s| s.file.to_str().unwrap()).collect();
+        assert_eq!(
+            files,
+            vec!["src/a.rs", "src/b.rs"],
+            "cycle must preserve original order"
         );
     }
 }
