@@ -325,6 +325,65 @@ fn index_embed_caps_at_2000_symbols_with_warning() {
 }
 
 #[test]
+fn index_embed_chunk_failure_skips_and_continues_pipeline() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FirstChunkFailProvider {
+        calls: AtomicUsize,
+    }
+    impl EmbeddingProvider for FirstChunkFailProvider {
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                Err(AppError::Runtime("transient network error".to_string()))
+            } else {
+                Ok(texts.iter().map(|_| vec![0.5f32, 0.5]).collect())
+            }
+        }
+    }
+
+    let root = canonical_root();
+    let db = NamedTempFile::new().unwrap();
+    let store = open_store(db.path());
+    // 40 symbols = 2 chunks (32 + 8); first chunk fails, second succeeds.
+    let names: Vec<String> = (0..40).map(|i| format!("fn_{i}")).collect();
+    let name_strs: Vec<&str> = names.iter().map(String::as_str).collect();
+    seed_symbols(&store, &root, &name_strs);
+    drop(store);
+
+    let provider = Box::new(FirstChunkFailProvider {
+        calls: AtomicUsize::new(0),
+    });
+    let (mut rt, root) = make_runtime_with_store_and_provider(db.path(), provider);
+
+    let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
+
+    let has_skip = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("skipping")));
+    assert!(
+        has_skip,
+        "failed chunk must emit 'skipping' message; events: {events:?}"
+    );
+
+    let has_stored = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("embeddings stored")));
+    assert!(
+        has_stored,
+        "pipeline must complete after chunk failure; events: {events:?}"
+    );
+
+    // Only the second chunk's 8 symbols should be stored.
+    let store2 = open_store(db.path());
+    let count = store2.embedding_count(&root).unwrap();
+    assert_eq!(
+        count, 8,
+        "only second chunk (8 symbols) must be persisted; got {count}"
+    );
+}
+
+#[test]
 fn index_embed_chunk_after_reset_is_silent_no_op() {
     // Verifies the stale-dispatch guard: IndexEmbedChunk with no pending_embed
     // (either because embed was never started or because Reset cleared it) must

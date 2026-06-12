@@ -9,6 +9,10 @@ pub(super) struct PendingEmbedState {
     pub(super) chunk_idx: usize,
     /// Accumulated (symbol_id, embedding_vec, model_name) results.
     pub(super) embedded: Vec<(i64, Vec<f32>, String)>,
+    /// Number of embeddings already written by intermediate flushes.
+    /// Intermediate and final flushes each write only embedded[flushed_up_to..] to
+    /// avoid re-inserting already-persisted rows (schema has no UNIQUE on symbol_id).
+    pub(super) flushed_up_to: usize,
     /// Total chunk count for progress display.
     pub(super) total_chunks: usize,
     /// Embedding model name captured at setup time.
@@ -109,6 +113,7 @@ impl Runtime {
             symbols,
             chunk_idx: 0,
             embedded: Vec::with_capacity(total_symbols),
+            flushed_up_to: 0,
             total_chunks,
             configured_model,
             project_root,
@@ -137,11 +142,12 @@ impl Runtime {
                 ));
                 return;
             };
-            match store.upsert_embeddings(&state.project_root, &state.embedded) {
+            let remaining = &state.embedded[state.flushed_up_to..];
+            let total = state.embedded.len();
+            match store.upsert_embeddings(&state.project_root, remaining) {
                 Ok(()) => {
                     on_event(RuntimeEvent::SystemMessage(format!(
-                        "embed: {} embeddings stored",
-                        state.embedded.len()
+                        "embed: {total} embeddings stored"
                     )));
                 }
                 Err(e) => {
@@ -174,20 +180,27 @@ impl Runtime {
                 .collect()
         };
 
-        let vecs = match self.embedding_provider.as_ref() {
-            Some(p) => match p.embed(&texts) {
-                Ok(v) => v,
-                Err(e) => {
-                    on_event(RuntimeEvent::SystemMessage(format!("embed: failed: {e}")));
-                    self.pending_embed = None;
-                    return;
-                }
-            },
+        let embed_result = match self.embedding_provider.as_ref() {
+            Some(p) => p.embed(&texts),
             None => {
                 on_event(RuntimeEvent::SystemMessage(
                     "embed: provider unavailable".to_string(),
                 ));
                 self.pending_embed = None;
+                return;
+            }
+        };
+
+        let vecs = match embed_result {
+            Ok(v) => v,
+            Err(e) => {
+                let chunk_num = self.pending_embed.as_ref().unwrap().chunk_idx + 1;
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "embed: chunk {chunk_num} failed, skipping ({} symbols lost): {e}",
+                    texts.len()
+                )));
+                self.pending_embed.as_mut().unwrap().chunk_idx += 1;
+                self.handle(RuntimeRequest::IndexEmbedChunk, on_event);
                 return;
             }
         };
@@ -201,6 +214,22 @@ impl Runtime {
                 state.embedded.push((*id, vec, model.clone()));
             }
             state.chunk_idx += 1;
+        }
+
+        // Best-effort intermediate flush every 5 chunks to limit data loss on late failures.
+        // Only the portion not yet persisted is written; flushed_up_to tracks the boundary.
+        if let (Some(store), Some(state)) = (&self.symbol_store, &mut self.pending_embed) {
+            if state.chunk_idx % 5 == 0 {
+                let new_slice = &state.embedded[state.flushed_up_to..];
+                if !new_slice.is_empty() {
+                    if store
+                        .upsert_embeddings(&state.project_root, new_slice)
+                        .is_ok()
+                    {
+                        state.flushed_up_to = state.embedded.len();
+                    }
+                }
+            }
         }
 
         // Recurse to process the next chunk.

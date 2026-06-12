@@ -410,6 +410,7 @@ impl SymbolStore {
     pub(crate) fn cosine_search(
         &self,
         project_root: &str,
+        model_name: &str,
         query: &[f32],
         limit: usize,
     ) -> Result<Vec<String>> {
@@ -419,12 +420,12 @@ impl SymbolStore {
                 "SELECT ie.embedding, sym.file_path \
                  FROM index_embeddings ie \
                  JOIN index_symbols sym ON ie.symbol_id = sym.id \
-                 WHERE ie.project_root = ?1",
+                 WHERE ie.project_root = ?1 AND ie.model_name = ?2",
             )
             .map_err(|e| AppError::Storage(e.to_string()))?;
 
         let rows = stmt
-            .query_map(params![project_root], |row| {
+            .query_map(params![project_root, model_name], |row| {
                 let blob: Vec<u8> = row.get(0)?;
                 let file_path: String = row.get(1)?;
                 Ok((blob, file_path))
@@ -432,10 +433,17 @@ impl SymbolStore {
             .map_err(|e| AppError::Storage(e.to_string()))?;
 
         let mut scored: Vec<(f32, String)> = Vec::new();
+        let mut dim_checked = false;
         for row in rows {
             let (blob, file_path) = row.map_err(|e| AppError::Storage(e.to_string()))?;
             let embedding = decode_embedding(&blob);
             if !embedding.is_empty() {
+                if !dim_checked {
+                    if embedding.len() != query.len() {
+                        return Ok(vec![]);
+                    }
+                    dim_checked = true;
+                }
                 let score = cosine_similarity(query, &embedding);
                 scored.push((score, file_path));
             }
@@ -801,9 +809,79 @@ mod tests {
             (ids[1].0, vec![0.0f32, 1.0], "m".to_string()),
         ];
         store.upsert_embeddings("root", &embeddings).unwrap();
-        let results = store.cosine_search("root", &query, 5).unwrap();
+        let results = store.cosine_search("root", "m", &query, 5).unwrap();
         assert!(!results.is_empty());
         assert_eq!(results[0], "src/foo.rs");
+    }
+
+    #[test]
+    fn cosine_search_filters_by_model_name() {
+        let store = in_memory();
+        store
+            .upsert_symbols("root", &[make_symbol("fn_a")])
+            .unwrap();
+        let ids: Vec<(i64, String)> = {
+            let mut stmt = store
+                .conn
+                .prepare("SELECT id, file_path FROM index_symbols WHERE project_root = 'root'")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        // Insert embeddings under two different model names.
+        store
+            .upsert_embeddings(
+                "root",
+                &[
+                    (ids[0].0, vec![1.0f32, 0.0], "model_a".to_string()),
+                    (ids[0].0, vec![0.0f32, 1.0], "model_b".to_string()),
+                ],
+            )
+            .unwrap();
+        // Querying with model_a should return a result (cosine = 1.0).
+        let results_a = store
+            .cosine_search("root", "model_a", &[1.0f32, 0.0], 5)
+            .unwrap();
+        assert_eq!(results_a.len(), 1);
+        // Querying with model_b should return the other embedding, not both.
+        let results_b = store
+            .cosine_search("root", "model_b", &[1.0f32, 0.0], 5)
+            .unwrap();
+        assert_eq!(results_b.len(), 1);
+        // Querying with an unknown model returns nothing.
+        let results_none = store
+            .cosine_search("root", "unknown", &[1.0f32, 0.0], 5)
+            .unwrap();
+        assert!(results_none.is_empty());
+    }
+
+    #[test]
+    fn cosine_search_dimension_mismatch_returns_empty() {
+        let store = in_memory();
+        store
+            .upsert_symbols("root", &[make_symbol("fn_a")])
+            .unwrap();
+        let ids: Vec<i64> = {
+            let mut stmt = store
+                .conn
+                .prepare("SELECT id FROM index_symbols WHERE project_root = 'root'")
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, i64>(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect()
+        };
+        // Store a 3-dim embedding but query with 2-dim vector.
+        store
+            .upsert_embeddings("root", &[(ids[0], vec![1.0f32, 0.0, 0.5], "m".to_string())])
+            .unwrap();
+        let results = store.cosine_search("root", "m", &[1.0f32, 0.0], 5).unwrap();
+        assert!(
+            results.is_empty(),
+            "dimension mismatch must return empty, not score 0"
+        );
     }
 
     fn make_symbol_in(name: &str, file: &str) -> ExtractedSymbol {

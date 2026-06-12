@@ -1349,6 +1349,10 @@ pub(super) fn try_vector_augment(
                 "vector_augment_skipped",
                 &[("reason", "no_embeddings".into())],
             );
+            on_event(RuntimeEvent::SystemMessage(
+                "vector: no embeddings indexed — run /index embed to enable semantic search"
+                    .to_string(),
+            ));
             return (ToolOutput::SearchResults(results), false);
         }
         Ok(n) if n > 10_000 => {
@@ -1382,7 +1386,8 @@ pub(super) fn try_vector_augment(
         }
     };
 
-    let vector_files = match store.cosine_search(&project_root_str, &query_vec, 10) {
+    let model_name = retrieval_config.embedding_model.as_deref().unwrap_or("");
+    let vector_files = match store.cosine_search(&project_root_str, model_name, &query_vec, 10) {
         Ok(files) => files,
         Err(_) => {
             trace_runtime_decision(
@@ -2674,6 +2679,63 @@ mod tests {
             has_hybrid_decision_true,
             "agent-turn search_code with embedding_provider set must emit \
              hybrid_search_decision(use_vector=true); events: {events:?}"
+        );
+    }
+
+    #[test]
+    fn no_embeddings_skip_emits_user_visible_system_message() {
+        use crate::core::error::Result;
+        use crate::runtime::index::EmbeddingProvider;
+        use crate::storage::index::SymbolStore;
+        use crate::storage::session::schema;
+        use crate::tools::types::{SearchResultsOutput, ToolOutput};
+        use rusqlite::Connection;
+
+        struct DummyProvider;
+        impl EmbeddingProvider for DummyProvider {
+            fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                Ok(texts.iter().map(|_| vec![1.0f32]).collect())
+            }
+        }
+
+        let (_dir, root, _registry) = temp_root();
+        let db_path = root.path().join("test.db");
+        let conn = Connection::open(&db_path).unwrap();
+        schema::initialize(&conn).unwrap();
+        drop(conn);
+        let store = SymbolStore::open(&db_path).unwrap();
+
+        let keyword_output = ToolOutput::SearchResults(SearchResultsOutput {
+            query: "something".to_string(),
+            matches: vec![],
+            total_matches: 0,
+            truncated: false,
+        });
+
+        let retrieval_config = RetrievalConfig {
+            vector_weight: 0.5,
+            embedding_model: None,
+        };
+
+        let provider = DummyProvider;
+        let mut events: Vec<crate::runtime::types::RuntimeEvent> = Vec::new();
+        try_vector_augment(
+            "something",
+            keyword_output,
+            Some(&store),
+            Some(&provider as &(dyn EmbeddingProvider + Send)),
+            &retrieval_config,
+            &root,
+            &mut |e| events.push(e),
+        );
+
+        let has_index_embed_hint = events.iter().any(|e| {
+            matches!(e, crate::runtime::types::RuntimeEvent::SystemMessage(msg)
+                if msg.contains("/index embed"))
+        });
+        assert!(
+            has_index_embed_hint,
+            "no_embeddings skip must emit a SystemMessage mentioning /index embed; events: {events:?}"
         );
     }
 }
