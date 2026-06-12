@@ -1,9 +1,11 @@
+mod cargo_context;
 mod project_path;
 mod project_root;
 mod project_snapshot;
 mod resolved_input;
 mod resolver;
 
+pub use cargo_context::CargoContext;
 pub use project_path::{ProjectPath, ProjectScope};
 pub use project_root::{ProjectRoot, ProjectRootError};
 pub(crate) use project_snapshot::{

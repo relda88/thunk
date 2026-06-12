@@ -22,6 +22,7 @@ use super::super::investigation::investigation::{
     detect_investigation_mode, InvestigationMode, ReadClassification,
 };
 use super::super::paths::normalize_evidence_path;
+use super::super::project::CargoContext;
 use super::super::project::ProjectRoot;
 use super::super::project::ProjectStructureSnapshot;
 use super::super::project::ProjectStructureSnapshotCache;
@@ -213,9 +214,11 @@ impl Runtime {
             active_ability: None,
             active_skill: None,
         };
+        let cargo_context = CargoContext::load(project_root.path());
         let system_prompt = prompt::build_system_prompt(
             &config.app.name,
             project_root.path(),
+            cargo_context.as_ref(),
             &specs,
             false,
             &prompt_physics,

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::tools::{ExecutionKind, ToolSpec};
 
-use super::super::project::{ProjectStructureEntryKind, ProjectStructureSnapshot};
+use super::super::project::{CargoContext, ProjectStructureEntryKind, ProjectStructureSnapshot};
 use super::prompt_physics;
 use super::prompt_physics::PromptPhysicsConfig;
 use super::tool_codec;
@@ -98,6 +98,7 @@ fn truncate_item(item: &str, max_chars: usize) -> String {
 pub fn build_system_prompt(
     app_name: &str,
     project_root: &Path,
+    cargo_context: Option<&CargoContext>,
     specs: &[ToolSpec],
     include_mutation_tools: bool,
     prompt_physics: &PromptPhysicsConfig,
@@ -116,6 +117,35 @@ do not guess or ask the user for information the tools can find. \
 When you show code, keep it focused on the user's request.",
         project_root.display()
     ));
+
+    if let Some(ctx) = cargo_context {
+        let ed = if ctx.edition.is_empty() {
+            "unknown"
+        } else {
+            &ctx.edition
+        };
+        let pkg = if ctx.version.is_empty() {
+            ctx.package_name.clone()
+        } else {
+            format!("{}@{}", ctx.package_name, ctx.version)
+        };
+        let mut line = format!("[cargo context] {pkg} edition={ed}");
+        if !ctx.direct_deps.is_empty() {
+            let deps: Vec<String> = ctx
+                .direct_deps
+                .iter()
+                .map(|(n, v)| format!("{n}@{v}"))
+                .collect();
+            line.push_str(&format!(", deps={}", deps.join(",")));
+        }
+        if !ctx.workspace_members.is_empty() {
+            let shown = ctx.workspace_members.join(",");
+            line.push_str(&format!(", workspace=[{shown}]"));
+        }
+        line.push_str("\n\n");
+        prompt.push_str("\n\n");
+        prompt.push_str(&line);
+    }
 
     let visible_specs: Vec<&ToolSpec> = specs
         .iter()
