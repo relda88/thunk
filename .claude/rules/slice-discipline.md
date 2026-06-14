@@ -5,7 +5,7 @@
 2. Find the runtime location that owns the decision — grep before assuming
 3. Make the minimal change — guard condition, terminal answer, or detection pattern
 4. Add a test that would have caught the regression
-5. Run just verify — this is the hard stop, 1030 tests must pass
+5. Run just verify — this is the hard stop, 1238 tests must pass
 6. Report to user — never commit, user commits manually
 
 ## Where Changes Live

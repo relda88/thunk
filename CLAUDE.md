@@ -15,7 +15,9 @@ Never make commits — user commits manually.
 - Phase 36: COMPLETE — .thunk/ migration, abilities, skills, /ability, /skill, prompt physics injection
 - Phase 37: COMPLETE — planning, task workflows, /plan, /task, /agent, web fetch, thinking trace
 - Phase 38: COMPLETE — vector/embedding layer, retrieval quality logging, /depth, /retrieval
-- Phase 39: ACTIVE — code extraction, module reorganization, documentation sync
+- Phase 39: COMPLETE — code extraction, module reorganization, documentation sync
+- Phase 40: COMPLETE — constrained decoding (/constrain), MLX backend, ability compression (/compress)
+- Phase 41: ACTIVE — /refactor command, planning turn, EditSequence + sequence executor (Slice 41.3 complete; Phase 42 = execution next)
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model

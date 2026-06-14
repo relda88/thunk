@@ -2,29 +2,29 @@
 
 ## Mutation Approval Gate
 `ShellTool`, `EditFileTool`, `WriteFileTool` always return `ToolRunResult::Approval(PendingAction)`.
-The only materialization path is `ToolRegistry::execute_approved()` at `src/tools/registry.rs:64`.
+The only materialization path is `ToolRegistry::execute_approved()` at `src/tools/registry.rs:66`.
 Single approvals and grouped approvals are wrapped in `PendingApprovalStage` / `PendingTransaction` at `src/tools/pending.rs`.
 There is no bypass. Never add one.
 
 ## Shell Allowlist
-`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs:260` — matches only `"cargo"`.
+`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs:269` — matches only `"cargo"`.
 Enforced in `TurnContext` construction in `engine.rs`: non-permitted commands suppress shell seeding.
 Shell seeding is suppressed entirely on `GitReadOnly` turns.
 
 ## Surface Enforcement
-`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs:247`.
+`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs:255`.
 Surfaces and tool sets defined in `TOOL_SURFACE_DEFINITIONS` (static registry).
 `RetrievalFirst` includes `lsp_definition`. `GitReadOnly` includes `git_branch`.
 Mutation tools (`edit_file`, `write_file`, `shell`) return `None` from `SurfaceTool::from_input()` — they bypass surface enforcement and go through the approval path only.
 
 ## Evidence Gates
 Eight named gates (plus sub-gates 5.5, 6a) in `InvestigationState::record_read_result()` in `investigation.rs`.
-`evidence_ready()` at `src/runtime/investigation/investigation.rs:622` — requires `search_produced_results && useful_accepted_candidate_reads >= useful_candidate_reads_target`.
+`evidence_ready()` at `src/runtime/investigation/investigation.rs:552` — requires `search_produced_results && useful_accepted_candidate_reads >= useful_candidate_reads_target`.
 Gates are never weakened. Never add a bypass.
 
 ## System Prompt
 Always built fresh via `build_system_prompt()` from config — never persisted to SQLite.
-Always called with `include_mutation_tools: false` (`src/runtime/orchestration/engine.rs:133`).
+Always called with `include_mutation_tools: false` (`src/runtime/orchestration/engine.rs:219`).
 Mutation tools appear only in the ephemeral per-turn hint for `MutationEnabled` turns.
 
 ## Prompt Physics
