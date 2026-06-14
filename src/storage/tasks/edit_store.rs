@@ -76,6 +76,7 @@ pub(crate) struct EditStep {
     pub(crate) replace: String,
     pub(crate) verification_cmd: Option<String>,
     pub(crate) status: StepStatus,
+    pub(crate) generated: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -123,8 +124,8 @@ impl EditSequenceStore {
             self.conn
                 .execute(
                     "INSERT INTO edit_steps
-                     (id, sequence_id, position, file, search, replace, verification_cmd, status)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                     (id, sequence_id, position, file, search, replace, verification_cmd, status, generated)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         step.id,
                         step.sequence_id,
@@ -134,6 +135,7 @@ impl EditSequenceStore {
                         step.replace,
                         step.verification_cmd,
                         step.status.as_str(),
+                        step.generated as i64,
                     ],
                 )
                 .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -186,7 +188,7 @@ impl EditSequenceStore {
             .conn
             .query_row(
                 "SELECT es.id, es.sequence_id, es.position, es.file, es.search, es.replace,
-                        es.verification_cmd, es.status
+                        es.verification_cmd, es.status, es.generated
                  FROM edit_steps es
                  JOIN edit_sequences eq ON eq.id = es.sequence_id
                  WHERE es.sequence_id = ?1 AND es.position = eq.current_idx",
@@ -201,6 +203,7 @@ impl EditSequenceStore {
                         row.get::<_, String>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, String>(7)?,
+                        row.get::<_, i64>(8)?,
                     ))
                 },
             )
@@ -208,7 +211,17 @@ impl EditSequenceStore {
             .map_err(|e| AppError::Storage(e.to_string()))?;
 
         Ok(row.map(
-            |(id, sequence_id, position, file, search, replace, verification_cmd, status_str)| {
+            |(
+                id,
+                sequence_id,
+                position,
+                file,
+                search,
+                replace,
+                verification_cmd,
+                status_str,
+                generated,
+            )| {
                 EditStep {
                     id,
                     sequence_id,
@@ -218,6 +231,7 @@ impl EditSequenceStore {
                     replace,
                     verification_cmd,
                     status: StepStatus::from_str(&status_str),
+                    generated: generated != 0,
                 }
             },
         ))
@@ -300,7 +314,7 @@ impl EditSequenceStore {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, sequence_id, position, file, search, replace, verification_cmd, status
+                "SELECT id, sequence_id, position, file, search, replace, verification_cmd, status, generated
                  FROM edit_steps WHERE sequence_id = ?1 ORDER BY position ASC",
             )
             .map_err(|e| AppError::Storage(e.to_string()))?;
@@ -316,6 +330,7 @@ impl EditSequenceStore {
                     replace: row.get(5)?,
                     verification_cmd: row.get(6)?,
                     status: StepStatus::from_str(&row.get::<_, String>(7)?),
+                    generated: row.get::<_, i64>(8)? != 0,
                 })
             })
             .map_err(|e| AppError::Storage(e.to_string()))?
@@ -343,7 +358,8 @@ mod tests {
                 id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL,
                 position INTEGER NOT NULL, file TEXT NOT NULL,
                 search TEXT NOT NULL, replace TEXT NOT NULL,
-                verification_cmd TEXT, status TEXT NOT NULL DEFAULT 'pending'
+                verification_cmd TEXT, status TEXT NOT NULL DEFAULT 'pending',
+                generated INTEGER NOT NULL DEFAULT 0
              );",
         )
         .unwrap();
@@ -364,6 +380,7 @@ mod tests {
                 replace: "fn new".to_string(),
                 verification_cmd: None,
                 status: StepStatus::Pending,
+                generated: false,
             }],
             current_idx: 0,
             status: SequenceStatus::Planning,

@@ -130,6 +130,7 @@ fn make_sequence_with_step(
             replace: replace.to_string(),
             verification_cmd: None,
             status: StepStatus::Pending,
+            generated: false,
         }],
         current_idx: 0,
         status: SequenceStatus::Approved,
@@ -305,6 +306,7 @@ fn make_two_step_sequence(
                 replace: "fn step_zero_new() {}".to_string(),
                 verification_cmd: None,
                 status: StepStatus::Pending,
+                generated: false,
             },
             EditStep {
                 id: format!("{seq_id}_s1"),
@@ -315,6 +317,7 @@ fn make_two_step_sequence(
                 replace: "fn step_one_new() {}".to_string(),
                 verification_cmd: None,
                 status: StepStatus::Pending,
+                generated: false,
             },
         ],
         current_idx: 0,

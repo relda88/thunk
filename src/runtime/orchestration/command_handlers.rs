@@ -1108,7 +1108,6 @@ impl Runtime {
         #[derive(serde::Deserialize)]
         struct RawStep {
             file: String,
-            #[allow(dead_code)]
             description: String,
         }
 
@@ -1147,8 +1146,42 @@ impl Runtime {
                 replace: String::new(),
                 verification_cmd: None,
                 status: StepStatus::Pending,
+                generated: false,
             })
             .collect();
+
+        const SIG_KEYWORDS: &[&str] = &["rename", "signature", "parameter", "argument"];
+        let steps = {
+            let mut steps = steps;
+            let mut auto_steps: Vec<EditStep> = Vec::new();
+            if let Some(store) = &self.symbol_store {
+                let root = self.project_root.path().to_string_lossy().into_owned();
+                for raw in &raw_steps {
+                    let desc_lower = raw.description.to_lowercase();
+                    if SIG_KEYWORDS.iter().any(|kw| desc_lower.contains(kw)) {
+                        if let Ok(importers) = store.importers_of(&root, &raw.file, 5) {
+                            for importer_file in importers {
+                                auto_steps.push(EditStep {
+                                    id: gen_id(),
+                                    sequence_id: seq_id.clone(),
+                                    position: steps.len() + auto_steps.len(),
+                                    file: PathBuf::from(&importer_file),
+                                    search: String::new(),
+                                    replace: String::new(),
+                                    verification_cmd: None,
+                                    status: StepStatus::Pending,
+                                    generated: true,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            let cap = 20usize.saturating_sub(steps.len());
+            auto_steps.truncate(cap);
+            steps.extend(auto_steps);
+            steps
+        };
 
         let steps = if let Some(store) = &self.symbol_store {
             let project_root_str = self.project_root.path().to_string_lossy().into_owned();
@@ -1246,7 +1279,13 @@ impl Runtime {
                     let n = seq.steps.len();
                     let mut lines = vec![format!("Refactor sequence approved — {n} steps")];
                     for step in &seq.steps {
-                        lines.push(format!("{}. {}", step.position + 1, step.file.display()));
+                        let badge = if step.generated { " [auto]" } else { "" };
+                        lines.push(format!(
+                            "{}. {}{}",
+                            step.position + 1,
+                            step.file.display(),
+                            badge
+                        ));
                     }
                     lines.push(String::new());
                     lines.push(
@@ -1618,7 +1657,8 @@ impl Runtime {
                     } else {
                         '·'
                     };
-                    lines.push(format!("  {} {}", indicator, step.file.display()));
+                    let badge = if step.generated { " [auto]" } else { "" };
+                    lines.push(format!("  {} {}{}", indicator, step.file.display(), badge));
                 }
                 on_event(RuntimeEvent::SystemMessage(lines.join("\n")));
             }
@@ -2146,7 +2186,8 @@ mod tests {
                 id TEXT PRIMARY KEY, sequence_id TEXT NOT NULL,
                 position INTEGER NOT NULL, file TEXT NOT NULL,
                 search TEXT NOT NULL, replace TEXT NOT NULL,
-                verification_cmd TEXT, status TEXT NOT NULL DEFAULT 'pending'
+                verification_cmd TEXT, status TEXT NOT NULL DEFAULT 'pending',
+                generated INTEGER NOT NULL DEFAULT 0
              );",
         )
         .unwrap();
@@ -2170,6 +2211,7 @@ mod tests {
                     replace: String::new(),
                     verification_cmd: None,
                     status: StepStatus::Pending,
+                    generated: false,
                 })
                 .collect(),
             current_idx: 0,
@@ -2291,6 +2333,7 @@ mod tests {
             replace: String::new(),
             verification_cmd: None,
             status: crate::storage::tasks::StepStatus::Pending,
+            generated: false,
         }
     }
 
@@ -2422,5 +2465,89 @@ mod tests {
         assert!(result.contains("new"));
         assert!(result.contains("Added"));
         assert!(names.is_empty(), "no changed names for all-added case");
+    }
+
+    #[test]
+    fn handle_refactor_auto_generates_steps_for_signature_change_hint() {
+        use crate::storage::index::types::ImportEdge;
+        use crate::storage::index::SymbolStore;
+        use crate::storage::session::schema;
+
+        let root_dir = tempfile::TempDir::new().unwrap();
+        let canon_root = root_dir.path().canonicalize().unwrap();
+        let root_str = canon_root.to_string_lossy().into_owned();
+
+        // Backend returns one step whose description contains "rename" → triggers importers_of
+        let json =
+            r#"[{"file":"src/lib.rs","description":"rename the process function signature"}]"#;
+
+        // Seed symbol store: src/caller.rs imports src/lib.rs
+        let sym_tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let conn = Connection::open(sym_tmp.path()).unwrap();
+            schema::initialize(&conn).unwrap();
+            drop(conn);
+            let store = SymbolStore::open(sym_tmp.path()).unwrap();
+            store
+                .upsert_imports(
+                    &root_str,
+                    &[ImportEdge {
+                        from_file: "src/caller.rs".to_string(),
+                        to_file: "src/lib.rs".to_string(),
+                    }],
+                )
+                .unwrap();
+        }
+
+        // Seed edit store
+        let edit_tmp = tempfile::NamedTempFile::new().unwrap();
+        {
+            let conn = Connection::open(edit_tmp.path()).unwrap();
+            schema::initialize(&conn).unwrap();
+        }
+
+        let mut runtime = crate::runtime::tests::make_runtime_in(vec![json], &canon_root)
+            .with_symbol_store(sym_tmp.path());
+        runtime.edit_store = Some(EditSequenceStore::open(edit_tmp.path()).unwrap());
+
+        let mut events = Vec::new();
+        runtime.handle_refactor(None, &mut |e| events.push(e));
+
+        let failed = events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::Failed { .. }));
+        assert!(!failed, "handle_refactor should not fail: {events:?}");
+
+        // Verify: one planned step + one auto-generated step persisted
+        let conn = Connection::open(edit_tmp.path()).unwrap();
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM edit_steps", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            total, 2,
+            "expected 1 planned + 1 generated step, got {total}"
+        );
+
+        let gen_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM edit_steps WHERE generated = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            gen_count, 1,
+            "expected one generated step for the importer file"
+        );
+
+        let gen_file: String = conn
+            .query_row("SELECT file FROM edit_steps WHERE generated = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(
+            gen_file.contains("src/caller.rs"),
+            "generated step should target the importer file, got: {gen_file}"
+        );
     }
 }
