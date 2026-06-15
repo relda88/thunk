@@ -1,9 +1,14 @@
 use rusqlite::Connection;
 
+use crate::core::config::Config;
+use crate::runtime::ProjectRoot;
+use crate::storage::index::types::{ExtractedSymbol, ImportEdge, SymbolConfidence, SymbolKind};
+use crate::storage::index::SymbolStore;
 use crate::storage::session::schema;
 use crate::storage::tasks::{
     EditSequence, EditSequenceStore, EditStep, SequenceStatus, StepStatus,
 };
+use crate::tools::default_registry;
 
 use super::*;
 
@@ -465,5 +470,267 @@ fn sequence_mid_run_step_failure_aborts_and_clears_state() {
     assert!(
         abort_msg.is_some(),
         "expected abort SystemMessage; got: {events:?}"
+    );
+}
+
+#[test]
+fn placeholder_skip_guard_skips_empty_step_and_sequence_completes() {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let file_a = tmp_dir.path().join("a.rs");
+    let file_b = tmp_dir.path().join("b.rs");
+    std::fs::write(&file_a, "fn step_zero() {}\n").unwrap();
+    std::fs::write(&file_b, "fn step_two() {}\n").unwrap();
+
+    let db = tmp_dir.path().join("store.db");
+    let mut runtime = make_runtime_in(Vec::<&str>::new(), tmp_dir.path());
+    attach_edit_store(&mut runtime, &db);
+
+    // 3-step sequence: step 0 (real), step 1 (generated placeholder, empty), step 2 (real).
+    let seq = EditSequence {
+        id: "seq_skip".to_string(),
+        task_id: None,
+        goal: "skip test".to_string(),
+        steps: vec![
+            EditStep {
+                id: "s0".to_string(),
+                sequence_id: "seq_skip".to_string(),
+                position: 0,
+                file: file_a.clone(),
+                search: "fn step_zero() {}".to_string(),
+                replace: "fn step_zero_new() {}".to_string(),
+                verification_cmd: None,
+                status: StepStatus::Pending,
+                generated: false,
+            },
+            EditStep {
+                id: "s1_placeholder".to_string(),
+                sequence_id: "seq_skip".to_string(),
+                position: 1,
+                file: file_b.clone(),
+                search: String::new(), // empty → placeholder guard fires
+                replace: String::new(),
+                verification_cmd: None,
+                status: StepStatus::Pending,
+                generated: true,
+            },
+            EditStep {
+                id: "s2".to_string(),
+                sequence_id: "seq_skip".to_string(),
+                position: 2,
+                file: file_b.clone(),
+                search: "fn step_two() {}".to_string(),
+                replace: "fn step_two_new() {}".to_string(),
+                verification_cmd: None,
+                status: StepStatus::Pending,
+                generated: false,
+            },
+        ],
+        current_idx: 0,
+        status: SequenceStatus::Approved,
+        snapshot_ref: None,
+    };
+    runtime
+        .edit_store
+        .as_ref()
+        .unwrap()
+        .create_sequence(&seq)
+        .unwrap();
+    runtime.active_sequence_id = Some("seq_skip".to_string());
+
+    let events = collect_events(&mut runtime, RuntimeRequest::SequenceExecuteStep);
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("Step 0 applied and verified"))),
+        "expected step 0 applied; got: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m)
+            if m.contains("Step 1 skipped") && m.contains("generated placeholder"))),
+        "expected placeholder skip message for step 1; got: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("Step 2 applied and verified"))),
+        "expected step 2 applied; got: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("Refactor sequence complete"))),
+        "expected sequence complete; got: {events:?}"
+    );
+
+    let seq_loaded = runtime
+        .edit_store
+        .as_ref()
+        .unwrap()
+        .get_sequence("seq_skip")
+        .unwrap()
+        .unwrap();
+    assert_eq!(seq_loaded.status, SequenceStatus::Completed);
+    let placeholder = seq_loaded
+        .steps
+        .iter()
+        .find(|s| s.id == "s1_placeholder")
+        .unwrap();
+    assert_eq!(
+        placeholder.status,
+        StepStatus::Verified,
+        "placeholder step must be Verified"
+    );
+}
+
+#[test]
+fn signature_change_inserts_placeholder_step_and_skip_completes_sequence() {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let canonical_root = tmp_dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(canonical_root.join("src")).unwrap();
+
+    // Use canonical path so strip_prefix(project_root) succeeds inside the runtime.
+    let file_a = canonical_root.join("src/a.rs");
+    std::fs::write(&file_a, "pub fn foo() {}\n").unwrap();
+
+    let root_str = canonical_root.to_string_lossy().to_string();
+
+    // Seed symbol store: foo in src/a.rs; src/b.rs imports src/a.rs.
+    let sym_db = tempfile::NamedTempFile::new().unwrap();
+    {
+        let conn = Connection::open(sym_db.path()).unwrap();
+        schema::initialize(&conn).unwrap();
+    }
+    let sym_store = SymbolStore::open(sym_db.path()).unwrap();
+    sym_store
+        .upsert_symbols_for_file(
+            &root_str,
+            "src/a.rs",
+            &[ExtractedSymbol {
+                name: "foo".to_string(),
+                kind: SymbolKind::Function,
+                file_path: "src/a.rs".to_string(),
+                line: 1,
+                col: 1,
+                signature: "pub fn foo() {}".to_string(),
+                confidence: SymbolConfidence::High,
+                parent_scope: None,
+            }],
+        )
+        .unwrap();
+    sym_store
+        .upsert_imports(
+            &root_str,
+            &[ImportEdge {
+                from_file: "src/b.rs".to_string(),
+                to_file: "src/a.rs".to_string(),
+            }],
+        )
+        .unwrap();
+    drop(sym_store);
+
+    let edit_db = tempfile::NamedTempFile::new().unwrap();
+
+    let project_root = ProjectRoot::new(canonical_root.clone()).unwrap();
+    let mut runtime = Runtime::new(
+        &Config::default(),
+        project_root.clone(),
+        Box::new(TestBackend::new(Vec::<&str>::new())),
+        default_registry().with_project_root(project_root.as_path_buf()),
+        None,
+        canonical_root.clone(),
+        "test-sig-insert".to_string(),
+    )
+    .with_symbol_store(sym_db.path());
+
+    attach_edit_store(&mut runtime, edit_db.path());
+
+    // 1-step sequence: edit src/a.rs to change fn signature.
+    let seq = EditSequence {
+        id: "seq_sig".to_string(),
+        task_id: None,
+        goal: "change signature".to_string(),
+        steps: vec![EditStep {
+            id: "s0".to_string(),
+            sequence_id: "seq_sig".to_string(),
+            position: 0,
+            file: file_a.clone(),
+            search: "pub fn foo() {}".to_string(),
+            replace: "pub fn foo(x: i32) {}".to_string(),
+            verification_cmd: None,
+            status: StepStatus::Pending,
+            generated: false,
+        }],
+        current_idx: 0,
+        status: SequenceStatus::Approved,
+        snapshot_ref: None,
+    };
+    runtime
+        .edit_store
+        .as_ref()
+        .unwrap()
+        .create_sequence(&seq)
+        .unwrap();
+    runtime.active_sequence_id = Some("seq_sig".to_string());
+
+    let events = collect_events(&mut runtime, RuntimeRequest::SequenceExecuteStep);
+
+    // Step 0 applied.
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("Step 0 applied and verified"))),
+        "expected step 0 applied; got: {events:?}"
+    );
+
+    // A generated placeholder was inserted and then skipped.
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m)
+            if m.contains("skipped") && m.contains("generated placeholder"))),
+        "expected placeholder skip message; got: {events:?}"
+    );
+
+    // Sequence completed without aborting.
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RuntimeEvent::SystemMessage(m) if m.contains("Refactor sequence complete"))),
+        "expected sequence complete; got: {events:?}"
+    );
+    assert!(
+        runtime.active_sequence_id.is_none(),
+        "active_sequence_id should be None after completion"
+    );
+
+    // Verify a generated step was inserted targeting src/b.rs.
+    let seq_loaded = runtime
+        .edit_store
+        .as_ref()
+        .unwrap()
+        .get_sequence("seq_sig")
+        .unwrap()
+        .unwrap();
+    let generated = seq_loaded
+        .steps
+        .iter()
+        .find(|s| s.generated && s.position == 1);
+    assert!(
+        generated.is_some(),
+        "expected a generated step at position 1; steps: {:?}",
+        seq_loaded
+            .steps
+            .iter()
+            .map(|s| (s.position, s.generated, &s.status))
+            .collect::<Vec<_>>()
+    );
+    let gen_step = generated.unwrap();
+    assert!(
+        gen_step.file.to_string_lossy().contains("b.rs"),
+        "generated step should target src/b.rs; got: {}",
+        gen_step.file.display()
     );
 }

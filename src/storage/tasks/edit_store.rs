@@ -247,6 +247,84 @@ impl EditSequenceStore {
         Ok(())
     }
 
+    /// Shift all steps at positions >= after_position+1 up by N, then insert steps at
+    /// consecutive positions starting at after_position+1. The `position` field in each
+    /// provided step is ignored — actual positions are assigned here.
+    pub(crate) fn insert_step_after(
+        &self,
+        sequence_id: &str,
+        after_position: usize,
+        steps: Vec<EditStep>,
+    ) -> Result<()> {
+        if steps.is_empty() {
+            return Ok(());
+        }
+        let n = steps.len() as i64;
+        let shift_from = (after_position + 1) as i64;
+
+        self.conn
+            .execute("BEGIN IMMEDIATE", [])
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let result: Result<()> = (|| {
+            self.conn
+                .execute(
+                    "UPDATE edit_steps SET position = position + ?1 \
+                     WHERE sequence_id = ?2 AND position >= ?3",
+                    params![n, sequence_id, shift_from],
+                )
+                .map_err(|e| AppError::Storage(e.to_string()))?;
+
+            for (i, step) in steps.iter().enumerate() {
+                let pos = (after_position + 1 + i) as i64;
+                self.conn
+                    .execute(
+                        "INSERT INTO edit_steps \
+                         (id, sequence_id, position, file, search, replace, \
+                          verification_cmd, status, generated) \
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        params![
+                            step.id,
+                            step.sequence_id,
+                            pos,
+                            step.file.to_string_lossy().as_ref(),
+                            step.search,
+                            step.replace,
+                            step.verification_cmd,
+                            step.status.as_str(),
+                            step.generated as i64,
+                        ],
+                    )
+                    .map_err(|e| AppError::Storage(e.to_string()))?;
+            }
+            Ok(())
+        })();
+
+        match result {
+            Ok(()) => self
+                .conn
+                .execute("COMMIT", [])
+                .map(|_| ())
+                .map_err(|e| AppError::Storage(e.to_string())),
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
+    pub(crate) fn count_steps(&self, sequence_id: &str) -> Result<usize> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM edit_steps WHERE sequence_id = ?1",
+                params![sequence_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+        Ok(count as usize)
+    }
+
     pub(crate) fn update_step_status(&self, step_id: &str, status: StepStatus) -> Result<()> {
         self.conn
             .execute(
@@ -433,5 +511,96 @@ mod tests {
         let seq = store.get_latest_sequence().unwrap().unwrap();
         assert_eq!(seq.steps.len(), 1);
         assert_eq!(seq.steps[0].search, "fn old");
+    }
+
+    #[test]
+    fn insert_step_after_shifts_and_inserts_at_correct_position() {
+        let store = make_store();
+
+        // 3-step sequence; steps 0 and 1 are done, current_idx = 2.
+        let seq = EditSequence {
+            id: "seq_ins".to_string(),
+            task_id: None,
+            goal: "test insert".to_string(),
+            steps: vec![
+                EditStep {
+                    id: "s0".to_string(),
+                    sequence_id: "seq_ins".to_string(),
+                    position: 0,
+                    file: std::path::PathBuf::from("src/a.rs"),
+                    search: "fn a".to_string(),
+                    replace: "fn a_new".to_string(),
+                    verification_cmd: None,
+                    status: StepStatus::Verified,
+                    generated: false,
+                },
+                EditStep {
+                    id: "s1".to_string(),
+                    sequence_id: "seq_ins".to_string(),
+                    position: 1,
+                    file: std::path::PathBuf::from("src/b.rs"),
+                    search: "fn b".to_string(),
+                    replace: "fn b_new".to_string(),
+                    verification_cmd: None,
+                    status: StepStatus::Verified,
+                    generated: false,
+                },
+                EditStep {
+                    id: "s2".to_string(),
+                    sequence_id: "seq_ins".to_string(),
+                    position: 2,
+                    file: std::path::PathBuf::from("src/c.rs"),
+                    search: "fn c".to_string(),
+                    replace: "fn c_new".to_string(),
+                    verification_cmd: None,
+                    status: StepStatus::Pending,
+                    generated: false,
+                },
+            ],
+            current_idx: 2,
+            status: SequenceStatus::Approved,
+            snapshot_ref: None,
+        };
+        store.create_sequence(&seq).unwrap();
+
+        // Insert a generated placeholder after position 1 (placeholder position = 0).
+        let new_step = EditStep {
+            id: "s_new".to_string(),
+            sequence_id: "seq_ins".to_string(),
+            position: 0, // arbitrary placeholder — insert_step_after must overwrite
+            file: std::path::PathBuf::from("src/d.rs"),
+            search: String::new(),
+            replace: String::new(),
+            verification_cmd: None,
+            status: StepStatus::Pending,
+            generated: true,
+        };
+        store
+            .insert_step_after("seq_ins", 1, vec![new_step])
+            .unwrap();
+
+        let loaded = store.get_sequence("seq_ins").unwrap().unwrap();
+        assert_eq!(loaded.steps.len(), 4);
+
+        // New step must be at position 2 — NOT the placeholder value 0.
+        let new_s = loaded.steps.iter().find(|s| s.id == "s_new").unwrap();
+        assert_eq!(
+            new_s.position, 2,
+            "new step must be at position 2, not placeholder 0"
+        );
+        assert!(new_s.search.is_empty());
+        assert!(new_s.generated);
+
+        // Old step-2 must have shifted to position 3.
+        let old_s2 = loaded.steps.iter().find(|s| s.id == "s2").unwrap();
+        assert_eq!(old_s2.position, 3, "old step-2 must shift to position 3");
+
+        // get_current_step with current_idx = 2 returns the newly inserted step.
+        let current = store.get_current_step("seq_ins").unwrap().unwrap();
+        assert_eq!(
+            current.id, "s_new",
+            "current step (idx=2) must be the newly inserted step"
+        );
+        assert_eq!(current.position, 2);
     }
 }

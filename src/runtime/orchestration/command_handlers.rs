@@ -1305,7 +1305,7 @@ impl Runtime {
         use std::process::Stdio;
 
         use crate::runtime::patch::{apply_patch, PatchError};
-        use crate::storage::tasks::{SequenceStatus, StepStatus};
+        use crate::storage::tasks::{EditStep, SequenceStatus, StepStatus};
 
         let sequence_id = match self.active_sequence_id.clone() {
             Some(id) => id,
@@ -1349,6 +1349,19 @@ impl Runtime {
                     return;
                 }
             };
+
+            // Placeholder-skip guard: generated steps with no edit body are skipped.
+            if step.search.is_empty() && step.replace.is_empty() {
+                if let Some(s) = &self.edit_store {
+                    let _ = s.update_step_status(&step.id, StepStatus::Verified);
+                    let _ = s.advance(&sequence_id);
+                }
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "Step {} skipped — generated placeholder, no edit body",
+                    step.position
+                )));
+                continue;
+            }
 
             let original = match std::fs::read_to_string(&step.file) {
                 Ok(s) => s,
@@ -1450,6 +1463,8 @@ impl Runtime {
             }
 
             let diff_preview = crate::runtime::diff::render_diff(&original, &patched);
+            // Populated below inside the signature-diff block; consumed by the live-insertion pass.
+            let mut insertion_candidates: Vec<String> = Vec::new();
             let call_site_info: Option<String> = if let Some(ref rel_path) = seq_rel_path {
                 if let Some(store) = &self.symbol_store {
                     use crate::storage::index::store::SymbolRecord;
@@ -1470,18 +1485,29 @@ impl Runtime {
                                     .query_references(&step.file, &patched, sym.line, sym.col)
                                 {
                                     let project_root = self.project_root.path();
-                                    let filtered: Vec<String> = locs
-                                        .into_iter()
-                                        .filter_map(|loc| {
-                                            loc.path.strip_prefix(project_root).ok().map(|rel| {
-                                                format!("  {}:{}", rel.display(), loc.line)
+                                    let (norm_paths, display_lines): (Vec<String>, Vec<String>) =
+                                        locs.into_iter()
+                                            .filter_map(|loc| {
+                                                loc.path.strip_prefix(project_root).ok().map(
+                                                    |rel| {
+                                                        (
+                                                            rel.to_string_lossy()
+                                                                .replace('\\', "/"),
+                                                            format!(
+                                                                "  {}:{}",
+                                                                rel.display(),
+                                                                loc.line
+                                                            ),
+                                                        )
+                                                    },
+                                                )
                                             })
-                                        })
-                                        .collect();
-                                    if !filtered.is_empty() {
-                                        let total = filtered.len();
+                                            .unzip();
+                                    insertion_candidates = norm_paths;
+                                    if !display_lines.is_empty() {
+                                        let total = display_lines.len();
                                         let capped: Vec<String> =
-                                            filtered.into_iter().take(10).collect();
+                                            display_lines.into_iter().take(10).collect();
                                         let header = if total > 10 {
                                             format!("{total} call sites (showing 10):")
                                         } else {
@@ -1501,6 +1527,11 @@ impl Runtime {
                             None
                         };
                         let fallback = if !importers.is_empty() {
+                            // Use importers as insertion candidates when LSP found nothing.
+                            if insertion_candidates.is_empty() {
+                                insertion_candidates =
+                                    importers.iter().map(|f| f.replace('\\', "/")).collect();
+                            }
                             let total = importers.len();
                             let capped: Vec<&String> = importers.iter().take(10).collect();
                             let header = if total > 10 {
@@ -1527,6 +1558,88 @@ impl Runtime {
             } else {
                 None
             };
+
+            // 43.8: Insert generated placeholder steps for call-site paths.
+            if !insertion_candidates.is_empty() {
+                let project_root = self.project_root.path();
+                let remaining_files: std::collections::HashSet<String> =
+                    if let Some(es) = &self.edit_store {
+                        if let Ok(Some(seq)) = es.get_sequence(&sequence_id) {
+                            seq.steps
+                                .iter()
+                                .filter(|s| s.position >= seq.current_idx)
+                                .filter_map(|s| {
+                                    s.file
+                                        .strip_prefix(project_root)
+                                        .ok()
+                                        .map(|r| r.to_string_lossy().replace('\\', "/"))
+                                })
+                                .collect()
+                        } else {
+                            std::collections::HashSet::new()
+                        }
+                    } else {
+                        std::collections::HashSet::new()
+                    };
+
+                let mut survivors: Vec<String> = insertion_candidates
+                    .into_iter()
+                    .filter(|p| !remaining_files.contains(p))
+                    .collect();
+
+                let live_total = if let Some(es) = &self.edit_store {
+                    es.count_steps(&sequence_id).unwrap_or(0)
+                } else {
+                    0
+                };
+
+                const STEP_CAP: usize = 20;
+                if live_total + survivors.len() > STEP_CAP {
+                    let allowed = STEP_CAP.saturating_sub(live_total);
+                    let dropped = survivors.len().saturating_sub(allowed);
+                    survivors.truncate(allowed);
+                    if dropped > 0 {
+                        on_event(RuntimeEvent::SystemMessage(format!(
+                            "step cap ({STEP_CAP}) reached — {dropped} call sites left unhandled; sequence will complete with current steps"
+                        )));
+                    }
+                }
+
+                if !survivors.is_empty() {
+                    fn gen_step_id() -> String {
+                        use std::sync::atomic::{AtomicU64, Ordering};
+                        use std::time::{SystemTime, UNIX_EPOCH};
+                        static COUNTER: AtomicU64 = AtomicU64::new(0);
+                        let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+                        let nanos = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_nanos() as u64)
+                            .unwrap_or(0);
+                        let unique = nanos.wrapping_add(count) ^ (std::process::id() as u64);
+                        format!("{unique:016x}")
+                    }
+
+                    let seq_id_clone = sequence_id.clone();
+                    let new_steps: Vec<EditStep> = survivors
+                        .iter()
+                        .map(|path| EditStep {
+                            id: gen_step_id(),
+                            sequence_id: seq_id_clone.clone(),
+                            position: 0, // overwritten by insert_step_after
+                            file: project_root.join(path),
+                            search: String::new(),
+                            replace: String::new(),
+                            verification_cmd: None,
+                            status: StepStatus::Pending,
+                            generated: true,
+                        })
+                        .collect();
+
+                    if let Some(es) = &self.edit_store {
+                        let _ = es.insert_step_after(&sequence_id, step.position, new_steps);
+                    }
+                }
+            }
             let step_msg = if let Some(info) = call_site_info {
                 format!(
                     "Step {} applied and verified: {}\n{}\n{}",
