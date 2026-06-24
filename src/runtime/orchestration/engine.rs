@@ -2080,9 +2080,14 @@ impl Runtime {
         let program = cmd_parts.next()?;
         let args: Vec<&str> = cmd_parts.collect();
         let is_cargo = program == "cargo";
+        let is_ruff = program == "ruff";
         let final_args: Vec<&str> = if is_cargo {
             let mut a = args.clone();
             a.push("--message-format=json");
+            a
+        } else if is_ruff {
+            let mut a = args.clone();
+            a.push("--output-format=json");
             a
         } else {
             args.clone()
@@ -2109,6 +2114,15 @@ impl Runtime {
                 }
                 let output_for_correction = if is_cargo {
                     let diagnostics = crate::runtime::diagnostics::parse_diagnostics(&combined);
+                    if diagnostics.is_empty() {
+                        on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                        self.correction_attempts = 0;
+                        return None;
+                    }
+                    crate::runtime::diagnostics::format_diagnostics(&diagnostics)
+                } else if is_ruff {
+                    let diagnostics =
+                        crate::runtime::diagnostics::parse_ruff_diagnostics(&combined);
                     if diagnostics.is_empty() {
                         on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
                         self.correction_attempts = 0;

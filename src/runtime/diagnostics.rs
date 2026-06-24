@@ -47,6 +47,36 @@ pub fn parse_diagnostics(output: &str) -> Vec<DiagnosticMessage> {
         .collect()
 }
 
+pub(crate) fn parse_ruff_diagnostics(output: &str) -> Vec<DiagnosticMessage> {
+    let arr = match serde_json::from_str::<serde_json::Value>(output) {
+        Ok(serde_json::Value::Array(a)) => a,
+        _ => return vec![],
+    };
+    arr.into_iter()
+        .filter_map(|obj| {
+            let file_name = obj["filename"].as_str().map(|s| s.to_string());
+            let raw_msg = obj["message"].as_str().unwrap_or("").to_string();
+            if file_name.is_none() && raw_msg.is_empty() {
+                return None;
+            }
+            let code = obj["code"].as_str().unwrap_or("");
+            let message = if code.is_empty() {
+                raw_msg
+            } else {
+                format!("{code}: {raw_msg}")
+            };
+            let line_start = obj["location"]["row"].as_u64().map(|r| r as u32);
+            Some(DiagnosticMessage {
+                level: "warning".to_string(),
+                message,
+                file_name,
+                line_start,
+                rendered: None,
+            })
+        })
+        .collect()
+}
+
 pub fn format_diagnostics(diagnostics: &[DiagnosticMessage]) -> String {
     if diagnostics.is_empty() {
         return String::new();
@@ -135,5 +165,34 @@ mod tests {
     #[test]
     fn format_diagnostics_empty_input_returns_empty_string() {
         assert_eq!(format_diagnostics(&[]), "");
+    }
+
+    fn ruff_message_json(code: &str, message: &str, file: &str, row: u64) -> String {
+        format!(
+            r#"[{{"code":"{code}","message":"{message}","filename":"{file}","location":{{"row":{row},"column":1}},"end_location":{{"row":{row},"column":5}},"fix":null,"noqa_row":{row}}}]"#
+        )
+    }
+
+    #[test]
+    fn parse_ruff_diagnostics_single_violation() {
+        let json = ruff_message_json("E225", "msg", "src/main.py", 42);
+        let result = parse_ruff_diagnostics(&json);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].level, "warning");
+        assert_eq!(result[0].message, "E225: msg");
+        assert_eq!(result[0].file_name.as_deref(), Some("src/main.py"));
+        assert_eq!(result[0].line_start, Some(42));
+    }
+
+    #[test]
+    fn parse_ruff_diagnostics_empty_array() {
+        let result = parse_ruff_diagnostics("[]");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_ruff_diagnostics_invalid_json() {
+        let result = parse_ruff_diagnostics("not json");
+        assert!(result.is_empty());
     }
 }
