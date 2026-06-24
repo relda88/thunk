@@ -117,6 +117,12 @@ impl AppContext {
         self.session.list_for_project()
     }
 
+    /// Returns the verify command and project root for background thread execution.
+    /// None when no verify command is configured.
+    pub fn verify_context(&self) -> Option<(String, std::path::PathBuf)> {
+        self.runtime.verify_context()
+    }
+
     /// Deletes all sessions for the current project, resets the runtime, and starts fresh.
     /// The TUI handles its own message-list clearing separately.
     pub fn clear_sessions(&mut self) -> Result<()> {

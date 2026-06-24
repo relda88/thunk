@@ -1941,6 +1941,7 @@ fn non_cargo_verify_passes_raw_output_unchanged() {
     // treats any non-empty output as a failure requiring correction.
     let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
         .with_verify_command(Some("echo failure-marker".into()))
+        .with_deferred_verify(false)
         .with_max_correction_attempts(0);
     rt.set_pending_for_test(PendingAction {
         tool_name: "edit_file".into(),

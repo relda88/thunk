@@ -154,6 +154,10 @@ pub struct Runtime {
     /// mutation. None = disabled. Initialized from config.project.verify_command;
     /// can be changed at runtime via /verify <command>|off without restarting.
     verify_command: Option<String>,
+    /// When true, verification runs in a background thread after the turn completes
+    /// (display-only, no correction loop). When false, verification runs synchronously
+    /// with the correction loop. Defaults to true.
+    deferred_verify: bool,
     /// Tracks how many correction attempts have been made for the current mutation.
     /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
     correction_attempts: u32,
@@ -251,6 +255,7 @@ impl Runtime {
             context_75_warned: false,
             prompt_physics,
             verify_command: config.project.verify_command.clone(),
+            deferred_verify: true,
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
             session_start_ref,
@@ -318,6 +323,20 @@ impl Runtime {
     #[cfg(test)]
     pub fn with_verify_command(mut self, cmd: Option<String>) -> Self {
         self.verify_command = cmd;
+        self
+    }
+
+    /// Returns the verify command and project root path for background execution.
+    /// None when no verify command is configured.
+    pub fn verify_context(&self) -> Option<(String, std::path::PathBuf)> {
+        self.verify_command
+            .as_ref()
+            .map(|cmd| (cmd.clone(), self.project_root.as_path_buf()))
+    }
+
+    #[cfg(test)]
+    pub fn with_deferred_verify(mut self, deferred: bool) -> Self {
+        self.deferred_verify = deferred;
         self
     }
 
@@ -1046,7 +1065,10 @@ impl Runtime {
                 // to the approval gate. Uses std::process::Command directly (not ShellTool or
                 // registry.execute_approved) because this is a read-only verification step
                 // initiated by the runtime after an approved mutation, not a user action.
-                if matches!(tool_name.as_str(), "edit_file" | "write_file") {
+                // When deferred_verify is true, verification runs on a background thread after
+                // the turn completes (display-only). The correction loop requires sync verify.
+                if !self.deferred_verify && matches!(tool_name.as_str(), "edit_file" | "write_file")
+                {
                     if let Some(verify_cmd) = self.verify_command.clone() {
                         if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload)
                         {
@@ -1361,12 +1383,15 @@ impl Runtime {
 
         // Step 3: Run verify_command if configured.
         // Correction loop is intentionally skipped for transactions.
-        if let Some(verify_cmd) = self.verify_command.clone() {
-            if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
-                on_event(RuntimeEvent::SystemMessage(format!(
-                    "{verify_cmd}: failed after transaction — manual fix required\n{}",
-                    combined.trim()
-                )));
+        // When deferred_verify is true, the background thread handles this instead.
+        if !self.deferred_verify {
+            if let Some(verify_cmd) = self.verify_command.clone() {
+                if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "{verify_cmd}: failed after transaction — manual fix required\n{}",
+                        combined.trim()
+                    )));
+                }
             }
         }
 

@@ -122,6 +122,7 @@ pub(crate) fn run_app(
 fn handle_worker_reply(state: &mut AppState, reply: WorkerReply) {
     match reply {
         WorkerReply::Event(ev) => events::apply_runtime_event(state, ev),
+        WorkerReply::DeferredVerification(msg) => state.add_system_message(msg),
         WorkerReply::HandleOk => state.is_busy = false,
         WorkerReply::HandleErr(msg) => {
             events::apply_runtime_event(state, RuntimeEvent::Failed { message: msg });
@@ -169,8 +170,9 @@ mod tests {
     use crate::storage::session::{SessionStore, StoredMessage};
     use crate::tools::default_registry;
 
-    use super::{handle_key_event, WorkerCmd};
+    use super::{handle_key_event, handle_worker_reply, WorkerCmd};
     use crate::tui::state::{AppState, ApprovalRisk, PendingApprovalState};
+    use crate::tui::worker::WorkerReply;
 
     #[test]
     fn session_clear_removes_old_project_sessions_and_leaves_fresh_active_session() {
@@ -322,6 +324,21 @@ mod tests {
                 app,
             }
         }
+    }
+
+    #[test]
+    fn deferred_verification_reply_appends_system_message() {
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        let initial_count = state.messages.len();
+        handle_worker_reply(
+            &mut state,
+            WorkerReply::DeferredVerification("cargo check: ok".to_string()),
+        );
+        assert_eq!(state.messages.len(), initial_count + 1);
+        assert_eq!(state.messages.last().unwrap().content, "cargo check: ok");
+        // is_busy must remain unchanged — DeferredVerification never touches it
+        assert!(!state.is_busy);
     }
 
     fn make_key(
