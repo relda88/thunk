@@ -399,6 +399,12 @@ impl Runtime {
         (last_read_file, last_search_query, last_search_scope)
     }
 
+    /// Rebuilds the symbol index for a single file. Best-effort — silently no-ops
+    /// if the store is absent or empty. Intended for watcher-triggered incremental updates.
+    pub fn rebuild_file(&mut self, path: &std::path::Path) {
+        self.rebuild_index_for_file(path, &mut |_| {});
+    }
+
     /// Handles a RuntimeRequest by updating the conversation, invoking the backend,
     /// and firing RuntimeEvents to drive the UI. Each request type has its own
     /// handler method for clarity.

@@ -10,6 +10,7 @@ pub(crate) enum WorkerCmd {
     Reset,
     ListSessions,
     ClearSessions,
+    RebuildFile(std::path::PathBuf),
 }
 
 pub(super) enum WorkerReply {
@@ -139,6 +140,9 @@ pub(super) fn run_worker(
                     let _ = reply_tx.send(WorkerReply::ClearErr(e.to_string()));
                 }
             },
+            WorkerCmd::RebuildFile(path) => {
+                app.rebuild_file(path);
+            }
         }
     }
 }

@@ -123,6 +123,12 @@ impl AppContext {
         self.runtime.verify_context()
     }
 
+    /// Rebuilds the symbol index for a single file. Best-effort and silent — delegates
+    /// directly to Runtime::rebuild_file which no-ops when the store is absent or empty.
+    pub fn rebuild_file(&mut self, path: std::path::PathBuf) {
+        self.runtime.rebuild_file(&path);
+    }
+
     /// Deletes all sessions for the current project, resets the runtime, and starts fresh.
     /// The TUI handles its own message-list clearing separately.
     pub fn clear_sessions(&mut self) -> Result<()> {
