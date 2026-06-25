@@ -168,7 +168,10 @@ impl MCPManager {
     pub(crate) fn discover_tools(&mut self, server_name: &str) -> Vec<McpTool> {
         match self.call(server_name, "tools/list", serde_json::json!({})) {
             Ok(result) => {
-                let tools = result["tools"].as_array().cloned().unwrap_or_default();
+                let tools = result["result"]["tools"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
                 tools
                     .iter()
                     .filter_map(|t| {
