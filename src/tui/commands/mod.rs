@@ -92,6 +92,8 @@ pub enum Command {
     RefactorAbort,
     /// /refactor status — show active sequence goal and step progress.
     RefactorStatus,
+    /// /remember <fact> — propose a memory fact for user approval.
+    Remember(String),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -324,6 +326,14 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
                 Some(Ok(Command::Refactor(goal)))
             }
         },
+        "/remember" => match arg {
+            Some(fact) if !fact.trim().is_empty() => {
+                Some(Ok(Command::Remember(fact.trim().to_string())))
+            }
+            _ => Some(Err(ParseError::MissingArgument {
+                command: "/remember",
+            })),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -375,6 +385,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/refactor abort",
         "/refactor status",
         "/reject",
+        "/remember",
         "/retrieval",
         "/search",
         "/session",
@@ -512,6 +523,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/refactor status",
             description: "Show active refactor sequence goal and step progress",
+        },
+        LauncherCommand {
+            name: "/remember",
+            description: "propose a fact for personal memory (/remember <fact>)",
         },
         LauncherCommand {
             name: "/constrain",

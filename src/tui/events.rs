@@ -3,7 +3,8 @@ use crate::tools::RiskLevel;
 
 use super::format::summarize_command_output;
 use super::state::{
-    AppState, ApprovalRisk, DirtySections, PendingApprovalState, PendingPlanApprovalState,
+    AppState, ApprovalRisk, DirtySections, PendingApprovalState, PendingMemoryProposalState,
+    PendingPlanApprovalState,
 };
 
 pub(super) fn decode_approval_preview(tool_name: &str, payload: &str) -> Vec<String> {
@@ -154,6 +155,25 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
         }
         RuntimeEvent::PlanApprovalCleared => {
             state.pending_plan_approval = None;
+            state.mark_dirty(DirtySections::INPUT);
+            state.set_status("ready");
+        }
+        RuntimeEvent::MemoryProposalRequired {
+            fact,
+            category,
+            scope,
+            ..
+        } => {
+            state.pending_memory_proposal = Some(PendingMemoryProposalState {
+                fact,
+                category,
+                scope,
+            });
+            state.mark_dirty(DirtySections::INPUT);
+            state.set_status("awaiting memory approval");
+        }
+        RuntimeEvent::MemoryProposalCleared => {
+            state.pending_memory_proposal = None;
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("ready");
         }

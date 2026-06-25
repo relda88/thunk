@@ -29,6 +29,7 @@ mod integration_misc;
 mod investigation;
 mod investigation_inline;
 mod investigation_modes;
+mod memory_command;
 mod path_scope;
 mod plan_command;
 mod project_snapshot;

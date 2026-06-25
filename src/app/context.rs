@@ -263,6 +263,9 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::SequenceExecuteStep => "sequence_execute_step",
         RuntimeRequest::SequenceAbort => "sequence_abort",
         RuntimeRequest::SequenceStatus => "sequence_status",
+        RuntimeRequest::MemoryApprove => "memory_approve",
+        RuntimeRequest::MemoryReject => "memory_reject",
+        RuntimeRequest::Remember { .. } => "remember",
     }
 }
 
@@ -285,6 +288,10 @@ fn event_label(event: &RuntimeEvent) -> Option<String> {
             Some(format!("plan approval required: {goal}"))
         }
         RuntimeEvent::PlanApprovalCleared => Some("plan approval cleared".to_string()),
+        RuntimeEvent::MemoryProposalRequired { fact, .. } => {
+            Some(format!("memory proposal required: {fact}"))
+        }
+        RuntimeEvent::MemoryProposalCleared => Some("memory proposal cleared".to_string()),
         // Handled with timing in handle():
         RuntimeEvent::AssistantMessageStarted
         | RuntimeEvent::AssistantMessageFinished

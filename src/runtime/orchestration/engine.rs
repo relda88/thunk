@@ -59,6 +59,9 @@ mod answer_guard;
 #[path = "plan_handlers.rs"]
 mod plan_handlers;
 
+#[path = "memory_handlers.rs"]
+mod memory_handlers;
+
 #[path = "embed_handlers.rs"]
 mod embed_handlers;
 
@@ -142,7 +145,7 @@ pub struct Runtime {
     /// Personal memory manager. None when ~/.thunk/memory.db is unavailable or memory disabled.
     /// Advisory — session proceeds normally when absent. MemoryStore drops cleanly with no
     /// explicit shutdown needed.
-    memory_manager: Option<crate::runtime::memory::MemoryManager>,
+    pub(crate) memory_manager: Option<crate::runtime::memory::MemoryManager>,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
     /// Embedding provider for vector search. `None` when unconfigured.
@@ -196,6 +199,8 @@ pub struct Runtime {
     /// Parsed plan awaiting user approval. Set by handle_plan_create, consumed by
     /// handle_plan_approve / handle_plan_abandon. Never persisted; cleared on reset.
     pending_plan: Option<command_handlers::PendingPlanDraft>,
+    /// Proposed memory fact awaiting user approval. Set by propose_memory, cleared by approve/reject.
+    pending_memory: Option<crate::storage::memory::MemoryFact>,
     /// In-progress chunked embed state between IndexEmbedChunk dispatches.
     /// Set by handle_index_embed, consumed by handle_index_embed_chunk, cleared on reset.
     pub(super) pending_embed: Option<embed_handlers::PendingEmbedState>,
@@ -323,6 +328,7 @@ impl Runtime {
             web_fetch_enabled: config.web_fetch.enabled,
             session_id,
             pending_plan: None,
+            pending_memory: None,
             pending_embed: None,
             investigation_depth: config.investigation.depth,
             investigation_hop_limit: config.investigation.hop_limit,
@@ -566,6 +572,9 @@ impl Runtime {
             RuntimeRequest::SequenceExecuteStep => self.handle_sequence_execute_step(on_event),
             RuntimeRequest::SequenceAbort => self.handle_sequence_abort(on_event),
             RuntimeRequest::SequenceStatus => self.handle_sequence_status(on_event),
+            RuntimeRequest::MemoryApprove => self.handle_memory_approve(on_event),
+            RuntimeRequest::MemoryReject => self.handle_memory_reject(on_event),
+            RuntimeRequest::Remember { fact } => self.handle_remember(fact, on_event),
         }
     }
 
@@ -808,6 +817,22 @@ impl Runtime {
                 message: "Cannot submit an empty prompt.".to_string(),
             });
             return;
+        }
+
+        if self.config.memory.enabled {
+            if let Some(fact) =
+                crate::runtime::investigation::prompt_analysis::user_requested_remember(trimmed)
+            {
+                let scope = Some(self.project_root.path().to_string_lossy().into_owned());
+                self.propose_memory(
+                    fact,
+                    "user".to_string(),
+                    scope,
+                    crate::storage::memory::MemorySource::User,
+                    on_event,
+                );
+                return;
+            }
         }
 
         let is_last_read_file_anchor = is_last_read_file_anchor_prompt(trimmed);

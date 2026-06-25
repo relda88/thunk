@@ -142,8 +142,21 @@ impl Renderer {
             .pending_plan_approval
             .as_ref()
             .map_or(0, |p| 1 + p.steps.len() as u16 + 1);
+        // 1 fact line + 1 category line + 1 optional scope line + 1 controls line = 4 rows max.
+        // Use 3 rows when scope is absent (fact + category + controls).
+        let memory_rows: u16 =
+            state.pending_memory_proposal.as_ref().map_or(
+                0,
+                |m| {
+                    if m.scope.is_some() {
+                        4
+                    } else {
+                        3
+                    }
+                },
+            );
         let input_base_rows = input_rows + overlay_rows;
-        let effective_rows = input_base_rows + approval_rows + plan_rows;
+        let effective_rows = input_base_rows + approval_rows + plan_rows + memory_rows;
 
         // Rows 2..h-effective_rows-2: transcript
         if h > effective_rows + 3 {
@@ -155,6 +168,12 @@ impl Renderer {
             let row = h.saturating_sub(effective_rows + 2);
             let rule = "─".repeat(w as usize);
             self.paint(cur, 0, row, &rule, w, self.theme.border());
+        }
+
+        // Memory proposal widget (above plan widget)
+        if memory_rows > 0 {
+            let first_row = h.saturating_sub(effective_rows - approval_rows - plan_rows + 1);
+            self.paint_memory_proposal_widget(state, first_row, w);
         }
 
         // Plan approval widget (above the tool approval widget)
@@ -621,6 +640,30 @@ impl Renderer {
         }
         let control_row = first_row + 1 + plan.steps.len() as u16;
         self.paint(cur, 0, control_row, "  ^Y approve   ^N abandon", w, dim);
+    }
+
+    fn paint_memory_proposal_widget(&mut self, state: &AppState, first_row: u16, w: u16) {
+        let Some(ref proposal) = state.pending_memory_proposal else {
+            return;
+        };
+        let cur = self.current;
+        let dim = self.theme.dim();
+        let label_style = self.theme.chip_warning();
+        let label = format!("  Propose memory: {}", proposal.fact);
+        let display: String = label.chars().take(w as usize).collect();
+        self.paint(cur, 0, first_row, &display, w, label_style);
+        let cat_text = format!("  Category: {}", proposal.category);
+        let cat_display: String = cat_text.chars().take(w as usize).collect();
+        self.paint(cur, 0, first_row + 1, &cat_display, w, dim);
+        let control_row = if let Some(ref scope) = proposal.scope {
+            let scope_text = format!("  Scope: {}", scope);
+            let scope_display: String = scope_text.chars().take(w as usize).collect();
+            self.paint(cur, 0, first_row + 2, &scope_display, w, dim);
+            first_row + 3
+        } else {
+            first_row + 2
+        };
+        self.paint(cur, 0, control_row, "  ^Y remember   ^N discard", w, dim);
     }
 
     fn paint_autocomplete_overlay(
