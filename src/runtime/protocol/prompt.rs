@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use crate::tools::{ExecutionKind, ToolSpec};
+use crate::runtime::mcp::McpTool;
+use crate::tools::{DynamicToolSpec, ExecutionKind, RiskLevel, ToolSpec};
 
 use super::super::project::{CargoContext, ProjectStructureEntryKind, ProjectStructureSnapshot};
 use super::prompt_physics;
@@ -102,6 +103,7 @@ pub fn build_system_prompt(
     specs: &[ToolSpec],
     include_mutation_tools: bool,
     prompt_physics: &PromptPhysicsConfig,
+    dynamic_tools: &[McpTool],
 ) -> String {
     let mut prompt = String::new();
     if let Some(anchor) = prompt_physics::primacy_anchor_block(prompt_physics) {
@@ -171,7 +173,16 @@ When you show code, keep it focused on the user's request.",
         }
         prompt.push('\n');
         prompt.push_str(instructions);
-        let dynamic_instructions = tool_codec::format_dynamic_instructions(&[]);
+        let dynamic_specs: Vec<DynamicToolSpec> = dynamic_tools
+            .iter()
+            .map(|t| DynamicToolSpec {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                execution_kind: ExecutionKind::RequiresApproval,
+                default_risk: Some(RiskLevel::Medium),
+            })
+            .collect();
+        let dynamic_instructions = tool_codec::format_dynamic_instructions(&dynamic_specs);
         if !dynamic_instructions.is_empty() {
             prompt.push('\n');
             prompt.push_str(&dynamic_instructions);

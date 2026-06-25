@@ -59,6 +59,7 @@ fn run_round(
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |_| {},
     )
 }
@@ -269,6 +270,7 @@ fn lsp_definition_seeded_on_definition_lookup_with_real_search() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |_| {},
     );
 
@@ -335,6 +337,7 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |_| {},
     );
 
@@ -368,6 +371,7 @@ fn non_candidate_read_redirects_to_candidate_with_real_files() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |_| {},
     );
 
@@ -469,6 +473,7 @@ fn definition_lookup_truncated_no_declaration_dispatches_refinement() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |_| {},
     );
 
@@ -589,6 +594,7 @@ fn index_hit_promotes_definition_candidate_on_definition_lookup() {
         Some(&store),
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |_| {},
     );
 

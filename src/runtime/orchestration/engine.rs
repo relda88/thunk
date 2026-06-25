@@ -134,6 +134,10 @@ pub struct Runtime {
     /// MCP server manager. None when no mcp.json config exists or all servers fail to start.
     /// Advisory — session proceeds normally when absent. Shut down in Drop via kill+wait.
     mcp_manager: Option<crate::runtime::mcp::MCPManager>,
+    /// MCP tools discovered at session start via `tools/list`, with namespaced names.
+    /// Session-scoped — re-discovered fresh each session, never persisted to SQLite.
+    /// Empty when no MCP servers are configured or none expose tools.
+    discovered_tools: Vec<crate::runtime::mcp::McpTool>,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
     /// Embedding provider for vector search. `None` when unconfigured.
@@ -223,17 +227,11 @@ impl Runtime {
             active_skill: None,
         };
         let cargo_context = CargoContext::load(project_root.path());
-        let system_prompt = prompt::build_system_prompt(
-            &config.app.name,
-            project_root.path(),
-            cargo_context.as_ref(),
-            &specs,
-            false,
-            &prompt_physics,
-        );
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
         let lsp = LspManager::new(&config.lsp, project_root.path());
-        let mcp_manager = {
+        // MCP must initialize before build_system_prompt so discovered tools appear in the
+        // model's prompt from session start.
+        let mut mcp_manager = {
             use crate::runtime::mcp::{MCPManager, McpConfig};
             let home_mcp_config = std::env::var("HOME")
                 .ok()
@@ -254,6 +252,32 @@ impl Runtime {
                 Some(mgr)
             }
         };
+        // Discover tools eagerly. Static tool names are never overwritten — a namespaced
+        // MCP tool colliding with a static name is skipped with a warning.
+        let static_names: std::collections::HashSet<&str> = specs.iter().map(|s| s.name).collect();
+        let discovered_tools: Vec<crate::runtime::mcp::McpTool> = mcp_manager
+            .as_mut()
+            .map(|m| m.discover_all())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| {
+                if static_names.contains(t.name.as_str()) {
+                    eprintln!("MCP tool name collision: {}, skipping", t.name);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        let system_prompt = prompt::build_system_prompt(
+            &config.app.name,
+            project_root.path(),
+            cargo_context.as_ref(),
+            &specs,
+            false,
+            &prompt_physics,
+            &discovered_tools,
+        );
         let session_start_ref = capture_session_head(project_root.path());
         Self {
             project_root,
@@ -270,6 +294,7 @@ impl Runtime {
             undo_stack: Vec::new(),
             lsp,
             mcp_manager,
+            discovered_tools,
             symbol_store: None,
             embedding_provider: None,
             retrieval_config: config.retrieval.clone(),
@@ -1681,7 +1706,12 @@ impl Runtime {
                     }
                 };
 
-                let calls = tool_codec::parse_all_tool_inputs(&response);
+                let dynamic_names: Vec<&str> = self
+                    .discovered_tools
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect();
+                let calls = tool_codec::parse_all_tool_inputs(&response, &dynamic_names);
                 (calls, Some(response), false)
             };
 
@@ -1726,6 +1756,11 @@ impl Runtime {
             None
         };
 
+        let dynamic_allowed: std::collections::HashSet<String> = self
+            .discovered_tools
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
         match run_tool_round(
             &self.project_root,
             &self.registry,
@@ -1748,6 +1783,7 @@ impl Runtime {
             self.symbol_store.as_ref(),
             self.embedding_provider.as_deref(),
             &self.retrieval_config,
+            &dynamic_allowed,
             on_event,
         ) {
             ToolRoundOutcome::Completed {

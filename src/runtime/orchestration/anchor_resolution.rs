@@ -56,6 +56,7 @@ impl Runtime {
             self.symbol_store.as_ref(),
             self.embedding_provider.as_deref(),
             &self.retrieval_config,
+            &HashSet::new(),
             on_event,
         ) {
             ToolRoundOutcome::Completed { results, .. } => {

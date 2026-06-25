@@ -401,6 +401,7 @@ fn search_anchor_stores_effective_clamped_scope() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |e| events.push(e),
     );
 
@@ -464,6 +465,7 @@ fn failed_search_code_does_not_update_last_search_anchor() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |e| events.push(e),
     );
     assert!(
@@ -498,6 +500,7 @@ fn failed_search_code_does_not_update_last_search_anchor() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |e| events.push(e),
     );
 
@@ -643,6 +646,7 @@ fn same_scope_forced_broader_path_clamps_to_prior_scoped_search() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |e| events.push(e),
     );
     assert!(
@@ -690,6 +694,7 @@ fn same_scope_forced_broader_path_clamps_to_prior_scoped_search() {
         None,
         None,
         &RetrievalConfig::default(),
+        &HashSet::new(),
         &mut |e| events.push(e),
     );
 

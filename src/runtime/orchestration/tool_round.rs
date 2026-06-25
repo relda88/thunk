@@ -212,6 +212,7 @@ pub(crate) fn run_tool_round(
     symbol_store: Option<&SymbolStore>,
     embedding_provider: Option<&(dyn EmbeddingProvider + Send)>,
     retrieval_config: &RetrievalConfig,
+    dynamic_allowed: &HashSet<String>,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> ToolRoundOutcome {
     let mut accumulated = String::new();
@@ -332,7 +333,7 @@ pub(crate) fn run_tool_round(
         let is_git_read_only_tool = is_git_read_only_tool_input(&input);
         on_event(RuntimeEvent::ToolCallStarted { name: name.clone() });
 
-        if !tool_allowed_for_surface(&input, tool_surface, &HashSet::new()) {
+        if !tool_allowed_for_surface(&input, tool_surface, dynamic_allowed) {
             *disallowed_tool_attempts += 1;
             trace_runtime_decision(
                 on_event,
@@ -1568,6 +1569,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         )
     }
@@ -1807,6 +1809,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -1841,6 +1844,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -1900,6 +1904,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -1928,6 +1933,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -1962,6 +1968,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2025,6 +2032,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2053,6 +2061,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
         assert!(
@@ -2085,6 +2094,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
         assert!(
@@ -2148,6 +2158,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2180,6 +2191,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2239,6 +2251,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2278,6 +2291,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2317,6 +2331,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2379,6 +2394,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2451,6 +2467,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2513,6 +2530,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2578,6 +2596,7 @@ mod tests {
             None,
             None,
             &RetrievalConfig::default(),
+            &HashSet::new(),
             &mut |_| {},
         );
 
@@ -2664,6 +2683,7 @@ mod tests {
             Some(&store),
             Some(&provider as &(dyn EmbeddingProvider + Send)),
             &retrieval_config,
+            &HashSet::new(),
             &mut |e| events.push(e),
         );
 

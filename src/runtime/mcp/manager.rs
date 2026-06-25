@@ -6,12 +6,18 @@ use serde_json::Value;
 use crate::core::error::Result;
 
 use super::session::McpSession;
-use super::types::{McpConfig, McpServerConfig};
+use super::types::{McpConfig, McpServerConfig, McpTool};
 
 pub(crate) struct MCPManager {
     sessions: HashMap<String, McpSession>,
     config: McpConfig,
     timeout: Duration,
+}
+
+/// Namespaces a server's raw tool name as `mcp::<server>::<tool>` so discovered MCP
+/// tools never collide with static tool names. The `::` separator is parser-safe.
+fn namespaced_tool_name(server_name: &str, tool_name: &str) -> String {
+    format!("mcp::{server_name}::{tool_name}")
 }
 
 impl MCPManager {
@@ -102,6 +108,42 @@ impl MCPManager {
     pub(crate) fn server_names(&self) -> impl Iterator<Item = &str> {
         self.config.servers.iter().map(|s| s.name.as_str())
     }
+
+    /// Queries a single server for its tool schemas via `tools/list` and returns the
+    /// discovered tools with namespaced names (`mcp::<server>::<tool>`).
+    /// Per-server error isolation: any failure (dead server, malformed response) yields
+    /// an empty vec — it never propagates and never blocks discovery for other servers.
+    /// Pagination is ignored — v1 takes the first page only.
+    pub(crate) fn discover_tools(&mut self, server_name: &str) -> Vec<McpTool> {
+        match self.call(server_name, "tools/list", serde_json::json!({})) {
+            Ok(result) => {
+                let tools = result["tools"].as_array().cloned().unwrap_or_default();
+                tools
+                    .iter()
+                    .filter_map(|t| {
+                        let name = t["name"].as_str()?; // skip if name missing
+                        let description = t["description"].as_str().unwrap_or("").to_string();
+                        Some(McpTool {
+                            name: namespaced_tool_name(server_name, name),
+                            description,
+                            server_name: server_name.to_string(),
+                        })
+                    })
+                    .collect()
+            }
+            Err(_) => vec![], // per-server error isolation — silent, never propagates
+        }
+    }
+
+    /// Discovers tools across all configured servers. One server's discovery failure
+    /// never blocks the others (each `discover_tools` swallows its own errors).
+    pub(crate) fn discover_all(&mut self) -> Vec<McpTool> {
+        let names: Vec<String> = self.server_names().map(|s| s.to_string()).collect();
+        names
+            .iter()
+            .flat_map(|name| self.discover_tools(name))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -166,6 +208,42 @@ mod tests {
         assert!(
             manager.sessions.is_empty(),
             "failed server should not appear in sessions map"
+        );
+    }
+
+    #[test]
+    fn discover_tools_returns_namespaced_names() {
+        // No live session for "test_server" — discovery must fail silently (no panic) and
+        // return an empty vec rather than propagating the error.
+        let config = make_config(vec![McpServerConfig {
+            name: "test_server".to_string(),
+            command: "nonexistent_binary_xyz_thunk_test".to_string(),
+            args: vec![],
+            env: None,
+        }]);
+        let mut manager = MCPManager::new(config);
+        let tools = manager.discover_tools("test_server");
+        assert!(
+            tools.is_empty(),
+            "discovery against a dead/absent server must return empty, not panic"
+        );
+    }
+
+    #[test]
+    fn discover_all_empty_when_no_servers() {
+        let mut manager = MCPManager::new(make_config(vec![]));
+        assert!(
+            manager.discover_all().is_empty(),
+            "no configured servers means no discovered tools"
+        );
+    }
+
+    #[test]
+    fn namespaced_tool_name_uses_mcp_double_colon_convention() {
+        // A raw tool "list_files" on server "filesystem" becomes mcp::filesystem::list_files.
+        assert_eq!(
+            namespaced_tool_name("filesystem", "list_files"),
+            "mcp::filesystem::list_files"
         );
     }
 }
