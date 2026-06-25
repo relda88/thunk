@@ -212,6 +212,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::Commit { .. } => "commit",
         RuntimeRequest::ListDir { .. } => "list_dir",
         RuntimeRequest::LspStatus => "lsp_status",
+        RuntimeRequest::McpList => "mcp_list",
+        RuntimeRequest::McpRefresh => "mcp_refresh",
         RuntimeRequest::IndexBuild { .. } => "index_build",
         RuntimeRequest::IndexStatus => "index_status",
         RuntimeRequest::IndexEmbed => "index_embed",

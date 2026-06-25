@@ -596,6 +596,79 @@ impl Runtime {
         on_event(RuntimeEvent::SystemMessage(report));
     }
 
+    /// Lists configured MCP servers with liveness and discovered tool counts.
+    pub(super) fn handle_mcp_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let Some(ref mut mgr) = self.mcp_manager else {
+            on_event(RuntimeEvent::SystemMessage(
+                "No MCP servers configured".to_string(),
+            ));
+            return;
+        };
+        let names: Vec<String> = mgr.server_names().map(|s| s.to_string()).collect();
+        let mut lines = vec!["MCP servers:".to_string()];
+        for name in &names {
+            let alive = mgr.is_alive(name);
+            let marker = if alive { '●' } else { '○' };
+            let status = if alive { "alive" } else { "dead" };
+            let command = mgr
+                .server_config(name)
+                .map(|c| c.command.clone())
+                .unwrap_or_default();
+            let tool_count = self
+                .discovered_tools
+                .iter()
+                .filter(|t| &t.server_name == name)
+                .count();
+            lines.push(format!("{marker} {name} ({status})"));
+            lines.push(format!("  command: {command}"));
+            lines.push(format!("  tools: {tool_count} discovered"));
+        }
+        on_event(RuntimeEvent::SystemMessage(lines.join("\n")));
+    }
+
+    /// Re-runs MCP tool discovery and refreshes the dynamic tool set.
+    pub(super) fn handle_mcp_refresh(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        if self.mcp_manager.is_none() {
+            on_event(RuntimeEvent::SystemMessage(
+                "No MCP servers configured".to_string(),
+            ));
+            return;
+        }
+        // Mirror Runtime::new()'s collision filter: a namespaced MCP tool whose name
+        // collides with a static tool name is skipped with a warning.
+        let specs = self.registry.specs();
+        let static_names: std::collections::HashSet<&str> = specs.iter().map(|s| s.name).collect();
+        let discovered: Vec<crate::runtime::mcp::McpTool> = self
+            .mcp_manager
+            .as_mut()
+            .map(|m| m.discover_all())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| {
+                if static_names.contains(t.name.as_str()) {
+                    eprintln!("MCP tool name collision: {}, skipping", t.name);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        let tool_count = discovered.len();
+        let server_count = self
+            .mcp_manager
+            .as_ref()
+            .map(|m| m.server_names().count())
+            .unwrap_or(0);
+        self.discovered_tools = discovered;
+        // The parser and surface layers recompute from self.discovered_tools each turn,
+        // so they pick up the refreshed set automatically on the next turn. The system
+        // prompt is built once at construction and is NOT rebuilt here — its advertised
+        // tool list may be stale until the session restarts (v1 limitation).
+        on_event(RuntimeEvent::SystemMessage(format!(
+            "MCP tools refreshed: {tool_count} tools discovered across {server_count} servers"
+        )));
+    }
+
     pub(super) fn handle_index_build(
         &mut self,
         large: bool,

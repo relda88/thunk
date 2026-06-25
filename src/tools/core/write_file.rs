@@ -103,6 +103,7 @@ impl Tool for WriteFileTool {
             tool_name: "write_file".to_string(),
             summary,
             risk,
+            reversible: true,
             payload,
         }))
     }

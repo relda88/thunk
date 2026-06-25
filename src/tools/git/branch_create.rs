@@ -74,6 +74,7 @@ impl Tool for GitBranchCreateTool {
             tool_name: "git_branch_create".to_string(),
             summary,
             risk: RiskLevel::Medium,
+            reversible: true,
             payload: encode_payload(name, start_point.as_deref()),
         }))
     }

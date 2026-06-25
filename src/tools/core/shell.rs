@@ -63,6 +63,7 @@ impl Tool for ShellTool {
             tool_name: "shell".to_string(),
             summary,
             risk: RiskLevel::High,
+            reversible: true,
             payload: command.clone(),
         }))
     }
@@ -233,6 +234,7 @@ mod tests {
         assert_eq!(pending.tool_name, "shell");
         assert_eq!(pending.summary, "run: cargo check");
         assert_eq!(pending.risk, RiskLevel::High);
+        assert!(pending.reversible);
         assert_eq!(pending.payload, "cargo check");
     }
 

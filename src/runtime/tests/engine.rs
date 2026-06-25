@@ -1952,6 +1952,7 @@ fn non_cargo_verify_passes_raw_output_unchanged() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload,
     });
 
@@ -1988,6 +1989,7 @@ fn verify_returning_none_does_not_inject_correction() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload,
     });
 

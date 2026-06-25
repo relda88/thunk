@@ -110,6 +110,7 @@ fn submit_while_pending_fires_failed() {
         tool_name: "edit_file".into(),
         summary: "edit src/lib.rs".into(),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload: "{}".into(),
     });
     let events = collect_events(
@@ -132,6 +133,7 @@ fn reset_clears_pending_state() {
         tool_name: "write_file".into(),
         summary: "write src/new.rs".into(),
         risk: RiskLevel::High,
+        reversible: true,
         payload: "{}".into(),
     });
     collect_events(&mut rt, RuntimeRequest::Reset);
@@ -489,6 +491,7 @@ fn approve_produces_runtime_owned_answer_after_successful_mutation() {
         tool_name: "edit_file".into(),
         summary: format!("edit {path}"),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload,
     });
 
@@ -615,6 +618,7 @@ fn diagnostics_not_injected_when_lsp_disabled() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload,
     });
 
@@ -656,6 +660,7 @@ fn lsp_disabled_pre_check_skipped_mutation_executes_in_one_approval() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload,
     });
 
@@ -706,6 +711,7 @@ fn verify_emits_system_message_after_mutation() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload,
     });
 
@@ -747,6 +753,7 @@ fn verify_skipped_when_disabled() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload,
     });
 
@@ -801,6 +808,7 @@ fn correction_loop_emits_approval_on_first_failure() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload: initial_payload,
     });
 
@@ -874,6 +882,7 @@ fn correction_exhaustion_emits_summary() {
         tool_name: "edit_file".into(),
         summary: format!("edit {abs_path}"),
         risk: RiskLevel::Low,
+        reversible: true,
         payload: initial_payload,
     });
 

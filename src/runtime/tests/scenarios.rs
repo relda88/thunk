@@ -1053,6 +1053,7 @@ fn approve_path_does_not_trigger_r1() {
         tool_name: "edit_file".into(),
         summary: "edit no_such_file.rs".into(),
         risk: crate::tools::RiskLevel::Medium,
+        reversible: true,
         payload: bad_payload,
     });
 
@@ -1444,6 +1445,7 @@ fn approve_produces_runtime_owned_answer_after_mutation() {
         tool_name: "edit_file".into(),
         summary: format!("edit {path}"),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload,
     });
 

@@ -51,6 +51,8 @@ pub(crate) struct PendingApprovalState {
     pub(crate) tool_name: String,
     pub(crate) summary: String,
     pub(crate) risk: ApprovalRisk,
+    /// True when the proposed action cannot be undone; surfaces a stronger warning.
+    pub(crate) irreversible: bool,
     pub(crate) evidence: Vec<String>,
     pub(crate) preview: Vec<String>,
     /// For multi-file transactions: list of affected file paths (display form).
@@ -559,6 +561,7 @@ mod tests {
             tool_name: "shell".into(),
             summary: "run tests".into(),
             risk: super::ApprovalRisk::High,
+            irreversible: false,
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],

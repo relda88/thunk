@@ -35,6 +35,8 @@ pub enum Command {
     Diff(DiffMode),
     Ls(String),
     LspStatus,
+    McpList,
+    McpRefresh,
     IndexBuild {
         large: bool,
     },
@@ -199,6 +201,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") => Some(Ok(Command::LspStatus)),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/mcp" => match arg {
+            None => Some(Ok(Command::McpList)),
+            Some("list") => Some(Ok(Command::McpList)),
+            Some("refresh") => Some(Ok(Command::McpRefresh)),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/index" => match arg {
             Some("status") => Some(Ok(Command::IndexStatus)),
             Some("build") => Some(Ok(Command::IndexBuild { large: false })),
@@ -355,6 +363,8 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/last",
         "/ls",
         "/lsp",
+        "/mcp",
+        "/mcp refresh",
         "/plan",
         "/prompt-physics",
         "/providers",
@@ -470,6 +480,14 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/lsp",
             description: "show LSP server status",
+        },
+        LauncherCommand {
+            name: "/mcp",
+            description: "list configured MCP servers and status",
+        },
+        LauncherCommand {
+            name: "/mcp refresh",
+            description: "re-run MCP tool discovery",
         },
         LauncherCommand {
             name: "/plan",
@@ -811,6 +829,14 @@ mod tests {
     #[test]
     fn parses_lsp_status() {
         assert_eq!(parse("/lsp status"), Some(Ok(Command::LspStatus)));
+    }
+
+    #[test]
+    fn parses_mcp_commands() {
+        assert_eq!(parse("/mcp"), Some(Ok(Command::McpList)));
+        assert_eq!(parse("/mcp list"), Some(Ok(Command::McpList)));
+        assert_eq!(parse("/mcp refresh"), Some(Ok(Command::McpRefresh)));
+        assert_eq!(parse("/mcp bogus"), Some(Err(ParseError::UnknownCommand)));
     }
 
     #[test]

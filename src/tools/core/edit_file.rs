@@ -119,6 +119,7 @@ impl Tool for EditFileTool {
             tool_name: "edit_file".to_string(),
             summary,
             risk: RiskLevel::Medium,
+            reversible: true,
             payload,
         }))
     }
@@ -306,6 +307,19 @@ mod tests {
             panic!("expected Approval");
         };
         assert_eq!(pa.risk, RiskLevel::Medium);
+    }
+
+    #[test]
+    fn run_pending_action_is_reversible() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("f.rs"), "old").unwrap();
+        let tool = tool_in(&dir);
+        let ToolRunResult::Approval(pa) =
+            run_edit(&tool, resolved_path(&dir, "f.rs"), "old", "new").unwrap()
+        else {
+            panic!("expected Approval");
+        };
+        assert!(pa.reversible);
     }
 
     #[test]

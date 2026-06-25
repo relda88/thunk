@@ -59,6 +59,7 @@ impl Tool for GitCommitTool {
             tool_name: "git_commit".to_string(),
             summary: format!("commit: {display}"),
             risk: RiskLevel::High,
+            reversible: true,
             // Payload is the raw commit message; decoded verbatim in execute_approved.
             payload: message.clone(),
         }))

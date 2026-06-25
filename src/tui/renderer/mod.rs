@@ -131,7 +131,8 @@ impl Renderer {
             0
         };
         let approval_rows: u16 = state.pending_approval.as_ref().map_or(0, |a| {
-            1 + a.transaction_files.len().min(6) as u16
+            1 + if a.irreversible { 1 } else { 0 }
+                + a.transaction_files.len().min(6) as u16
                 + a.evidence.len().min(4) as u16
                 + a.preview.len().min(4) as u16
                 + if a.impact.is_empty() { 0 } else { 1 }
@@ -547,6 +548,20 @@ impl Renderer {
 
         let mut offset: u16 = 1;
 
+        // Stronger confirmation for actions that cannot be undone.
+        if approval.irreversible {
+            let warning = "⚠ This action cannot be undone";
+            self.paint(
+                cur,
+                0,
+                first_row + offset,
+                warning,
+                w,
+                self.theme.chip_danger(),
+            );
+            offset += 1;
+        }
+
         // Transaction file list (capped at 6).
         let tx_count = approval.transaction_files.len().min(6);
         for (i, file) in approval.transaction_files.iter().take(6).enumerate() {
@@ -845,6 +860,7 @@ mod tests {
             tool_name: "shell".to_string(),
             summary: "run cargo test".to_string(),
             risk: ApprovalRisk::Low,
+            irreversible: false,
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
@@ -881,6 +897,7 @@ mod tests {
             tool_name: "shell".to_string(),
             summary: "run".to_string(),
             risk: ApprovalRisk::Low,
+            irreversible: false,
             evidence: vec!["some evidence".to_string()],
             preview: vec![],
             transaction_files: vec![],
@@ -915,6 +932,7 @@ mod tests {
             tool_name: "shell".to_string(),
             summary: "run".to_string(),
             risk: ApprovalRisk::Low,
+            irreversible: false,
             evidence: vec![],
             preview: vec![],
             transaction_files: vec![],
@@ -951,6 +969,7 @@ mod tests {
                 tool_name: "shell".to_string(),
                 summary: "run".to_string(),
                 risk: ApprovalRisk::Low,
+                irreversible: false,
                 evidence: (0..count).map(|i| format!("ev{}", i)).collect(),
                 preview: vec![],
                 transaction_files: vec![],

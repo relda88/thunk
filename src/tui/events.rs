@@ -81,10 +81,12 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
                 RiskLevel::Low => ApprovalRisk::Low,
             };
             let preview = decode_approval_preview(&pending.tool_name, &pending.payload);
+            let irreversible = !pending.reversible;
             state.pending_approval = Some(PendingApprovalState {
                 tool_name: pending.tool_name,
                 summary: pending.summary,
                 risk,
+                irreversible,
                 evidence,
                 preview,
                 transaction_files: vec![],
@@ -106,10 +108,12 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             };
             let preview = decode_approval_preview(&first.tool_name, &first.payload);
             let transaction_files = actions.iter().map(|a| a.summary.clone()).collect();
+            let irreversible = !actions[0].reversible;
             state.pending_approval = Some(PendingApprovalState {
                 tool_name: first.tool_name.clone(),
                 summary: format!("{} edits", actions.len()),
                 risk,
+                irreversible,
                 evidence,
                 preview,
                 transaction_files,
@@ -192,6 +196,7 @@ mod tests {
             tool_name: tool_name.to_string(),
             summary: format!("{tool_name} summary"),
             risk,
+            reversible: true,
             payload: String::new(),
         }
     }
@@ -269,6 +274,47 @@ mod tests {
 
         let approval = state.pending_approval.as_ref().unwrap();
         assert_eq!(approval.risk, ApprovalRisk::Medium);
+    }
+
+    #[test]
+    fn irreversible_field_set_in_approval_state() {
+        let mut state = make_state();
+        let pending = PendingAction {
+            tool_name: "mcp::server::send_email".to_string(),
+            summary: "send email".to_string(),
+            risk: RiskLevel::Medium,
+            reversible: false,
+            payload: String::new(),
+        };
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending,
+                evidence: vec![],
+                impact: vec![],
+            },
+        );
+
+        let approval = state.pending_approval.as_ref().unwrap();
+        assert!(approval.irreversible);
+    }
+
+    #[test]
+    fn reversible_action_is_not_marked_irreversible() {
+        let mut state = make_state();
+
+        apply_runtime_event(
+            &mut state,
+            RuntimeEvent::ApprovalRequired {
+                pending: make_pending("edit_file", RiskLevel::Medium),
+                evidence: vec![],
+                impact: vec![],
+            },
+        );
+
+        let approval = state.pending_approval.as_ref().unwrap();
+        assert!(!approval.irreversible);
     }
 
     #[test]

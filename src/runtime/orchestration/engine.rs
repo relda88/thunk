@@ -491,6 +491,8 @@ impl Runtime {
             RuntimeRequest::Diff { mode } => self.handle_diff(mode, on_event),
             RuntimeRequest::ListDir { path } => self.handle_list_dir(path, on_event),
             RuntimeRequest::LspStatus => self.handle_lsp_status(on_event),
+            RuntimeRequest::McpList => self.handle_mcp_list(on_event),
+            RuntimeRequest::McpRefresh => self.handle_mcp_refresh(on_event),
             RuntimeRequest::IndexBuild { large } => self.handle_index_build(large, on_event),
             RuntimeRequest::IndexStatus => self.handle_index_status(on_event),
             RuntimeRequest::IndexEmbed => self.handle_index_embed(on_event),

@@ -51,6 +51,7 @@ fn successful_approved_write_file_invalidates_cache_and_rebuilds_snapshot() {
         tool_name: "write_file".into(),
         summary: "create written.txt".into(),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload: format!("{}\x00hello\n", written.display()),
     });
 
@@ -89,6 +90,7 @@ fn successful_approved_edit_file_invalidates_cache() {
         tool_name: "edit_file".into(),
         summary: "edit editable.txt".into(),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload: format!("{}\x00hello world\x00hello runtime", editable.display()),
     });
 
@@ -123,6 +125,7 @@ fn rejected_approval_does_not_invalidate_cache() {
         tool_name: "write_file".into(),
         summary: "create rejected.txt".into(),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload: format!("{}\x00hello\n", rejected_target.display()),
     });
 
@@ -167,6 +170,7 @@ fn failed_approved_mutation_does_not_invalidate_cache() {
         tool_name: "write_file".into(),
         summary: "create missing/out.txt".into(),
         risk: RiskLevel::Medium,
+        reversible: true,
         payload: format!("{}\x00hello\n", failed_target.display()),
     });
 

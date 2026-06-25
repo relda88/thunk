@@ -12,6 +12,11 @@ pub struct PendingAction {
     pub tool_name: String,
     pub summary: String,
     pub risk: RiskLevel,
+    /// Whether the action can be undone after execution. File edits, writes, and git
+    /// branch/commit operations are reversible; MCP tools are classified heuristically.
+    /// Irreversible actions are never grouped into a transaction and surface a stronger
+    /// confirmation in the TUI. thunk classifies this — MCP server declarations are ignored.
+    pub reversible: bool,
     /// Opaque serialized payload passed back to the tool's execute_approved().
     pub payload: String,
 }
@@ -78,6 +83,7 @@ mod tests {
             tool_name: "edit_file".to_string(),
             summary: "Edit src/lib.rs (3 lines)".to_string(),
             risk: RiskLevel::Low,
+            reversible: true,
             payload: "{}".to_string(),
         };
         let cloned = action.clone();
@@ -99,6 +105,7 @@ mod tests {
             tool_name: "edit_file".to_string(),
             summary: "edit a.rs".to_string(),
             risk: RiskLevel::Medium,
+            reversible: true,
             payload: "payload".to_string(),
         };
         let tx = PendingTransaction::single(action.clone());
@@ -113,6 +120,7 @@ mod tests {
             tool_name: name.to_string(),
             summary: name.to_string(),
             risk: RiskLevel::Medium,
+            reversible: true,
             payload: String::new(),
         };
         let tx = PendingTransaction {
@@ -128,6 +136,7 @@ mod tests {
             tool_name: "write_file".to_string(),
             summary: "write b.rs".to_string(),
             risk: RiskLevel::Low,
+            reversible: true,
             payload: String::new(),
         };
         let stage = PendingApprovalStage::AwaitingPreCheck(PendingTransaction::single(action));

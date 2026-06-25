@@ -133,6 +133,17 @@ fn is_mutating_tool(input: &ToolInput) -> bool {
     )
 }
 
+/// Heuristically classifies whether an MCP tool's action can be undone.
+/// thunk owns this classification — MCP server declarations are ignored. The
+/// conservative default is reversible; a tool whose (bare) name suggests an
+/// outward, destructive, or non-undoable effect is flagged irreversible.
+fn mcp_action_reversible(bare_tool: &str) -> bool {
+    let lower = bare_tool.to_lowercase();
+    !["send", "delete", "post", "remove", "destroy", "publish"]
+        .iter()
+        .any(|kw| lower.contains(kw))
+}
+
 fn is_general_doc_like_candidate_path(path: &str) -> bool {
     let normalized = normalize_evidence_path(path);
     let lower = normalized.to_ascii_lowercase();
@@ -889,6 +900,7 @@ pub(crate) fn run_tool_round(
                     tool_name: name.clone(),
                     summary: format!("Call MCP tool {bare_tool} on server {server}"),
                     risk: RiskLevel::Medium,
+                    reversible: mcp_action_reversible(&bare_tool),
                     payload,
                 };
                 return ToolRoundOutcome::ApprovalRequired {
@@ -1295,6 +1307,14 @@ pub(crate) fn run_tool_round(
                         pending: tx_actions.remove(0),
                     };
                 }
+                // Invariant: irreversible actions are never grouped into a transaction.
+                // Only consecutive edit_file/write_file approvals reach this batch today
+                // (all reversible), so this is a documentation guard, not load-bearing
+                // logic — MCP/git/shell are never batched here.
+                debug_assert!(
+                    tx_actions.iter().all(|a| a.reversible),
+                    "irreversible action grouped into a transaction"
+                );
                 return ToolRoundOutcome::TransactionRequired {
                     accumulated,
                     actions: tx_actions,
@@ -1519,6 +1539,18 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn mcp_action_reversible_detects_irreversible_keywords() {
+        assert!(!mcp_action_reversible("send_email"));
+        assert!(!mcp_action_reversible("delete_record"));
+        assert!(!mcp_action_reversible("post_message"));
+        assert!(!mcp_action_reversible("remove_file"));
+        assert!(!mcp_action_reversible("destroy_resource"));
+        assert!(!mcp_action_reversible("publish_doc"));
+        assert!(mcp_action_reversible("list_files"));
+        assert!(mcp_action_reversible("read_record"));
+    }
     use crate::core::config::LspConfig;
     use crate::runtime::ProjectRoot;
     use crate::tools::types::FileContentsOutput;

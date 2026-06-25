@@ -53,6 +53,7 @@ impl Tool for GitBranchSwitchTool {
             tool_name: "git_branch_switch".to_string(),
             summary: format!("switch to branch {name}"),
             risk: RiskLevel::Medium,
+            reversible: true,
             payload: name.clone(),
         }))
     }

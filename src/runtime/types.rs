@@ -172,6 +172,12 @@ pub enum RuntimeRequest {
     /// Read-only LSP health query. Returns LSP status as a SystemMessage event.
     /// Does not mutate conversation state or trigger session save.
     LspStatus,
+    /// Lists configured MCP servers with liveness and discovered tool counts.
+    /// Returns status as a SystemMessage event. Does not mutate conversation state.
+    McpList,
+    /// Re-runs MCP tool discovery and refreshes the dynamic tool set. Parser and
+    /// surface layers pick up the change on the next turn. Does not mutate conversation.
+    McpRefresh,
     /// Runs the symbol extractor and writes results to the index store.
     /// `large` disables the default file-count guard for large projects.
     /// Does not mutate conversation state or trigger session save.
