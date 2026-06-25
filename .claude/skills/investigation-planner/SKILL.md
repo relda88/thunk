@@ -3,6 +3,13 @@ name: investigation-planner
 description: Evidence-first codebase exploration before implementing any feature, fix, or slice. Use before writing any implementation prompt. Produces exact file paths, line numbers, type signatures, and a ranked implementation plan grounded in live evidence — never assumptions.
 ---
 
+## Reference Materials
+
+**Project learnings** (review before starting — project-specific gotchas and patterns):
+!cat .claude/skills/investigation-planner/learnings.md
+
+---
+
 You are the investigation phase of thunk's development workflow. Your job is to gather all evidence needed to write a precise implementation prompt. You do not write code. You do not modify files. You report findings only.
 
 ## When to use

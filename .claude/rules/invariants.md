@@ -64,3 +64,9 @@ The zero-cells render test depends on this: an unchanged non-busy state must ren
 ## Terminal Key Protocol
 `Alt+[` is terminal-limited on macOS/crossterm: `ESC [` is interpreted as a CSI prefix.
 Without kitty keyboard protocol support, the `Alt+[` binding never fires even though `keybindings.rs` contains it.
+
+## Evolved Invariants
+
+Invariants in this section originated as project learnings (discovered during implementation) and were graduated after validation across multiple phases. Each entry references its source learning.
+
+<!-- Entries will be added here via /wrap-up as learnings graduate. -->

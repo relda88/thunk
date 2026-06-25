@@ -3,6 +3,13 @@
 Activate when diagnosing runtime failures, protocol parse errors, tool
 dispatch problems, mutation issues, or session/restore problems.
 
+## Reference Materials
+
+**Project learnings** (review before diagnosing — known failure patterns and gotchas):
+!cat .claude/skills/debug-runtime/learnings.md
+
+---
+
 ## When to use this skill
 - Tools are failing at 0ms with no visible error
 - Protocol parse failures — model emitting malformed tool syntax
