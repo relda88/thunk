@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use rusqlite::Connection;
 use tempfile::NamedTempFile;
 
@@ -66,7 +68,7 @@ fn seed_symbols(store: &SymbolStore, root: &str, names: &[&str]) {
 
 fn make_runtime_with_store_and_provider(
     db_path: &std::path::Path,
-    provider: Box<dyn EmbeddingProvider + Send>,
+    provider: Arc<dyn EmbeddingProvider + Send + Sync>,
 ) -> (Runtime, String) {
     use crate::core::config::Config;
     use crate::runtime::ProjectRoot;
@@ -152,7 +154,7 @@ fn index_embed_no_symbols_emits_build_first_message() {
     let _store = open_store(db.path());
     drop(_store);
 
-    let provider = Box::new(ConstantEmbedProvider(vec![1.0, 0.0]));
+    let provider = Arc::new(ConstantEmbedProvider(vec![1.0, 0.0]));
     let (mut rt, _root) = make_runtime_with_store_and_provider(db.path(), provider);
 
     let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
@@ -177,7 +179,7 @@ fn index_embed_stores_embeddings_for_symbols() {
     seed_symbols(&store, &root, &["alpha", "beta"]);
     drop(store);
 
-    let provider = Box::new(ConstantEmbedProvider(vec![0.5, 0.5]));
+    let provider = Arc::new(ConstantEmbedProvider(vec![0.5, 0.5]));
     let (mut rt, root) = make_runtime_with_store_and_provider(db.path(), provider);
 
     let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
@@ -202,7 +204,7 @@ fn index_embed_provider_failure_emits_failed_message() {
     seed_symbols(&store, &root, &["fn_x"]);
     drop(store);
 
-    let provider = Box::new(FailingEmbedProvider);
+    let provider = Arc::new(FailingEmbedProvider);
     let (mut rt, _) = make_runtime_with_store_and_provider(db.path(), provider);
 
     let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
@@ -235,7 +237,7 @@ fn index_embed_clears_on_model_change() {
     );
     drop(store);
 
-    let provider = Box::new(ConstantEmbedProvider(vec![0.1, 0.9]));
+    let provider = Arc::new(ConstantEmbedProvider(vec![0.1, 0.9]));
     let (mut rt, root) = make_runtime_with_store_and_provider(db.path(), provider);
 
     let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
@@ -269,7 +271,7 @@ fn index_embed_emits_per_chunk_progress_messages() {
     seed_symbols(&store, &root, &name_strs);
     drop(store);
 
-    let provider = Box::new(ConstantEmbedProvider(vec![0.1, 0.9]));
+    let provider = Arc::new(ConstantEmbedProvider(vec![0.1, 0.9]));
     let (mut rt, _) = make_runtime_with_store_and_provider(db.path(), provider);
 
     let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
@@ -304,7 +306,7 @@ fn index_embed_caps_at_2000_symbols_with_warning() {
     seed_symbols(&store, &root, &name_strs);
     drop(store);
 
-    let provider = Box::new(ConstantEmbedProvider(vec![0.0, 1.0]));
+    let provider = Arc::new(ConstantEmbedProvider(vec![0.0, 1.0]));
     let (mut rt, root) = make_runtime_with_store_and_provider(db.path(), provider);
 
     let events = collect_events(&mut rt, RuntimeRequest::IndexEmbed);
@@ -351,7 +353,7 @@ fn index_embed_chunk_failure_skips_and_continues_pipeline() {
     seed_symbols(&store, &root, &name_strs);
     drop(store);
 
-    let provider = Box::new(FirstChunkFailProvider {
+    let provider = Arc::new(FirstChunkFailProvider {
         calls: AtomicUsize::new(0),
     });
     let (mut rt, root) = make_runtime_with_store_and_provider(db.path(), provider);
@@ -394,7 +396,7 @@ fn index_embed_chunk_after_reset_is_silent_no_op() {
     seed_symbols(&store, &root, &["fn_a", "fn_b", "fn_c"]);
     drop(store);
 
-    let provider = Box::new(ConstantEmbedProvider(vec![0.1, 0.2]));
+    let provider = Arc::new(ConstantEmbedProvider(vec![0.1, 0.2]));
     let (mut rt, _) = make_runtime_with_store_and_provider(db.path(), provider);
 
     // Complete a full embed (synchronous recursive dispatch clears pending_embed).

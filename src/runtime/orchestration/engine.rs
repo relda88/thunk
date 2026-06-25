@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::core::config::{Config, InvestigationDepth, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
@@ -138,10 +139,14 @@ pub struct Runtime {
     /// Session-scoped — re-discovered fresh each session, never persisted to SQLite.
     /// Empty when no MCP servers are configured or none expose tools.
     discovered_tools: Vec<crate::runtime::mcp::McpTool>,
+    /// Personal memory manager. None when ~/.thunk/memory.db is unavailable or memory disabled.
+    /// Advisory — session proceeds normally when absent. MemoryStore drops cleanly with no
+    /// explicit shutdown needed.
+    memory_manager: Option<crate::runtime::memory::MemoryManager>,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
     /// Embedding provider for vector search. `None` when unconfigured.
-    pub(super) embedding_provider: Option<Box<dyn EmbeddingProvider + Send>>,
+    pub(super) embedding_provider: Option<Arc<dyn EmbeddingProvider + Send + Sync>>,
     pub(super) retrieval_config: RetrievalConfig,
     /// Plan/task store. `None` when no db_path was supplied (e.g. in tests).
     pub(crate) task_store: Option<TaskStore>,
@@ -295,6 +300,7 @@ impl Runtime {
             lsp,
             mcp_manager,
             discovered_tools,
+            memory_manager: None,
             symbol_store: None,
             embedding_provider: None,
             retrieval_config: config.retrieval.clone(),
@@ -353,8 +359,18 @@ impl Runtime {
     }
 
     /// Attaches an embedding provider for vector search. Returns `self` for chaining.
-    pub fn with_embedding_provider(mut self, provider: Box<dyn EmbeddingProvider + Send>) -> Self {
+    pub fn with_embedding_provider(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider + Send + Sync>,
+    ) -> Self {
         self.embedding_provider = Some(provider);
+        self
+    }
+
+    /// Attaches a personal memory manager. Returns `self` for chaining.
+    /// Advisory — call only when the home DB is confirmed available.
+    pub fn with_memory_manager(mut self, manager: crate::runtime::memory::MemoryManager) -> Self {
+        self.memory_manager = Some(manager);
         self
     }
 

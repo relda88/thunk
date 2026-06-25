@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::logging::SessionLog;
@@ -168,10 +169,27 @@ impl AppContext {
                 runtime = runtime.with_edit_store(store);
             }
         }
-        if let Some(ref model) = config.retrieval.embedding_model {
-            let provider =
-                OllamaEmbeddingProvider::new(config.ollama.base_url.clone(), model.clone());
-            runtime = runtime.with_embedding_provider(Box::new(provider));
+        let embed_provider: Option<
+            Arc<dyn crate::runtime::index::EmbeddingProvider + Send + Sync>,
+        > = config.retrieval.embedding_model.as_ref().map(|model| {
+            Arc::new(OllamaEmbeddingProvider::new(
+                config.ollama.base_url.clone(),
+                model.clone(),
+            )) as Arc<dyn crate::runtime::index::EmbeddingProvider + Send + Sync>
+        });
+        if let Some(ref provider) = embed_provider {
+            runtime = runtime.with_embedding_provider(provider.clone());
+        }
+        if let Some(mem_path) = crate::storage::memory::schema::memory_db_path() {
+            if let Some(parent) = mem_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            if let Ok(store) = crate::storage::memory::MemoryStore::open(&mem_path) {
+                runtime = runtime.with_memory_manager(crate::runtime::memory::MemoryManager::new(
+                    store,
+                    embed_provider.clone(),
+                ));
+            }
         }
         if !history.is_empty() {
             runtime.load_history(history);
