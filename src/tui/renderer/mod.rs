@@ -687,6 +687,7 @@ mod tests {
             data_dir: dir.path().join("data"),
             logs_dir: dir.path().join("logs"),
             session_db: dir.path().join("data").join("sessions.db"),
+            home_mcp_config: None,
         };
         let state = AppState::new(&Config::default(), &paths);
         (dir, state)

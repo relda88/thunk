@@ -338,6 +338,7 @@ mod tests {
                 data_dir: root_dir.path().join("data"),
                 logs_dir: root_dir.path().join("logs"),
                 session_db: root_dir.path().join("data").join("sessions.db"),
+                home_mcp_config: None,
             };
             let config = Config::default();
             let backend = build_backend(&config).unwrap();

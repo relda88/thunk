@@ -131,6 +131,9 @@ pub struct Runtime {
     /// Persistent LSP server session. Starts lazily on first query when lsp.enabled = true.
     /// Shut down in Drop via graceful shutdown → kill.
     lsp: LspManager,
+    /// MCP server manager. None when no mcp.json config exists or all servers fail to start.
+    /// Advisory — session proceeds normally when absent. Shut down in Drop via kill+wait.
+    mcp_manager: Option<crate::runtime::mcp::MCPManager>,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
     /// Embedding provider for vector search. `None` when unconfigured.
@@ -230,6 +233,27 @@ impl Runtime {
         );
         let context_policy = ContextPolicy::from_capabilities(backend.capabilities());
         let lsp = LspManager::new(&config.lsp, project_root.path());
+        let mcp_manager = {
+            use crate::runtime::mcp::{MCPManager, McpConfig};
+            let home_mcp_config = std::env::var("HOME")
+                .ok()
+                .map(|h| std::path::PathBuf::from(h).join(".thunk").join("mcp.json"));
+            let home = home_mcp_config.as_deref().filter(|p| p.exists());
+            let project_path = thunk_dir.join("mcp.json");
+            let project = if project_path.exists() {
+                Some(project_path.as_path())
+            } else {
+                None
+            };
+            let config = McpConfig::load(home, project);
+            if config.servers.is_empty() {
+                None
+            } else {
+                let mut mgr = MCPManager::new(config);
+                mgr.start_all();
+                Some(mgr)
+            }
+        };
         let session_start_ref = capture_session_head(project_root.path());
         Self {
             project_root,
@@ -245,6 +269,7 @@ impl Runtime {
             pending_runtime_call: None,
             undo_stack: Vec::new(),
             lsp,
+            mcp_manager,
             symbol_store: None,
             embedding_provider: None,
             retrieval_config: config.retrieval.clone(),
@@ -2181,6 +2206,9 @@ impl Runtime {
 impl Drop for Runtime {
     fn drop(&mut self) {
         self.lsp.shutdown();
+        if let Some(ref mut mcp) = self.mcp_manager {
+            mcp.shutdown();
+        }
     }
 }
 

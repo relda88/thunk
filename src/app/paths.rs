@@ -22,6 +22,8 @@ pub struct AppPaths {
     pub data_dir: PathBuf,
     pub logs_dir: PathBuf,
     pub session_db: PathBuf,
+    /// Path to ~/.thunk/mcp.json for user-home MCP server config. None if HOME is unset.
+    pub home_mcp_config: Option<PathBuf>,
 }
 
 /// Discovers the necessary paths for the application based on the current working directory
@@ -45,12 +47,17 @@ impl AppPaths {
         // Runtime project root: nearest .git ancestor, or cwd as fallback.
         let project_root = find_git_root(&start_dir).unwrap_or_else(|| start_dir.clone());
 
+        let home_mcp_config = std::env::var("HOME")
+            .ok()
+            .map(|h| PathBuf::from(h).join(".thunk").join("mcp.json"));
+
         Ok(Self {
             config_file: root_dir.join(CONFIG_FILE_NAME),
             data_dir: root_dir.join("data"),
             logs_dir: root_dir.join("logs"),
             session_db: root_dir.join("data").join("sessions.db"),
             thunk_dir: project_root.join(".thunk"),
+            home_mcp_config,
             root_dir,
             project_root,
         })
@@ -114,6 +121,7 @@ mod tests {
             logs_dir: root_dir.join("logs"),
             session_db: root_dir.join("data").join("sessions.db"),
             thunk_dir: project_root.join(".thunk"),
+            home_mcp_config: None,
             root_dir,
             project_root,
         }

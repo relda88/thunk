@@ -440,6 +440,7 @@ mod tests {
             data_dir: PathBuf::from("/tmp/data"),
             logs_dir: PathBuf::from("/tmp/logs"),
             session_db: PathBuf::from("/tmp/data/sessions.db"),
+            home_mcp_config: None,
         };
         AppState::new(&config, &paths)
     }

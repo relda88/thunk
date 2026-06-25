@@ -4,6 +4,7 @@ pub(crate) mod diff;
 pub(crate) mod index;
 mod investigation;
 pub(crate) mod lsp;
+pub(crate) mod mcp;
 mod orchestration;
 mod patch;
 mod paths;
