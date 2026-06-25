@@ -11,8 +11,10 @@ Key files: `src/core/config.rs`, `src/core/error.rs`, `src/core/mod.rs`
 Owns concrete filesystem, Git, and web-fetch actions, registration, approval contracts, and the `PendingAction` / `PendingTransaction` / `PendingApprovalStage` / `RiskLevel` types.
 Must not parse assistant text, own conversation mutations, or decide investigation correctness.
 `default_registry()` registers only `read_file` and `list_dir`.
-`ToolRegistry::with_project_root()` adds `search_code`, `git_status`, `git_diff`, `git_log`, `git_branch`, `edit_file`, `write_file`, `shell`.
+`ToolRegistry::with_project_root()` adds `search_code`, `git_status`, `git_diff`, `git_diff_staged`, `git_log`, `git_branch`, `git_branch_create`, `git_branch_switch`, `git_commit`, `edit_file`, `write_file`, `shell`.
+`ToolRegistry` keys tools by `String` (runtime-owned names), not `&'static str`, so dynamically-registered MCP tools can share the registry. `register()` takes any `impl Tool + 'static`.
 `web_fetch` is not registered in `ToolRegistry` — it is dispatched directly by `handle_fetch_url()` in `command_handlers.rs`.
+`ToolInput::DynamicTool { name, args }` and `DynamicToolSpec` (`types.rs`) carry MCP-registered tool calls and their metadata; `DynamicToolSpec` is separate from `ToolSpec` to avoid `&'static str` name fields.
 Key files: `src/tools/mod.rs`, `src/tools/registry.rs`, `src/tools/types.rs`, `src/tools/core/web_fetch.rs` (`WebFetchTool` — private IP blocking, HTML stripping, 32 KB cap), `src/tools/core/*.rs`, `src/tools/git/*.rs`, `src/tools/search/`
 
 ## src/runtime/lsp/
@@ -20,6 +22,12 @@ Owns the LSP server lifecycle, JSON-RPC transport, and definition/hover queries.
 `LspManager` is the only public type; it starts rust-analyzer lazily on first query when `[lsp].enabled = true`.
 `LspManager` is owned by `Runtime` — not registered in `ToolRegistry`.
 Key files: `src/runtime/lsp/manager.rs`, `src/runtime/lsp/session.rs`, `src/runtime/lsp/transport.rs`, `src/runtime/lsp/protocol.rs`, `src/runtime/lsp/types.rs`
+
+## src/runtime/mcp/
+Owns the Model Context Protocol client: external MCP server process lifecycle, stdio transport, JSON-RPC session, and config loading.
+`MCPManager` (`manager.rs`) is the public type, owned by `Runtime` — it spawns/supervises configured servers and surfaces their tools as dynamically-registered tools. Not registered in `ToolRegistry` itself.
+`McpConfig` / `McpServerConfig` are loaded from an optional home-level config (`paths.home_mcp_config`). `McpTool` / `McpCallResult` carry tool descriptors and call results (used from Slice 45.3+).
+Key files: `src/runtime/mcp/manager.rs`, `src/runtime/mcp/session.rs`, `src/runtime/mcp/transport.rs`, `src/runtime/mcp/types.rs`, `src/runtime/mcp/mod.rs`
 
 ## src/runtime/index/
 Owns project symbol and import extraction for the persistent index, and the embedding provider abstraction.
@@ -79,6 +87,7 @@ Owns bootstrap, config loading, path discovery, backend construction, tool-regis
 `AppContext` wraps `Runtime` + `ActiveSession` + optional `SessionLog`; TUI works through `AppContext::handle()`.
 `ActiveSession` (`app/session.rs`) is the only layer that converts between runtime `Message` and stored records.
 Bootstrap reads optional project `.thunk/THUNK.md` (falling back to `THUNK.md` at project root) and passes it into runtime prompt physics config; it does not persist `THUNK.md` content into sessions.
+`paths.rs` discovers `home_mcp_config` (`$HOME`-based path) for MCP server config loading.
 Must not implement runtime policy or parse tool syntax.
 Key files: `src/app/mod.rs`, `src/app/context.rs`, `src/app/session.rs`, `src/app/paths.rs`, `src/app/config.rs`
 

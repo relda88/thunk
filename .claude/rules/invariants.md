@@ -12,10 +12,11 @@ Enforced in `TurnContext` construction in `engine.rs`: non-permitted commands su
 Shell seeding is suppressed entirely on `GitReadOnly` turns.
 
 ## Surface Enforcement
-`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs:255`.
-Surfaces and tool sets defined in `TOOL_SURFACE_DEFINITIONS` (static registry).
+`tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs:260`.
+Surfaces and tool sets defined in `TOOL_SURFACE_DEFINITIONS` (static registry of built-in tools).
 `RetrievalFirst` includes `lsp_definition`. `GitReadOnly` includes `git_branch`.
 Mutation tools (`edit_file`, `write_file`, `shell`) return `None` from `SurfaceTool::from_input()` — they bypass surface enforcement and go through the approval path only.
+Dynamic (MCP) tools are not in the static surface registry: `tool_allowed_for_surface()` takes a runtime-held `dynamic_allowed: &HashSet<String>` and admits a `ToolInput::DynamicTool` only when its name is whitelisted for the current surface. `DynamicTool` also returns `None` from `SurfaceTool::from_input()`.
 
 ## Evidence Gates
 Eight named gates (plus sub-gates 5.5, 6a) in `InvestigationState::record_read_result()` in `investigation.rs`.
@@ -24,7 +25,7 @@ Gates are never weakened. Never add a bypass.
 
 ## System Prompt
 Always built fresh via `build_system_prompt()` from config — never persisted to SQLite.
-Always called with `include_mutation_tools: false` (`src/runtime/orchestration/engine.rs:219`).
+Always called with `include_mutation_tools: false` (positional arg in the `build_system_prompt()` call at `src/runtime/orchestration/engine.rs:231`).
 Mutation tools appear only in the ephemeral per-turn hint for `MutationEnabled` turns.
 
 ## Prompt Physics

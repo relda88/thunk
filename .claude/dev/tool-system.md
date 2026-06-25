@@ -6,6 +6,8 @@ Tool registration is split in two stages. `default_registry()` in `src/tools/mod
 
 `ToolRegistry` owns registration, spec lookup, dispatch, and approved execution. It does not parse assistant text, render tool results, or enforce runtime policy. Code: `src/tools/registry.rs`.
 
+The built-in tool set is no longer purely compile-time. `ToolRegistry` keys tools by `String` (not `&'static str`), and MCP tools are registered dynamically at runtime (Phase 45). Dynamic calls arrive as `ToolInput::DynamicTool { name, args }` with metadata in `DynamicToolSpec`; the surface policy admits them via the runtime-held `dynamic_allowed` set in `tool_allowed_for_surface()` rather than the static `TOOL_SURFACE_DEFINITIONS`. `MCPManager` (`src/runtime/mcp/`) owns the server lifecycle that provides these tools. Code: `src/tools/types.rs`, `src/runtime/investigation/tool_surface.rs`, `src/runtime/mcp/manager.rs`.
+
 ## Wire Format
 
 The tool wire format is owned by `tool_codec` (`src/runtime/protocol/tool_codec/`). `parse_all_tool_inputs()` scans bracket calls, static Git calls, block tools, and `lsp_definition` blocks in document order; it ignores tool syntax inside Markdown code fences. `format_tool_result()` and `format_tool_error()` render the conversation-facing protocol blocks. Code: `src/runtime/protocol/tool_codec/tool_parser.rs`, `src/runtime/protocol/tool_codec/tool_renderer.rs`.
