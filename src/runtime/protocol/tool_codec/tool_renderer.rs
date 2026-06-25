@@ -132,6 +132,13 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
             let trunc = if w.truncated { " (truncated)" } else { "" };
             format!("fetched {} — {} bytes{}", w.url, w.bytes_fetched, trunc)
         }
+        ToolOutput::McpResult(m) => {
+            if m.is_error {
+                format!("mcp tool error ({} bytes)", m.content.len())
+            } else {
+                format!("mcp tool result ({} bytes)", m.content.len())
+            }
+        }
     }
 }
 
@@ -497,6 +504,13 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
         }
         ToolOutput::LspDefinition(d) => render_lsp_definition(d),
         ToolOutput::WebFetch(w) => render_web_fetch(w),
+        ToolOutput::McpResult(m) => {
+            if m.is_error {
+                format!("[mcp error]\n{}", m.content)
+            } else {
+                m.content.clone()
+            }
+        }
     }
 }
 
@@ -669,6 +683,28 @@ mod tests {
         assert!(result.contains("[1 lines]"));
         assert!(result.contains("fn main() {}"));
         assert!(result.contains("=== /tool_result ==="));
+    }
+
+    #[test]
+    fn mcp_result_is_error_surfaces_prefix() {
+        use crate::runtime::mcp::McpCallResult;
+        use crate::tools::ToolOutput;
+        let output = ToolOutput::McpResult(McpCallResult {
+            content: "err".to_string(),
+            is_error: true,
+        });
+        let result = format_tool_result("mcp::server::tool", &output);
+        assert!(result.contains("[mcp error]"));
+        assert!(result.contains("err"));
+
+        // A non-error result renders the content verbatim without the prefix.
+        let ok = ToolOutput::McpResult(McpCallResult {
+            content: "all good".to_string(),
+            is_error: false,
+        });
+        let ok_result = format_tool_result("mcp::server::tool", &ok);
+        assert!(!ok_result.contains("[mcp error]"));
+        assert!(ok_result.contains("all good"));
     }
 
     #[test]

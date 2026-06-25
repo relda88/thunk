@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::core::error::Result;
 
 use super::session::McpSession;
-use super::types::{McpConfig, McpServerConfig, McpTool};
+use super::types::{McpCallResult, McpConfig, McpServerConfig, McpTool};
 
 pub(crate) struct MCPManager {
     sessions: HashMap<String, McpSession>,
@@ -18,6 +18,40 @@ pub(crate) struct MCPManager {
 /// tools never collide with static tool names. The `::` separator is parser-safe.
 fn namespaced_tool_name(server_name: &str, tool_name: &str) -> String {
     format!("mcp::{server_name}::{tool_name}")
+}
+
+/// Builds the `tools/call` params object: `{"name": <bare>, "arguments": <args>}`.
+/// `name` is the bare tool name (no `mcp::<server>::` prefix); the MCP protocol
+/// addresses tools by their bare name within a server.
+fn build_call_params(bare_tool_name: &str, args: Value) -> Value {
+    serde_json::json!({
+        "name": bare_tool_name,
+        "arguments": args,
+    })
+}
+
+/// Parses a JSON-RPC `tools/call` response (the full envelope, as returned by
+/// `call`) into an `McpCallResult`. Concatenates all `text` content blocks with
+/// newlines and reads the `isError` flag (defaulting to `false`).
+fn parse_call_result(response: &Value) -> McpCallResult {
+    let content = response["result"]["content"]
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|b| {
+                    if b["type"].as_str() == Some("text") {
+                        b["text"].as_str().map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    let is_error = response["result"]["isError"].as_bool().unwrap_or(false);
+    McpCallResult { content, is_error }
 }
 
 impl MCPManager {
@@ -85,6 +119,23 @@ impl MCPManager {
             self.sessions.remove(server_name);
         }
         result
+    }
+
+    /// Calls a discovered MCP tool via the `tools/call` JSON-RPC method.
+    /// `bare_tool_name` is the un-namespaced tool name (no `mcp::<server>::` prefix);
+    /// `args` is the JSON object passed as the tool's `arguments`. Returns the flattened
+    /// text content and the server-reported `isError` flag. A tool-level error
+    /// (`isError: true`) is NOT an `Err` — it is surfaced to the model as tool output.
+    /// Only a protocol/transport failure produces `Err`.
+    pub(crate) fn call_tool(
+        &mut self,
+        server_name: &str,
+        bare_tool_name: &str,
+        args: Value,
+    ) -> Result<McpCallResult> {
+        let params = build_call_params(bare_tool_name, args);
+        let response = self.call(server_name, "tools/call", params)?;
+        Ok(parse_call_result(&response))
     }
 
     pub(crate) fn shutdown(&mut self) {
@@ -245,5 +296,42 @@ mod tests {
             namespaced_tool_name("filesystem", "list_files"),
             "mcp::filesystem::list_files"
         );
+    }
+
+    #[test]
+    fn call_tool_builds_correct_request_params() {
+        // tools/call params must use the BARE tool name and an `arguments` object.
+        let args = serde_json::json!({ "path": "/tmp", "depth": 2 });
+        let params = build_call_params("list_files", args.clone());
+        assert_eq!(params["name"], serde_json::json!("list_files"));
+        assert_eq!(params["arguments"], args);
+    }
+
+    #[test]
+    fn parse_call_result_flattens_text_blocks_and_reads_error_flag() {
+        // Multiple text blocks concatenate with newlines; non-text blocks are skipped.
+        let response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "content": [
+                    { "type": "text", "text": "line one" },
+                    { "type": "image", "data": "ignored" },
+                    { "type": "text", "text": "line two" }
+                ],
+                "isError": false
+            }
+        });
+        let result = parse_call_result(&response);
+        assert_eq!(result.content, "line one\nline two");
+        assert!(!result.is_error);
+
+        // isError: true is preserved (surfaced to the model, not raised as Err).
+        let err_response = serde_json::json!({
+            "result": { "content": [{ "type": "text", "text": "boom" }], "isError": true }
+        });
+        let err_result = parse_call_result(&err_response);
+        assert_eq!(err_result.content, "boom");
+        assert!(err_result.is_error);
     }
 }

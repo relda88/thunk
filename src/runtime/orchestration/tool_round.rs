@@ -6,7 +6,8 @@ use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::SymbolStore;
 use crate::tools::types::LspDefinitionOutput;
 use crate::tools::{
-    ExecutionKind, PendingAction, ToolError, ToolInput, ToolOutput, ToolRegistry, ToolRunResult,
+    ExecutionKind, PendingAction, RiskLevel, ToolError, ToolInput, ToolOutput, ToolRegistry,
+    ToolRunResult,
 };
 
 use super::super::investigation::anchors::AnchorState;
@@ -862,6 +863,39 @@ pub(crate) fn run_tool_round(
             accumulated.push_str(&tool_codec::format_tool_result(&name, &output));
             *last_call_key = Some(key);
             continue;
+        }
+
+        // MCP tool intercept — builds a PendingAction and returns for approval.
+        // The server call does NOT happen here (unlike LSP, which is Immediate):
+        // every MCP call is approval-gated and executes post-approval in
+        // engine::execute_and_handle. registry.dispatch() is never reached for MCP
+        // tools (they are not registered in ToolRegistry).
+        if let super::super::project::ResolvedToolInput::DynamicTool { ref name, ref args } =
+            resolved
+        {
+            if name.starts_with("mcp::") {
+                let parts: Vec<&str> = name.splitn(3, "::").collect();
+                let server = parts.get(1).copied().unwrap_or("").to_string();
+                let bare_tool = parts.get(2).copied().unwrap_or("").to_string();
+                let parsed_args: serde_json::Value =
+                    serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!({}));
+                let payload = serde_json::json!({
+                    "server": server,
+                    "tool": bare_tool,
+                    "args": parsed_args,
+                })
+                .to_string();
+                let pending = PendingAction {
+                    tool_name: name.clone(),
+                    summary: format!("Call MCP tool {bare_tool} on server {server}"),
+                    risk: RiskLevel::Medium,
+                    payload,
+                };
+                return ToolRoundOutcome::ApprovalRequired {
+                    accumulated,
+                    pending,
+                };
+            }
         }
 
         match registry.dispatch(resolved) {

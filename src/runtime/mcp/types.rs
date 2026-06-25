@@ -59,7 +59,9 @@ pub(crate) struct McpTool {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct McpCallResult {
+// `pub` (not `pub(crate)`) because it is carried by the `pub` `ToolOutput::McpResult`
+// variant in the tools layer; keeping it crate-private triggers a private-interfaces lint.
+pub struct McpCallResult {
     pub content: String,
     pub is_error: bool,
 }

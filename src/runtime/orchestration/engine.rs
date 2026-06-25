@@ -961,6 +961,54 @@ impl Runtime {
             }
         }
 
+        // MCP tool execution — intercept before the registry. MCP tools are not
+        // registered, so execute_approved() would return NotFound. Decode the payload
+        // built by the tool_round intercept, call the server, commit the result, and
+        // re-enter generation so the model synthesizes over it (read-only tools must
+        // not take the mutation terminal-answer path). A tool-level error is surfaced
+        // as committed tool output, not as a terminal failure.
+        if tool_name.starts_with("mcp::") {
+            let payload: serde_json::Value =
+                serde_json::from_str(&pending.payload).unwrap_or_else(|_| serde_json::json!({}));
+            let server = payload["server"].as_str().unwrap_or("").to_string();
+            let bare_tool = payload["tool"].as_str().unwrap_or("").to_string();
+            let args = payload["args"].clone();
+            // Scope the &mut borrow of mcp_manager to this match so the owned result
+            // releases it before commit_tool_results / run_turns re-borrow self.
+            let call_result = match self.mcp_manager {
+                Some(ref mut mcp) => mcp.call_tool(&server, &bare_tool, args),
+                None => {
+                    on_event(RuntimeEvent::SystemMessage(
+                        "MCP tool called but no MCP manager configured.".to_string(),
+                    ));
+                    return;
+                }
+            };
+            match call_result {
+                Ok(result) => {
+                    let output = ToolOutput::McpResult(result);
+                    let summary = tool_codec::render_compact_summary(&output);
+                    on_event(RuntimeEvent::ToolCallFinished {
+                        name: tool_name.clone(),
+                        summary: Some(summary),
+                    });
+                    self.commit_tool_results(tool_codec::format_tool_result(&tool_name, &output));
+                    on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
+                    self.run_turns(0, on_event);
+                }
+                Err(e) => {
+                    on_event(RuntimeEvent::ToolCallFinished {
+                        name: tool_name.clone(),
+                        summary: None,
+                    });
+                    on_event(RuntimeEvent::SystemMessage(format!(
+                        "MCP tool call failed: {e}"
+                    )));
+                }
+            }
+            return;
+        }
+
         match self.registry.execute_approved(&pending) {
             Ok(output) => {
                 self.invalidate_project_snapshot_if_needed(&output);

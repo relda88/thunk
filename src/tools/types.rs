@@ -121,6 +121,9 @@ pub enum ToolOutput {
     Shell(ShellOutput),
     LspDefinition(LspDefinitionOutput),
     WebFetch(WebFetchOutput),
+    /// Result of an approved MCP (dynamic) tool call. Carries the flattened text
+    /// content and the server-reported tool-level error flag.
+    McpResult(crate::runtime::mcp::McpCallResult),
 }
 
 #[derive(Debug, Clone)]
