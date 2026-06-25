@@ -282,6 +282,7 @@ impl Runtime {
             false,
             &prompt_physics,
             &discovered_tools,
+            &[], // anchor facts injected later by with_memory_manager
         );
         let session_start_ref = capture_session_head(project_root.path());
         Self {
@@ -370,6 +371,16 @@ impl Runtime {
     /// Attaches a personal memory manager. Returns `self` for chaining.
     /// Advisory — call only when the home DB is confirmed available.
     pub fn with_memory_manager(mut self, manager: crate::runtime::memory::MemoryManager) -> Self {
+        let root_str = self.project_root.path().to_string_lossy().into_owned();
+        let anchor_facts = manager.anchor_facts(Some(&root_str), self.config.memory.anchor_limit);
+        if !anchor_facts.is_empty() {
+            self.system_prompt.push_str("## What I know about you\n");
+            for fact in &anchor_facts {
+                self.system_prompt.push_str(&format!("- {}\n", fact.text));
+            }
+            self.system_prompt.push('\n');
+            self.conversation.reset(self.system_prompt.clone());
+        }
         self.memory_manager = Some(manager);
         self
     }
@@ -1728,58 +1739,72 @@ impl Runtime {
             on_event,
         );
 
-        let (calls, response, seeded_pre_generation) =
-            if let Some(pending) = state.pending_runtime_call.take() {
-                (vec![pending.input], None, pending.seeded_pre_generation)
-            } else {
-                let response = {
-                    let mut perf_on_event = |event| {
-                        if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
-                            state.turn_perf.record_backend_timing(*stage, *elapsed_ms);
+        let (calls, response, seeded_pre_generation) = if let Some(pending) =
+            state.pending_runtime_call.take()
+        {
+            (vec![pending.input], None, pending.seeded_pre_generation)
+        } else {
+            let response = {
+                let recall_facts: Vec<crate::storage::memory::MemoryFact> =
+                    if self.config.memory.enabled {
+                        if let Some(ref mgr) = self.memory_manager {
+                            let query = self.conversation.last_user_content().unwrap_or("");
+                            let root_str = self.project_root.path().to_string_lossy().into_owned();
+                            mgr.recall(query, Some(&root_str), self.config.memory.recall_top_k)
+                        } else {
+                            vec![]
                         }
-                        if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
-                            state.turn_perf.record_token_counts(*prompt, *completion);
-                        }
-                        on_event(event);
+                    } else {
+                        vec![]
                     };
-
-                    match run_generate_turn(
-                        self.backend.as_mut(),
-                        &mut self.conversation,
-                        effective_surface,
-                        project_snapshot_hint.as_deref(),
-                        test_coverage_hint.as_deref(),
-                        ctx.investigation_mode,
-                        &self.prompt_physics,
-                        self.constrained_output,
-                        &mut perf_on_event,
-                    ) {
-                        Ok(Some(r)) => r,
-                        Ok(None) => {
-                            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
-                            on_event(RuntimeEvent::Failed {
-                                message: format!("{} returned no output.", self.backend.name()),
-                            });
-                            return TurnSignal::Finish;
-                        }
-                        Err(e) => {
-                            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
-                            on_event(RuntimeEvent::Failed {
-                                message: e.to_string(),
-                            });
-                            return TurnSignal::Finish;
-                        }
+                let mut perf_on_event = |event| {
+                    if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
+                        state.turn_perf.record_backend_timing(*stage, *elapsed_ms);
                     }
+                    if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
+                        state.turn_perf.record_token_counts(*prompt, *completion);
+                    }
+                    on_event(event);
                 };
 
-                let dynamic_names: Vec<&str> = self
-                    .discovered_tools
-                    .iter()
-                    .map(|t| t.name.as_str())
-                    .collect();
-                let calls = tool_codec::parse_all_tool_inputs(&response, &dynamic_names);
-                (calls, Some(response), false)
+                match run_generate_turn(
+                    self.backend.as_mut(),
+                    &mut self.conversation,
+                    effective_surface,
+                    project_snapshot_hint.as_deref(),
+                    test_coverage_hint.as_deref(),
+                    ctx.investigation_mode,
+                    &self.prompt_physics,
+                    self.constrained_output,
+                    &recall_facts,
+                    &mut perf_on_event,
+                ) {
+                    Ok(Some(r)) => r,
+                    Ok(None) => {
+                        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                        on_event(RuntimeEvent::Failed {
+                            message: format!("{} returned no output.", self.backend.name()),
+                        });
+                        return TurnSignal::Finish;
+                    }
+                    Err(e) => {
+                        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                        on_event(RuntimeEvent::Failed {
+                            message: e.to_string(),
+                        });
+                        return TurnSignal::Finish;
+                    }
+                }
             };
+
+            let dynamic_names: Vec<&str> = self
+                .discovered_tools
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect();
+            let calls = tool_codec::parse_all_tool_inputs(&response, &dynamic_names);
+            (calls, Some(response), false)
+        };
 
         if let Some(signal) =
             self.check_tool_call_gates(ctx, state, &calls, response.as_deref(), on_event)

@@ -242,6 +242,25 @@ impl Default for WebFetchConfig {
     }
 }
 
+/// Personal memory configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    pub enabled: bool,
+    pub anchor_limit: usize,
+    pub recall_top_k: usize,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            anchor_limit: 5,
+            recall_top_k: 3,
+        }
+    }
+}
+
 /// Investigation depth for retrieval — how aggressively the runtime follows import chains.
 /// `shallow`: stop after the first useful candidate read.
 /// `normal`: current behavior (up to two candidate reads).
@@ -310,6 +329,7 @@ pub struct Config {
     pub web_fetch: WebFetchConfig,
     pub retrieval: RetrievalConfig,
     pub investigation: InvestigationConfig,
+    pub memory: MemoryConfig,
 }
 
 /// Application configuration for the app
