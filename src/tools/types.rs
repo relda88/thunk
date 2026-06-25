@@ -65,12 +65,18 @@ pub enum ToolInput {
     WebFetch {
         url: String,
     },
+    /// Dynamically-registered tool call emitted by the model.
+    /// The name is the tool's registered identifier; args is the raw argument string.
+    DynamicTool {
+        name: String,
+        args: String,
+    },
 }
 
 impl ToolInput {
     /// Returns the canonical tool name for this input variant.
     /// Used by ToolRegistry::dispatch to look up the right implementation.
-    pub fn tool_name(&self) -> &'static str {
+    pub fn tool_name(&self) -> &str {
         match self {
             ToolInput::ReadFile { .. } => "read_file",
             ToolInput::ListDir { .. } => "list_dir",
@@ -88,6 +94,7 @@ impl ToolInput {
             ToolInput::Shell { .. } => "shell",
             ToolInput::LspDefinition { .. } => "lsp_definition",
             ToolInput::WebFetch { .. } => "web_fetch",
+            ToolInput::DynamicTool { name, .. } => name.as_str(),
         }
     }
 }
@@ -311,6 +318,19 @@ pub struct ToolSpec {
     /// Whether this tool requires an approval round before executing.
     pub execution_kind: ExecutionKind,
     /// Baseline risk for approval-required tools. `None` for immediate tools.
+    pub default_risk: Option<RiskLevel>,
+}
+
+/// Metadata for a dynamically-registered tool. Used to build the system prompt
+/// and to wire dynamic tools into the surface policy and parser.
+///
+/// Separate from ToolSpec to avoid requiring `&'static str` fields for runtime-owned names.
+/// input_hint is deliberately omitted — it is a dead field on ToolSpec.
+#[derive(Debug, Clone)]
+pub struct DynamicToolSpec {
+    pub name: String,
+    pub description: String,
+    pub execution_kind: ExecutionKind,
     pub default_risk: Option<RiskLevel>,
 }
 

@@ -116,6 +116,7 @@ fn call_fingerprint(input: &ToolInput) -> String {
             format!("lsp_definition\x00{path}\x00{line}\x00{col}")
         }
         ToolInput::WebFetch { url } => format!("web_fetch\x00{url}"),
+        ToolInput::DynamicTool { name, args } => format!("dynamic\x00{name}\x00{args}"),
     }
 }
 
@@ -331,7 +332,7 @@ pub(crate) fn run_tool_round(
         let is_git_read_only_tool = is_git_read_only_tool_input(&input);
         on_event(RuntimeEvent::ToolCallStarted { name: name.clone() });
 
-        if !tool_allowed_for_surface(&input, tool_surface) {
+        if !tool_allowed_for_surface(&input, tool_surface, &HashSet::new()) {
             *disallowed_tool_attempts += 1;
             trace_runtime_decision(
                 on_event,

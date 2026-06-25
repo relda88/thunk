@@ -359,6 +359,7 @@ pub(crate) fn tool_input_activity(input: Option<&ToolInput>) -> Activity {
         Some(ToolInput::GitCommit { .. }) => ("git_commit".to_string(), None),
         Some(ToolInput::LspDefinition { path, .. }) => ("lsp".to_string(), Some(path.clone())),
         Some(ToolInput::WebFetch { url }) => ("fetch".to_string(), Some(url.clone())),
+        Some(ToolInput::DynamicTool { name, .. }) => ("dynamic".to_string(), Some(name.clone())),
         None => ("tool".to_string(), None),
     };
     Activity::ExecutingTools { tool, detail }

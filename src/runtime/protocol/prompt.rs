@@ -171,6 +171,11 @@ When you show code, keep it focused on the user's request.",
         }
         prompt.push('\n');
         prompt.push_str(instructions);
+        let dynamic_instructions = tool_codec::format_dynamic_instructions(&[]);
+        if !dynamic_instructions.is_empty() {
+            prompt.push('\n');
+            prompt.push_str(&dynamic_instructions);
+        }
     }
 
     prompt

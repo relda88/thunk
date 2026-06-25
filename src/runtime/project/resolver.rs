@@ -121,6 +121,12 @@ pub fn resolve(
             })
         }
         ToolInput::WebFetch { url } => Ok(ResolvedToolInput::WebFetch { url: url.clone() }),
+        // Dynamic tools bypass path confinement — they validate their own inputs.
+        // Path resolution is MCP-server responsibility, not the runtime's.
+        ToolInput::DynamicTool { name, args } => Ok(ResolvedToolInput::DynamicTool {
+            name: name.clone(),
+            args: args.clone(),
+        }),
     }
 }
 

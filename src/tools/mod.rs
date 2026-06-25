@@ -14,7 +14,8 @@ pub use git::GitDiffTool;
 pub use pending::{PendingAction, PendingApprovalStage, PendingTransaction, RiskLevel};
 pub use registry::ToolRegistry;
 pub use types::{
-    EntryKind, ExecutionKind, ToolError, ToolInput, ToolOutput, ToolRunResult, ToolSpec,
+    DynamicToolSpec, EntryKind, ExecutionKind, ToolError, ToolInput, ToolOutput, ToolRunResult,
+    ToolSpec,
 };
 
 /// The core tool trait. Each implementation handles exactly one ToolInput variant.

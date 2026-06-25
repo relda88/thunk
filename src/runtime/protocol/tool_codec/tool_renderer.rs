@@ -2,7 +2,7 @@
 
 use crate::runtime::investigation::classify::{is_exact_symbol_definition, looks_like_definition};
 use crate::tools::types::{LspDefinitionOutput, WebFetchOutput};
-use crate::tools::{EntryKind, ToolOutput};
+use crate::tools::{DynamicToolSpec, EntryKind, ToolOutput};
 
 /// Returns a compact one-line summary of a tool result for TUI display.
 /// This is separate from format_tool_result, which produces the full conversation text.
@@ -553,6 +553,22 @@ fn render_web_fetch(w: &WebFetchOutput) -> String {
 }
 
 // Protocol description
+
+/// Returns the call-syntax block for dynamically-registered tools appended after
+/// format_instructions(). Returns an empty string when no dynamic tools are registered.
+pub fn format_dynamic_instructions(specs: &[DynamicToolSpec]) -> String {
+    if specs.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    for spec in specs {
+        out.push_str(&format!(
+            "[{}: your_argument_here]\n  {}\n\n",
+            spec.name, spec.description
+        ));
+    }
+    out
+}
 
 /// Returns the format instructions block that prompt.rs includes in the system prompt.
 /// Keeping this here ensures the prompt's description always matches the actual
@@ -1496,5 +1512,28 @@ mod tests {
             "output must not contain absolute path prefix"
         );
         assert!(result.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn format_dynamic_instructions_empty_specs_returns_empty() {
+        assert!(format_dynamic_instructions(&[]).is_empty());
+    }
+
+    #[test]
+    fn format_dynamic_instructions_one_spec_contains_name_and_description() {
+        use crate::tools::{DynamicToolSpec, ExecutionKind};
+        let spec = DynamicToolSpec {
+            name: "my_tool".to_string(),
+            description: "does something useful".to_string(),
+            execution_kind: ExecutionKind::Immediate,
+            default_risk: None,
+        };
+        let result = format_dynamic_instructions(&[spec]);
+        assert!(!result.is_empty());
+        assert!(result.contains("my_tool"), "must contain tool name");
+        assert!(
+            result.contains("does something useful"),
+            "must contain description"
+        );
     }
 }

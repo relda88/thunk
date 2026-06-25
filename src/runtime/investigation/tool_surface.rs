@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::tools::ToolInput;
 
 use super::prompt_analysis::normalized_prompt_tokens;
@@ -111,7 +113,8 @@ impl SurfaceTool {
             | ToolInput::GitBranchCreate { .. }
             | ToolInput::GitBranchSwitch { .. }
             | ToolInput::GitCommit { .. }
-            | ToolInput::WebFetch { .. } => None,
+            | ToolInput::WebFetch { .. }
+            | ToolInput::DynamicTool { .. } => None,
             ToolInput::LspDefinition { .. } => Some(Self::LspDefinition),
         }
     }
@@ -252,14 +255,24 @@ fn starts_with_token_phrase(tokens: &[String], phrase: &[&str]) -> bool {
 ///
 /// Mutation calls return true here because they are checked by the separate
 /// approval/mutation policy, not by read-only surface enforcement.
-pub(crate) fn tool_allowed_for_surface(input: &ToolInput, surface: ToolSurface) -> bool {
+/// `dynamic_allowed` is the runtime-held set of dynamic tool names permitted on any
+/// surface; it is empty until MCP tools are wired in (Slice 45.3).
+pub(crate) fn tool_allowed_for_surface(
+    input: &ToolInput,
+    surface: ToolSurface,
+    dynamic_allowed: &HashSet<String>,
+) -> bool {
     if let Some(tool) = SurfaceTool::from_input(input) {
         // Direct membership check: is this read-only tool in the surface's canonical set?
         // Using direct lookup avoids ambiguity when multiple surfaces share the same tools
         // (e.g., MutationEnabled and RetrievalFirst both carry search/read/list).
         surface.tools().contains(&tool)
+    } else if dynamic_allowed.contains(input.tool_name()) {
+        // Dynamic read-only tool explicitly whitelisted for this surface.
+        true
     } else {
         // Mutation permission remains separate from tool-surface policy.
+        // Unknown tools and approval-required tools (edit_file, write_file, shell) pass through.
         true
     }
 }

@@ -58,10 +58,16 @@ pub enum ResolvedToolInput {
     WebFetch {
         url: String,
     },
+    /// Dynamically-registered tool call after identity resolution.
+    /// No path confinement is applied — dynamic tools validate their own inputs.
+    DynamicTool {
+        name: String,
+        args: String,
+    },
 }
 
 impl ResolvedToolInput {
-    pub fn tool_name(&self) -> &'static str {
+    pub fn tool_name(&self) -> &str {
         match self {
             Self::ReadFile { .. } => "read_file",
             Self::ListDir { .. } => "list_dir",
@@ -79,6 +85,7 @@ impl ResolvedToolInput {
             Self::GitDiffStaged => "git_diff_staged",
             Self::LspDefinition { .. } => "lsp_definition",
             Self::WebFetch { .. } => "web_fetch",
+            Self::DynamicTool { name, .. } => name.as_str(),
         }
     }
 }
@@ -131,6 +138,7 @@ impl From<ResolvedToolInput> for ToolInput {
                 ToolInput::LspDefinition { path, line, col }
             }
             ResolvedToolInput::WebFetch { url } => ToolInput::WebFetch { url },
+            ResolvedToolInput::DynamicTool { name, args } => ToolInput::DynamicTool { name, args },
         }
     }
 }

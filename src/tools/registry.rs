@@ -17,7 +17,7 @@ use super::Tool;
 /// This type does NOT parse model output, format results, or truncate content —
 /// those concerns belong in the tool loop and the individual tools respectively.
 pub struct ToolRegistry {
-    tools: HashMap<&'static str, Box<dyn Tool>>,
+    tools: HashMap<String, Box<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -30,7 +30,7 @@ impl ToolRegistry {
     /// Registers a tool. The tool's name (from its spec) is used as the lookup key.
     /// Overwrites any existing registration with the same name.
     pub fn register(&mut self, tool: impl Tool + 'static) {
-        let name = tool.spec().name;
+        let name = tool.spec().name.to_string();
         self.tools.insert(name, Box::new(tool));
     }
 

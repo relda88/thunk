@@ -36,6 +36,7 @@ pub fn parse_all_tool_inputs(text: &str) -> Vec<ToolInput> {
     all.extend(scan_write_blocks(text));
     all.extend(scan_search_code_blocks(text));
     all.extend(scan_lsp_definition_blocks(text));
+    all.extend(scan_dynamic_bracket_calls(text, &[]));
     if !fences.is_empty() {
         all.retain(|(pos, _)| !fences.iter().any(|&(s, e)| *pos >= s && *pos < e));
     }
@@ -113,6 +114,48 @@ fn scan_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
         }
     }
 
+    results
+}
+
+/// Scans for `[name: args]` calls for dynamically-registered tool names.
+/// Follows the same single-line bracket pattern as scan_bracket_calls.
+/// Returns ToolInput::DynamicTool for each match. Unrecognized names produce nothing.
+pub(crate) fn scan_dynamic_bracket_calls(
+    text: &str,
+    dynamic_names: &[&str],
+) -> Vec<(usize, ToolInput)> {
+    let mut results = Vec::new();
+    for name in dynamic_names {
+        let prefix = format!("[{name}:");
+        let mut search_start = 0;
+        while search_start < text.len() {
+            let Some(rel) = text[search_start..].find(prefix.as_str()) else {
+                break;
+            };
+            let open_abs = search_start + rel;
+            let after_colon = open_abs + prefix.len();
+
+            let Some(bracket_rel) = text[after_colon..].find(']') else {
+                break;
+            };
+            let bracket_abs = after_colon + bracket_rel;
+
+            let arg_text = &text[after_colon..bracket_abs];
+            if arg_text.contains('\n') {
+                search_start = after_colon;
+                continue;
+            }
+
+            results.push((
+                open_abs,
+                ToolInput::DynamicTool {
+                    name: name.to_string(),
+                    args: arg_text.trim().to_string(),
+                },
+            ));
+            search_start = bracket_abs + 1;
+        }
+    }
     results
 }
 
@@ -1103,5 +1146,25 @@ mod tests {
     fn lsp_definition_block_missing_close_tag_is_skipped() {
         let text = "[lsp_definition]\npath: src/main.rs\nline: 1\ncol: 0";
         assert!(parse_all_tool_inputs(text).is_empty());
+    }
+
+    #[test]
+    fn scan_dynamic_bracket_calls_registered_name_parses_correctly() {
+        let text = "[my_tool: some argument here]";
+        let results = scan_dynamic_bracket_calls(text, &["my_tool"]);
+        assert_eq!(results.len(), 1);
+        let (_, input) = &results[0];
+        assert!(
+            matches!(input, ToolInput::DynamicTool { name, args }
+                if name == "my_tool" && args == "some argument here"),
+            "unexpected input: {input:?}"
+        );
+    }
+
+    #[test]
+    fn scan_dynamic_bracket_calls_unregistered_name_returns_nothing() {
+        let text = "[unknown_tool: arg]";
+        let results = scan_dynamic_bracket_calls(text, &["my_tool"]);
+        assert!(results.is_empty());
     }
 }

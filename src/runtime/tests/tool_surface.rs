@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use super::super::investigation::tool_surface::{
     select_tool_surface, tool_allowed_for_surface, SurfaceTool, ToolSurface,
 };
@@ -227,7 +229,7 @@ fn tool_surface_enforcement_uses_canonical_surface_membership() {
         for input in &inputs {
             let tool = SurfaceTool::from_input(input).expect("test inputs are surface-controlled");
             assert_eq!(
-                tool_allowed_for_surface(input, surface),
+                tool_allowed_for_surface(input, surface, &HashSet::new()),
                 surface.tools().contains(&tool),
                 "surface enforcement must match canonical membership for {} on {}",
                 input.tool_name(),

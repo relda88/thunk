@@ -19,6 +19,6 @@ pub use tool_detector::{
 pub use tool_parser::parse_all_tool_inputs;
 pub(crate) use tool_renderer::render_output;
 pub use tool_renderer::{
-    format_instructions, format_tool_error, format_tool_result,
+    format_dynamic_instructions, format_instructions, format_tool_error, format_tool_result,
     format_tool_result_definition_ordered, render_compact_summary,
 };
