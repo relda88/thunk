@@ -198,7 +198,7 @@ fn tool_surface_hint_renders_from_canonical_surface_membership() {
             ToolSurface::RetrievalFirst.as_str(),
             ToolSurface::RetrievalFirst.allowed_tool_names()
         ),
-        "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir, lsp_definition."
+        "Active tool surface: RetrievalFirst. Available this turn: search_code, read_file, list_dir, lsp_definition, shell_read."
     );
     assert_eq!(
         prompt::render_tool_surface_hint(
@@ -613,7 +613,7 @@ fn mutation_turn_receives_mutation_enabled_surface_hint() {
         first.messages.iter().any(|m| {
             m.role == Role::System
                 && m.content
-                    == "Active tool surface: MutationEnabled. Available this turn: search_code, read_file, list_dir, edit_file, write_file, shell."
+                    == "Active tool surface: MutationEnabled. Available this turn: search_code, read_file, list_dir, shell_read, edit_file, write_file, shell."
         }),
         "mutation-intent turns must expose MutationEnabled hint with all tool names: {:?}",
         first.messages

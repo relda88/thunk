@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use crate::runtime::ResolvedToolInput;
 
-use super::core::{EditFileTool, ShellTool, WriteFileTool};
+use super::core::{EditFileTool, ShellReadTool, ShellTool, WriteFileTool};
 use super::git::{
     GitBranchCreateTool, GitBranchSwitchTool, GitBranchTool, GitCommitTool, GitDiffStagedTool,
     GitDiffTool, GitLogTool, GitStatusTool,
@@ -47,6 +47,7 @@ impl ToolRegistry {
         self.register(GitCommitTool::new(root.clone()));
         self.register(EditFileTool::new(root.clone()));
         self.register(WriteFileTool::new(root.clone()));
+        self.register(ShellReadTool::new(root.clone()));
         self.register(ShellTool::new(root));
         self
     }

@@ -56,6 +56,10 @@ pub enum ToolInput {
         /// The command to run, e.g. "cargo check" or "cargo test my_test"
         command: String,
     },
+    ShellRead {
+        /// The read-only command to run, e.g. "ls src/" or "grep -r foo src/"
+        command: String,
+    },
     LspDefinition {
         /// Path relative to the project root, or absolute.
         path: String,
@@ -92,6 +96,7 @@ impl ToolInput {
             ToolInput::EditFile { .. } => "edit_file",
             ToolInput::WriteFile { .. } => "write_file",
             ToolInput::Shell { .. } => "shell",
+            ToolInput::ShellRead { .. } => "shell_read",
             ToolInput::LspDefinition { .. } => "lsp_definition",
             ToolInput::WebFetch { .. } => "web_fetch",
             ToolInput::DynamicTool { name, .. } => name.as_str(),
@@ -119,6 +124,7 @@ pub enum ToolOutput {
     EditFile(EditFileOutput),
     WriteFile(WriteFileOutput),
     Shell(ShellOutput),
+    ShellRead(ShellOutput),
     LspDefinition(LspDefinitionOutput),
     WebFetch(WebFetchOutput),
     /// Result of an approved MCP (dynamic) tool call. Carries the flattened text

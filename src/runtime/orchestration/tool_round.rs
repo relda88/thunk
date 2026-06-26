@@ -113,6 +113,7 @@ fn call_fingerprint(input: &ToolInput) -> String {
             format!("write_file\x00{path}\x00{content}")
         }
         ToolInput::Shell { command } => format!("shell\x00{command}"),
+        ToolInput::ShellRead { command } => format!("shell_read\x00{command}"),
         ToolInput::LspDefinition { path, line, col } => {
             format!("lsp_definition\x00{path}\x00{line}\x00{col}")
         }

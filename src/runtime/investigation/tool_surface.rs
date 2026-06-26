@@ -49,6 +49,7 @@ pub(crate) enum SurfaceTool {
     GitBranch,
     GitDiffStaged,
     LspDefinition,
+    ShellRead,
 }
 
 const RETRIEVAL_FIRST_TOOLS: &[SurfaceTool] = &[
@@ -56,6 +57,7 @@ const RETRIEVAL_FIRST_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::ReadFile,
     SurfaceTool::ListDir,
     SurfaceTool::LspDefinition,
+    SurfaceTool::ShellRead,
 ];
 const GIT_READ_ONLY_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::GitStatus,
@@ -72,6 +74,7 @@ const MUTATION_ENABLED_TOOLS: &[SurfaceTool] = &[
     SurfaceTool::SearchCode,
     SurfaceTool::ReadFile,
     SurfaceTool::ListDir,
+    SurfaceTool::ShellRead,
 ];
 const TOOL_SURFACE_DEFINITIONS: &[ToolSurfaceDefinition] = &[
     ToolSurfaceDefinition {
@@ -107,6 +110,7 @@ impl SurfaceTool {
             ToolInput::GitLog => Some(Self::GitLog),
             ToolInput::GitBranch => Some(Self::GitBranch),
             ToolInput::GitDiffStaged => Some(Self::GitDiffStaged),
+            ToolInput::ShellRead { .. } => Some(Self::ShellRead),
             ToolInput::EditFile { .. }
             | ToolInput::WriteFile { .. }
             | ToolInput::Shell { .. }
@@ -130,6 +134,7 @@ impl SurfaceTool {
             Self::GitBranch => "git_branch",
             Self::GitDiffStaged => "git_diff_staged",
             Self::LspDefinition => "lsp_definition",
+            Self::ShellRead => "shell_read",
         }
     }
 }

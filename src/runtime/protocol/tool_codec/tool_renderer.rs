@@ -121,6 +121,15 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
                 format!("shell exit {}: {}", s.exit_code, s.command)
             }
         }
+        ToolOutput::ShellRead(s) => {
+            if s.timed_out {
+                format!("shell_read timed out: {}", s.command)
+            } else if s.truncated {
+                format!("shell_read exit {}: {} (truncated)", s.exit_code, s.command)
+            } else {
+                format!("shell_read exit {}: {}", s.exit_code, s.command)
+            }
+        }
         ToolOutput::LspDefinition(d) => {
             if d.target_path.is_empty() {
                 format!("lsp_definition: no definition found for {}", d.source_path)
@@ -502,6 +511,22 @@ pub(crate) fn render_output(output: &ToolOutput) -> String {
             }
             lines.join("\n")
         }
+        ToolOutput::ShellRead(s) => {
+            let mut lines = vec![
+                format!("command: {}", s.command),
+                format!("exit: {}", s.exit_code),
+            ];
+            if !s.stdout_stderr.is_empty() {
+                lines.push(s.stdout_stderr.clone());
+            }
+            if s.truncated {
+                lines.push(format!("[output truncated: {} bytes total]", s.total_bytes));
+            }
+            if s.timed_out {
+                lines.push("[timed out after 60s]".to_string());
+            }
+            lines.join("\n")
+        }
         ToolOutput::LspDefinition(d) => render_lsp_definition(d),
         ToolOutput::WebFetch(w) => render_web_fetch(w),
         ToolOutput::McpResult(m) => {
@@ -603,6 +628,11 @@ To run a build or test command, use shell — never use search_code for this:
 [shell: cargo check]
 [shell: cargo test my_filter]
 [shell: cargo clippy]
+
+To run a read-only system command without approval (ls, find, cat, grep, wc, head, tail, sed without -i):
+[shell_read: ls src/]
+[shell_read: grep -r foo src/]
+[shell_read: wc -l src/main.rs]
 
 Request a file read:
 [read_file: path/to/file.rs]
@@ -1206,6 +1236,7 @@ mod tests {
         assert!(instructions.contains("[write_file]"));
         assert!(instructions.contains("[/write_file]"));
         assert!(instructions.contains("[shell:"));
+        assert!(instructions.contains("[shell_read:"));
         assert!(instructions.contains("---search---"));
         assert!(instructions.contains("---replace---"));
         assert!(instructions.contains("---content---"));

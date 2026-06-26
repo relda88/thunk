@@ -95,6 +95,9 @@ pub fn resolve(
         ToolInput::Shell { command } => Ok(ResolvedToolInput::Shell {
             command: command.clone(),
         }),
+        ToolInput::ShellRead { command } => Ok(ResolvedToolInput::ShellRead {
+            command: command.clone(),
+        }),
         ToolInput::GitStatus => Ok(ResolvedToolInput::GitStatus),
         ToolInput::GitDiff => Ok(ResolvedToolInput::GitDiff { path: None }),
         ToolInput::GitLog => Ok(ResolvedToolInput::GitLog),
