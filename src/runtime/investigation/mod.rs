@@ -5,4 +5,5 @@ pub(crate) mod graph;
 pub(super) mod investigation;
 pub(super) mod prompt_analysis;
 pub(super) mod search_query;
+pub(crate) mod shell_tier;
 pub(super) mod tool_surface;
