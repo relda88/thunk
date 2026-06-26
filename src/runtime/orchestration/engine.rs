@@ -1780,11 +1780,17 @@ impl Runtime {
             None
         };
         let prompt_chars = if state.turn_perf.is_enabled() {
+            let dynamic_names_for_perf: Vec<&str> = self
+                .discovered_tools
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect();
             estimate_generation_prompt_chars(
                 &self.conversation,
                 effective_surface,
                 project_snapshot_hint.as_deref(),
                 test_coverage_hint.as_deref(),
+                &dynamic_names_for_perf,
             )
         } else {
             0

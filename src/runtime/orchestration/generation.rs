@@ -61,7 +61,7 @@ pub(super) fn run_generate_turn(
             false
         };
     let has_recency = if let Some(recency) =
-        prompt_physics::recency_field_message(prompt_physics, tool_surface)
+        prompt_physics::recency_field_message(prompt_physics, tool_surface, dynamic_tool_names)
     {
         messages.push(Message::system(recency));
         true

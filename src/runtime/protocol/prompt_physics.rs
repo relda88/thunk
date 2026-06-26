@@ -65,15 +65,20 @@ pub fn periodic_refresh_message(config: &PromptPhysicsConfig) -> Option<String> 
     Some(format!("{anchor}{skill_line}"))
 }
 
-pub fn recency_field_message(config: &PromptPhysicsConfig, surface: ToolSurface) -> Option<String> {
+pub fn recency_field_message(
+    config: &PromptPhysicsConfig,
+    surface: ToolSurface,
+    dynamic_tool_names: &[&str],
+) -> Option<String> {
     if !config.enabled {
         return None;
     }
-    let tools = surface.allowed_tool_names().collect::<Vec<_>>().join(", ");
-    let tools = if tools.is_empty() {
+    let mut tools_vec: Vec<&str> = surface.allowed_tool_names().collect();
+    tools_vec.extend_from_slice(dynamic_tool_names);
+    let tools = if tools_vec.is_empty() {
         "none".to_string()
     } else {
-        tools
+        tools_vec.join(", ")
     };
     let ability_line = config
         .active_ability
@@ -157,7 +162,7 @@ mod tests {
             thunk_md: None,
             ..Default::default()
         };
-        assert!(recency_field_message(&config, ToolSurface::RetrievalFirst).is_none());
+        assert!(recency_field_message(&config, ToolSurface::RetrievalFirst, &[]).is_none());
     }
 
     #[test]
@@ -167,7 +172,7 @@ mod tests {
             thunk_md: None,
             ..Default::default()
         };
-        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst, &[]).unwrap();
         assert!(result.contains("RetrievalFirst"));
     }
 
@@ -178,7 +183,7 @@ mod tests {
             thunk_md: None,
             ..Default::default()
         };
-        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst, &[]).unwrap();
         assert!(result.contains("search_code"));
     }
 
@@ -189,7 +194,7 @@ mod tests {
             thunk_md: None,
             ..Default::default()
         };
-        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst, &[]).unwrap();
         assert!(result.contains("[thunk: current context]"));
         assert!(result.contains("[/thunk: current context]"));
     }
@@ -201,7 +206,7 @@ mod tests {
             thunk_md: None,
             ..Default::default()
         };
-        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst, &[]).unwrap();
         assert!(result.contains("Runtime owns control flow"));
     }
 
@@ -212,7 +217,7 @@ mod tests {
             thunk_md: None,
             ..Default::default()
         };
-        let result = recency_field_message(&config, ToolSurface::AnswerOnly).unwrap();
+        let result = recency_field_message(&config, ToolSurface::AnswerOnly, &[]).unwrap();
         assert!(result.contains("Tools: none"));
     }
 
@@ -282,7 +287,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let result = recency_field_message(&config, ToolSurface::RetrievalFirst).unwrap();
+        let result = recency_field_message(&config, ToolSurface::RetrievalFirst, &[]).unwrap();
         assert!(result.contains("Ability (debug):"));
         assert!(result.contains("test effect"));
     }

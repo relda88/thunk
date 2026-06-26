@@ -7,13 +7,14 @@ pub(crate) fn estimate_generation_prompt_chars(
     tool_surface: ToolSurface,
     project_snapshot_hint: Option<&str>,
     test_coverage_hint: Option<&str>,
+    dynamic_tool_names: &[&str],
 ) -> usize {
-    let hint = prompt::render_tool_surface_hint(
-        tool_surface.as_str(),
-        tool_surface
-            .allowed_tool_names()
-            .chain(tool_surface.mutation_tool_names().iter().copied()),
-    );
+    let mut hint_tools: Vec<&str> = tool_surface
+        .allowed_tool_names()
+        .chain(tool_surface.mutation_tool_names().iter().copied())
+        .collect();
+    hint_tools.extend_from_slice(dynamic_tool_names);
+    let hint = prompt::render_tool_surface_hint(tool_surface.as_str(), hint_tools);
     conversation
         .pruned_snapshot()
         .into_iter()
