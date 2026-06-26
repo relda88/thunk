@@ -94,6 +94,10 @@ pub enum Command {
     RefactorStatus,
     /// /remember <fact> — propose a memory fact for user approval.
     Remember(String),
+    /// /memory — list all stored memory facts.
+    Memory,
+    /// /forget <id> — propose deletion of the memory fact with the given id.
+    Forget(i64),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -334,6 +338,14 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
                 command: "/remember",
             })),
         },
+        "/memory" => Some(Ok(Command::Memory)),
+        "/forget" => match arg {
+            Some(raw) => match raw.trim().parse::<i64>() {
+                Ok(id) => Some(Ok(Command::Forget(id))),
+                Err(_) => Some(Err(ParseError::UnknownCommand)),
+            },
+            None => Some(Err(ParseError::MissingArgument { command: "/forget" })),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -385,6 +397,8 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/refactor abort",
         "/refactor status",
         "/reject",
+        "/forget",
+        "/memory",
         "/remember",
         "/retrieval",
         "/search",
@@ -527,6 +541,14 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/remember",
             description: "propose a fact for personal memory (/remember <fact>)",
+        },
+        LauncherCommand {
+            name: "/memory",
+            description: "list all stored memory facts",
+        },
+        LauncherCommand {
+            name: "/forget",
+            description: "propose deletion of a stored memory fact (/forget <id>)",
         },
         LauncherCommand {
             name: "/constrain",

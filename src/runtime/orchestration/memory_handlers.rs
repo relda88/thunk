@@ -18,6 +18,7 @@ impl Runtime {
         if !self.config.memory.enabled {
             return;
         }
+        self.pending_memory_is_delete = false;
         let memory_fact = MemoryManager::propose_fact(
             fact.clone(),
             category.clone(),
@@ -30,10 +31,11 @@ impl Runtime {
             category,
             scope,
             source: source.as_str().to_string(),
+            delete: false,
         });
     }
 
-    /// Approve the pending memory proposal — embed, encode, persist, clear.
+    /// Approve the pending memory proposal — either persist (write) or delete, then clear.
     pub(super) fn handle_memory_approve(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let fact = match self.pending_memory.take() {
             Some(f) => f,
@@ -44,6 +46,18 @@ impl Runtime {
                 return;
             }
         };
+
+        if self.pending_memory_is_delete {
+            if let Some(ref mgr) = self.memory_manager {
+                let _ = mgr.store.delete_fact(fact.id);
+            }
+            on_event(RuntimeEvent::MemoryProposalCleared);
+            on_event(RuntimeEvent::SystemMessage(format!(
+                "Forgotten: {}",
+                fact.text
+            )));
+            return;
+        }
 
         let embedding: Option<Vec<u8>> = self.embedding_provider.as_ref().and_then(|provider| {
             match provider.embed(&[fact.text.clone()]) {
@@ -97,5 +111,74 @@ impl Runtime {
             MemorySource::User,
             on_event,
         );
+    }
+
+    /// Handle /memory — list all stored facts grouped with id, category, text, scope.
+    pub(super) fn handle_memory_list(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let Some(ref mgr) = self.memory_manager else {
+            on_event(RuntimeEvent::SystemMessage(
+                "Memory not available.".to_string(),
+            ));
+            return;
+        };
+        match mgr.store.list_facts(None) {
+            Ok(facts) if facts.is_empty() => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "No stored memories.".to_string(),
+                ));
+            }
+            Ok(facts) => {
+                let mut lines = vec!["Stored memories:".to_string()];
+                for f in &facts {
+                    let scope_str = f.scope.as_deref().unwrap_or("global");
+                    lines.push(format!(
+                        "  [{}] ({}) {}\n       scope: {}  salience: {:.2}",
+                        f.id, f.category, f.text, scope_str, f.salience
+                    ));
+                }
+                on_event(RuntimeEvent::InfoMessage(lines.join("\n")));
+            }
+            Err(_) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "Failed to read memory store.".to_string(),
+                ));
+            }
+        }
+    }
+
+    /// Handle /forget <id> — propose deletion of the fact with the given id.
+    pub(super) fn handle_memory_forget(&mut self, id: i64, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        let Some(ref mgr) = self.memory_manager else {
+            on_event(RuntimeEvent::SystemMessage(
+                "Memory not available.".to_string(),
+            ));
+            return;
+        };
+        match mgr.store.get_fact(id) {
+            Ok(Some(fact)) => {
+                self.pending_memory_is_delete = true;
+                let text = fact.text.clone();
+                let category = fact.category.clone();
+                let scope = fact.scope.clone();
+                self.pending_memory = Some(fact);
+                on_event(RuntimeEvent::MemoryProposalRequired {
+                    fact: text,
+                    category,
+                    scope,
+                    source: "user".to_string(),
+                    delete: true,
+                });
+            }
+            Ok(None) => {
+                on_event(RuntimeEvent::SystemMessage(format!(
+                    "No fact with id {id}."
+                )));
+            }
+            Err(_) => {
+                on_event(RuntimeEvent::SystemMessage(
+                    "Failed to read memory store.".to_string(),
+                ));
+            }
+        }
     }
 }

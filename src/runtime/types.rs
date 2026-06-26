@@ -320,6 +320,12 @@ pub enum RuntimeRequest {
     Remember {
         fact: String,
     },
+    /// /memory — list all stored memory facts.
+    MemoryList,
+    /// /forget <id> — propose deletion of the memory fact with the given id.
+    MemoryForget {
+        id: i64,
+    },
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
@@ -416,6 +422,8 @@ pub enum RuntimeEvent {
         scope: Option<String>,
         /// MemorySource::as_str() value — avoids importing storage types into types.rs.
         source: String,
+        /// True when the proposal is for deletion (^Y confirms delete) rather than write.
+        delete: bool,
     },
     /// Fired after memory proposal approval or rejection to dismiss the memory widget.
     MemoryProposalCleared,

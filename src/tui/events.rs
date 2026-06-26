@@ -162,12 +162,14 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             fact,
             category,
             scope,
+            delete,
             ..
         } => {
             state.pending_memory_proposal = Some(PendingMemoryProposalState {
                 fact,
                 category,
                 scope,
+                delete,
             });
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("awaiting memory approval");

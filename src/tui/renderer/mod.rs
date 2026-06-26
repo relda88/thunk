@@ -649,8 +649,12 @@ impl Renderer {
         let cur = self.current;
         let dim = self.theme.dim();
         let label_style = self.theme.chip_warning();
-        let label = format!("  Propose memory: {}", proposal.fact);
-        let display: String = label.chars().take(w as usize).collect();
+        let header = if proposal.delete {
+            format!("  Forget this fact: {}", proposal.fact)
+        } else {
+            format!("  Propose memory: {}", proposal.fact)
+        };
+        let display: String = header.chars().take(w as usize).collect();
         self.paint(cur, 0, first_row, &display, w, label_style);
         let cat_text = format!("  Category: {}", proposal.category);
         let cat_display: String = cat_text.chars().take(w as usize).collect();
@@ -663,7 +667,12 @@ impl Renderer {
         } else {
             first_row + 2
         };
-        self.paint(cur, 0, control_row, "  ^Y remember   ^N discard", w, dim);
+        let controls = if proposal.delete {
+            "  ^Y confirm   ^N cancel"
+        } else {
+            "  ^Y remember   ^N discard"
+        };
+        self.paint(cur, 0, control_row, controls, w, dim);
     }
 
     fn paint_autocomplete_overlay(

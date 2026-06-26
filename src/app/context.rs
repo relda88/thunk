@@ -266,6 +266,8 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::MemoryApprove => "memory_approve",
         RuntimeRequest::MemoryReject => "memory_reject",
         RuntimeRequest::Remember { .. } => "remember",
+        RuntimeRequest::MemoryList => "memory_list",
+        RuntimeRequest::MemoryForget { .. } => "memory_forget",
     }
 }
 

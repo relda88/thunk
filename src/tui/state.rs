@@ -74,6 +74,7 @@ pub(crate) struct PendingMemoryProposalState {
     pub(crate) fact: String,
     pub(crate) category: String,
     pub(crate) scope: Option<String>,
+    pub(crate) delete: bool,
 }
 
 /// Represents a chat message with a role (system, user, assistant) and content

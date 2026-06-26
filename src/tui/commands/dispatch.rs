@@ -131,6 +131,8 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::RefactorAbort => CommandAction::Runtime(RuntimeRequest::SequenceAbort),
         Command::RefactorStatus => CommandAction::Runtime(RuntimeRequest::SequenceStatus),
         Command::Remember(fact) => CommandAction::Runtime(RuntimeRequest::Remember { fact }),
+        Command::Memory => CommandAction::Runtime(RuntimeRequest::MemoryList),
+        Command::Forget(id) => CommandAction::Runtime(RuntimeRequest::MemoryForget { id }),
     }
 }
 
