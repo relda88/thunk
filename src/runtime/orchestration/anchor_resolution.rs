@@ -57,6 +57,7 @@ impl Runtime {
             self.embedding_provider.as_deref(),
             &self.retrieval_config,
             &HashSet::new(),
+            false,
             on_event,
         ) {
             ToolRoundOutcome::Completed { results, .. } => {

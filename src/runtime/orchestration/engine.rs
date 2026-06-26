@@ -1951,6 +1951,7 @@ impl Runtime {
             self.embedding_provider.as_deref(),
             &self.retrieval_config,
             &dynamic_allowed,
+            self.exec_enabled,
             on_event,
         ) {
             ToolRoundOutcome::Completed {
