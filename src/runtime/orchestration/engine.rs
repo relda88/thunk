@@ -831,6 +831,18 @@ impl Runtime {
             });
             return;
         }
+        if self.pending_memory.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "finish the pending approval first — ^Y to confirm, ^N to discard".to_string(),
+            ));
+            return;
+        }
+        if self.pending_plan.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "finish the pending approval first — ^Y to confirm, ^N to discard".to_string(),
+            ));
+            return;
+        }
 
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -1768,11 +1780,17 @@ impl Runtime {
             None
         };
         let prompt_chars = if state.turn_perf.is_enabled() {
+            let dynamic_names_for_perf: Vec<&str> = self
+                .discovered_tools
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect();
             estimate_generation_prompt_chars(
                 &self.conversation,
                 effective_surface,
                 project_snapshot_hint.as_deref(),
                 test_coverage_hint.as_deref(),
+                &dynamic_names_for_perf,
             )
         } else {
             0
@@ -1813,6 +1831,11 @@ impl Runtime {
                     on_event(event);
                 };
 
+                let dynamic_tool_names: Vec<&str> = self
+                    .discovered_tools
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect();
                 match run_generate_turn(
                     self.backend.as_mut(),
                     &mut self.conversation,
@@ -1823,6 +1846,7 @@ impl Runtime {
                     &self.prompt_physics,
                     self.constrained_output,
                     &recall_facts,
+                    &dynamic_tool_names,
                     &mut perf_on_event,
                 ) {
                     Ok(Some(r)) => r,

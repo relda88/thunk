@@ -38,7 +38,7 @@ impl From<PathResolutionError> for ToolError {
     fn from(error: PathResolutionError) -> Self {
         match error {
             PathResolutionError::EscapesRoot { raw, root } => ToolError::InvalidInput(format!(
-                "path escapes project root: '{raw}' is outside {}",
+                "path escapes project root: '{raw}' is outside {} — for paths outside the project, use [mcp::filesystem::list_directory: /full/path] or other mcp::filesystem tools instead.",
                 root.display()
             )),
             PathResolutionError::NotFound { raw } => {
@@ -710,7 +710,7 @@ mod tests {
 
         assert_eq!(
             tool_error.to_string(),
-            "invalid tool input: path escapes project root: '../secret.txt' is outside /project"
+            "invalid tool input: path escapes project root: '../secret.txt' is outside /project — for paths outside the project, use [mcp::filesystem::list_directory: /full/path] or other mcp::filesystem tools instead."
         );
     }
 

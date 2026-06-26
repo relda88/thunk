@@ -26,6 +26,7 @@ pub(super) fn run_generate_turn(
     prompt_physics: &PromptPhysicsConfig,
     constrained_output: bool,
     recall_facts: &[crate::storage::memory::MemoryFact],
+    dynamic_tool_names: &[&str],
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
     let mut messages = conversation.pruned_snapshot();
@@ -37,11 +38,14 @@ pub(super) fn run_generate_turn(
     } else {
         false
     };
+    let mut hint_tools: Vec<&str> = tool_surface
+        .allowed_tool_names()
+        .chain(tool_surface.mutation_tool_names().iter().copied())
+        .collect();
+    hint_tools.extend_from_slice(dynamic_tool_names);
     messages.push(Message::system(prompt::render_tool_surface_hint(
         tool_surface.as_str(),
-        tool_surface
-            .allowed_tool_names()
-            .chain(tool_surface.mutation_tool_names().iter().copied()),
+        hint_tools,
     )));
     if let Some(hint) = project_snapshot_hint {
         messages.push(Message::system(hint.to_string()));
@@ -57,7 +61,7 @@ pub(super) fn run_generate_turn(
             false
         };
     let has_recency = if let Some(recency) =
-        prompt_physics::recency_field_message(prompt_physics, tool_surface)
+        prompt_physics::recency_field_message(prompt_physics, tool_surface, dynamic_tool_names)
     {
         messages.push(Message::system(recency));
         true
@@ -227,6 +231,7 @@ mod tests {
             &physics,
             false,
             &recall_facts,
+            &[],
             &mut |_| {},
         )
         .unwrap();

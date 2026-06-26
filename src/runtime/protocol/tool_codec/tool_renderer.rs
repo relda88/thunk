@@ -575,6 +575,7 @@ pub fn format_dynamic_instructions(specs: &[DynamicToolSpec]) -> String {
         return String::new();
     }
     let mut out = String::new();
+    out.push_str("You also have access to the following tools from connected MCP servers — use these when the request matches their capability:\n\n");
     for spec in specs {
         out.push_str(&format!(
             "[{}: your_argument_here]\n  {}\n\n",
@@ -596,7 +597,7 @@ You do NOT write result blocks. Result blocks are written by the system, not you
 
 When a tool is needed, your ENTIRE response must be the call tag only — no prose, no fences, no explanation.
 
-Tag names are EXACT. Do not rename, abbreviate, or invent tag names. Use only the tags shown below.
+Tag names are EXACT. Do not rename, abbreviate, or invent tag names. Use only registered tool tags — those listed here and in the MCP section below.
 
 To run a build or test command, use shell — never use search_code for this:
 [shell: cargo check]
