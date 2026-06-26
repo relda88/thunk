@@ -10,6 +10,30 @@ An entry graduates to `rules/invariants.md` (## Evolved Invariants) when: valida
 
 ---
 
+**2026-06-26 | Phase 46 | generation/mcp**
+**Observation**: MCP tool names must be threaded into THREE independent per-turn surfaces, not one: the tool-surface hint (`run_generate_turn` → `dynamic_tool_names`), the recency field (`recency_field_message`), and the telemetry estimator (`estimate_generation_prompt_chars`). Missing any single one yields "model can't call the MCP tool" or a silent telemetry undercount.
+**Evidence**: commits bd689a7 (hint), 0899f5d (recency + estimator); `src/runtime/orchestration/generation.rs`, `context_cap.rs`, `prompt_physics.rs:71`.
+**Action/Rule**: When adding any new runtime-owned tool name, grep for every consumer of `allowed_tool_names()`/`mutation_tool_names()` and thread the dynamic set into each. There is no single chokepoint.
+**Impact**: High
+
+**2026-06-26 | Phase 46 | memory**
+**Observation**: The model emits `[REMEMBER: ... | category]` proposals that frequently contain task imperatives ("create a module…", "add logging…") rather than durable personal facts. Unfiltered, the memory store fills with task instructions.
+**Evidence**: `src/runtime/protocol/memory_parser.rs` `is_imperative()` + `IMPERATIVE_MARKERS`; commit c08536d; tests `imperative_first_word_is_dropped`.
+**Action/Rule**: Any model-proposed fact stream needs a first-word imperative filter before persistence. Filter at parse time in `parse_memory_proposals`, not at write time.
+**Impact**: Med
+
+**2026-06-26 | Phase 46 | resolver/mcp**
+**Observation**: Path-confinement errors are an opportunity to redirect the model, not just reject it. `EscapesRoot` ToolError and `list_dir` description now point the model at `mcp::filesystem::list_directory` for out-of-project paths.
+**Evidence**: `src/runtime/project/resolver.rs` `From<PathResolutionError>`, `src/tools/core/list_dir.rs` spec; commit c08536d.
+**Action/Rule**: When a confinement guard rejects an action that an MCP tool could legitimately perform, embed the redirect in the error string. Keep error text and tool description in sync.
+**Impact**: Med
+
+**2026-06-26 | Phase 46 | memory/app-paths**
+**Observation**: Memory must write correctly when launched from a bare directory with no `.git` ancestor. `AppPaths.project_label` is `Some(git_root.file_name())` or `None`; the `memory_write_scope` helper centralizes the scope decision so the 3 write sites don't each re-derive it.
+**Evidence**: `src/app/paths.rs` `project_label`, `src/runtime/orchestration/memory_handlers.rs`; commit 6d454b8.
+**Action/Rule**: Never assume a project root exists in memory/storage write paths. Route scope decisions through `memory_write_scope`; test the no-`.git` fallback explicitly.
+**Impact**: Med
+
 **2026-06-25 | Phase 45 | mcp**
 **Observation**: MCP JSON-RPC responses are double-enveloped — `tools/list` results are at `result["result"]["tools"]`, not `result["tools"]`. `tools/call` response content is at `response["result"]["content"]`.
 **Evidence**: `src/runtime/mcp/manager.rs` — bug fix commit after 45.3 shipped with wrong path; `discover_tools` silently returned empty.

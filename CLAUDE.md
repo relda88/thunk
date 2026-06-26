@@ -21,7 +21,8 @@ Never make commits — user commits manually.
 - Phase 42: COMPLETE — sequence execution: auto/live signature-change follow-up steps, precise LSP call-site references
 - Phase 43: COMPLETE — filesystem watcher, incremental index rebuild on source file changes
 - Phase 44: COMPLETE — background save verification surfaced as a passive notification (RebuildFile trigger)
-- Phase 45: ACTIVE — MCP integration: dynamic tool registration, `MCPManager` (process lifecycle, stdio transport, config loading) (Slices 45.1 & 45.2 complete; 45.3 in progress)
+- Phase 45: COMPLETE — MCP integration: dynamic tool registration, `MCPManager` (process lifecycle, stdio transport, config loading), tool calling + surface threading + telemetry wired (Slices 45.1–45.3)
+- Phase 46: COMPLETE — personal memory: storage/schema, `MemoryManager` (embedding recall + keyword fallback), /remember, /forget, /memory, /reflect, imperative + reflection filters, MCP polish (escape redirect, no-project-root write scope)
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model
@@ -46,6 +47,8 @@ Never make commits — user commits manually.
 | Tool dispatch | src/runtime/orchestration/tool_round.rs |
 | Runtime config knobs | src/core/config.rs |
 | Approval rendering | src/tui/renderer/mod.rs |
+| Memory recall/write | src/runtime/memory/manager.rs |
+| Memory fact store | src/storage/memory/store.rs |
 | Shared types | src/core/ |
 
 ## TUI Module Structure

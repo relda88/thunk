@@ -29,6 +29,11 @@ Owns the Model Context Protocol client: external MCP server process lifecycle, s
 `McpConfig` / `McpServerConfig` are loaded from an optional home-level config (`paths.home_mcp_config`). `McpTool` / `McpCallResult` carry tool descriptors and call results (used from Slice 45.3+).
 Key files: `src/runtime/mcp/manager.rs`, `src/runtime/mcp/session.rs`, `src/runtime/mcp/transport.rs`, `src/runtime/mcp/types.rs`, `src/runtime/mcp/mod.rs`
 
+## src/runtime/memory/
+Owns personal long-term memory: recall (embedding similarity with keyword fallback) and model-proposed fact handling.
+`MemoryManager` (`manager.rs`) is owned by `Runtime`; it queries `src/storage/memory/` for facts, injects recall at the session-start anchor and per-turn request-local, and surfaces fact proposals for approval-gated write-back. Filters out imperative/task proposals before persistence.
+Key files: `src/runtime/memory/manager.rs`, `src/runtime/memory/mod.rs`
+
 ## src/runtime/index/
 Owns project symbol and import extraction for the persistent index, and the embedding provider abstraction.
 The extractor feeds `SymbolStore`; it does not own SQLite access or runtime dispatch policy.
@@ -58,12 +63,13 @@ Key files:
 - `retrieval_log_writer.rs` — `write_retrieval_log()` (extracted from engine.rs)
 - `plan_handlers.rs` — `handle_plan_create/approve/abandon/status()`, `handle_task_execute/complete/block/status()` (extracted from command_handlers.rs)
 - `embed_handlers.rs` — `handle_index_embed()`, `handle_index_embed_chunk()`, `PendingEmbedState` (extracted from command_handlers.rs)
+- `memory_handlers.rs` — `/remember`, `/forget`, `/memory list`, `/reflect` handlers, approval-gated fact write-back, `memory_write_scope` routing
 
 ## src/runtime/protocol/
 Owns the wire protocol between model text and typed tool inputs/results.
 `tool_codec/` is a module (not a single file): `tool_parser.rs`, `tool_renderer.rs`, `tool_detector.rs`.
 Must not dispatch tools, resolve paths, enforce surfaces, or decide answer admissibility.
-Key files: `src/runtime/protocol/tool_codec/mod.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/prompt_physics.rs`, `src/runtime/protocol/response_text.rs`, `src/runtime/protocol/agent_prompts.rs`, `src/runtime/protocol/plan_parser.rs`
+Key files: `src/runtime/protocol/tool_codec/mod.rs`, `src/runtime/protocol/prompt.rs`, `src/runtime/protocol/prompt_physics.rs`, `src/runtime/protocol/response_text.rs`, `src/runtime/protocol/agent_prompts.rs`, `src/runtime/protocol/plan_parser.rs`, `src/runtime/protocol/memory_parser.rs` (`parse_memory_proposals`, `is_imperative` fact filter)
 
 ## src/runtime/project/
 Owns path confinement types: `ProjectRoot`, `ProjectPath`, `ProjectScope`, `ResolvedToolInput`, `resolve()`.
@@ -80,7 +86,7 @@ Key files: `src/llm/backend.rs`, `src/llm/providers/mod.rs`, `src/llm/providers/
 Owns SQLite schema (v9), CRUD for saved sessions, persistent symbol/import index storage, plan/task storage, vector embedding storage, and retrieval quality logging.
 Schema: `sessions`, `session_messages`, `index_symbols`, `index_imports`, `file_metadata`, `plans`, `plan_tasks`, `index_embeddings`, `retrieval_log` tables.
 Must not know the system prompt, runtime correction policy, or tool semantics.
-Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src/storage/session/types.rs`, `src/storage/index/store.rs`, `src/storage/index/types.rs`, `src/storage/tasks/store.rs` (`TaskStore`), `src/storage/tasks/types.rs` (`PlanRecord`, `TaskRecord`, `PlanStatus`, `TaskStatus`), `src/storage/retrieval/store.rs` (`RetrievalLogStore`, `RetrievalLogEntry`)
+Key files: `src/storage/session/store.rs`, `src/storage/session/schema.rs`, `src/storage/session/types.rs`, `src/storage/index/store.rs`, `src/storage/index/types.rs`, `src/storage/tasks/store.rs` (`TaskStore`), `src/storage/tasks/types.rs` (`PlanRecord`, `TaskRecord`, `PlanStatus`, `TaskStatus`), `src/storage/retrieval/store.rs` (`RetrievalLogStore`, `RetrievalLogEntry`), `src/storage/memory/store.rs` (personal fact store), `src/storage/memory/schema.rs`, `src/storage/memory/types.rs` (`MemoryFact`)
 
 ## src/app/
 Owns bootstrap, config loading, path discovery, backend construction, tool-registry construction, session restore, autosave, event logging.

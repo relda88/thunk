@@ -10,6 +10,12 @@ Same as investigation-planner/learnings.md. Graduated entries tagged [GRADUATED]
 
 ---
 
+**2026-06-26 | Phase 46 | mcp**
+**Observation**: Symptom "model emits a well-formed `mcp::server::tool` call but nothing executes" almost always means the tool name never reached the per-turn surface hint, so the surface policy rejected it before dispatch — not a transport or registration bug.
+**Evidence**: commit bd689a7; `src/runtime/orchestration/generation.rs` `hint_tools` extension with `dynamic_tool_names`.
+**Action/Rule**: For "MCP call is a no-op", first confirm the tool name appears in the rendered surface hint for that turn (check `dynamic_tool_names` is non-empty and threaded). Only then investigate transport/discovery.
+**Impact**: High
+
 **2026-06-25 | Phase 45 | mcp**
 **Observation**: A silent empty result from `discover_tools` (no tools discovered, no error) is almost always the JSON-RPC envelope path bug — `result["tools"]` instead of `result["result"]["tools"]`. The session starts, servers connect, but zero tools appear in the prompt.
 **Evidence**: `src/runtime/mcp/manager.rs:171` bug fix (65117c4).
