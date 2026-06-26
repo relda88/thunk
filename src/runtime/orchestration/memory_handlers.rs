@@ -1,6 +1,8 @@
+use crate::llm::backend::{BackendEvent, GenerateRequest, Message};
 use crate::runtime::memory::MemoryManager;
+use crate::runtime::protocol::memory_parser::parse_memory_proposals;
 use crate::runtime::types::RuntimeEvent;
-use crate::storage::memory::MemorySource;
+use crate::storage::memory::{MemoryFact, MemorySource};
 
 use super::Runtime;
 
@@ -86,6 +88,7 @@ impl Runtime {
             "Remembered: {}",
             fact.text
         )));
+        self.drain_memory_queue(on_event);
     }
 
     /// Reject the pending memory proposal — clear without persisting.
@@ -93,10 +96,32 @@ impl Runtime {
         self.pending_memory = None;
         on_event(RuntimeEvent::MemoryProposalCleared);
         on_event(RuntimeEvent::SystemMessage("Discarded.".to_string()));
+        self.drain_memory_queue(on_event);
+    }
+
+    /// Pop the next fact from pending_memory_queue and surface it as a proposal, if any remain.
+    fn drain_memory_queue(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        if let Some(next) = self.pending_memory_queue.pop() {
+            self.pending_memory_is_delete = false;
+            on_event(RuntimeEvent::MemoryProposalRequired {
+                fact: next.text.clone(),
+                category: next.category.clone(),
+                scope: next.scope.clone(),
+                source: "reflection".to_string(),
+                delete: false,
+            });
+            self.pending_memory = Some(next);
+        }
     }
 
     /// Handle /remember <fact> — propose the fact for approval.
     pub(super) fn handle_remember(&mut self, fact: String, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        if !self.pending_memory_queue.is_empty() {
+            on_event(RuntimeEvent::SystemMessage(
+                "reflect in progress — approve or reject current proposal first".to_string(),
+            ));
+            return;
+        }
         if fact.trim().is_empty() {
             on_event(RuntimeEvent::SystemMessage(
                 "Usage: /remember <fact>".to_string(),
@@ -179,6 +204,110 @@ impl Runtime {
                     "Failed to read memory store.".to_string(),
                 ));
             }
+        }
+    }
+
+    /// Handle /reflect — run a generation pass over recent conversation and propose extracted facts.
+    pub(super) fn handle_reflect(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        if !self.config.memory.enabled {
+            on_event(RuntimeEvent::SystemMessage(
+                "reflect: memory is disabled".to_string(),
+            ));
+            return;
+        }
+        let raw = match self.generate_reflection_text(on_event) {
+            Some(t) => t,
+            None => return,
+        };
+        let proposals = parse_memory_proposals(&raw);
+        if proposals.is_empty() {
+            on_event(RuntimeEvent::SystemMessage(
+                "reflect: nothing to remember".to_string(),
+            ));
+            return;
+        }
+        let scope = Some(self.project_root.path().to_string_lossy().into_owned());
+        let mut facts: Vec<MemoryFact> = proposals
+            .into_iter()
+            .map(|p| {
+                MemoryManager::propose_fact(
+                    p.text,
+                    p.category,
+                    scope.clone(),
+                    MemorySource::Reflection,
+                )
+            })
+            .collect();
+        // Reverse so pop() later yields them in parse order.
+        facts.reverse();
+        let first = facts.pop().unwrap();
+        self.pending_memory_queue = facts;
+        self.pending_memory_is_delete = false;
+        on_event(RuntimeEvent::MemoryProposalRequired {
+            fact: first.text.clone(),
+            category: first.category.clone(),
+            scope: first.scope.clone(),
+            source: "reflection".to_string(),
+            delete: false,
+        });
+        self.pending_memory = Some(first);
+    }
+
+    /// Run a single generation pass to extract candidate memory facts from recent conversation.
+    /// Returns the raw model output or None on failure / insufficient history.
+    fn generate_reflection_text(
+        &mut self,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) -> Option<String> {
+        let history = self.conversation.human_visible_snapshot();
+        if history.len() < 2 {
+            on_event(RuntimeEvent::SystemMessage(
+                "reflect: not enough conversation history".to_string(),
+            ));
+            return None;
+        }
+        let conversation_text: String = history
+            .iter()
+            .map(|m| format!("{}: {}", m.role.as_str(), m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let prompt = format!(
+            "You are extracting facts for long-term memory from a conversation.\n\
+             Output ONLY facts in this exact format, one per line:\n\
+             [REMEMBER: fact text | category]\n\n\
+             Categories: preference, project, identity, workflow, general\n\n\
+             Rules:\n\
+             - No prose, no preamble, no explanation\n\
+             - Only facts worth remembering across sessions\n\
+             - Omit anything ephemeral or session-specific\n\
+             - At most 5 facts\n\
+             - If nothing is worth remembering, output nothing\n\n\
+             Conversation:\n\
+             {conversation_text}"
+        );
+        let mut messages = self.conversation.pruned_snapshot();
+        messages.push(Message::user(prompt));
+        let request = GenerateRequest::new(messages);
+        let mut result = String::new();
+        if self
+            .backend
+            .generate(request, &mut |event| {
+                if let BackendEvent::TextDelta(chunk) = event {
+                    result.push_str(&chunk);
+                }
+            })
+            .is_err()
+        {
+            on_event(RuntimeEvent::SystemMessage(
+                "reflect: backend did not respond".to_string(),
+            ));
+            return None;
+        }
+        let text = result.trim().to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
         }
     }
 }

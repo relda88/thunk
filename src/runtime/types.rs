@@ -326,6 +326,8 @@ pub enum RuntimeRequest {
     MemoryForget {
         id: i64,
     },
+    /// /reflect — run a generation pass over recent conversation and propose extracted facts.
+    Reflect,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.

@@ -554,6 +554,8 @@ impl Runtime {
     pub(super) fn handle_reset(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         self.pending_action = None;
         self.pending_plan = None;
+        self.pending_memory = None;
+        self.pending_memory_queue.clear();
         self.pending_embed = None;
         self.active_sequence_id = None;
         self.anchors.clear();

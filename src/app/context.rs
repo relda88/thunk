@@ -268,6 +268,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::Remember { .. } => "remember",
         RuntimeRequest::MemoryList => "memory_list",
         RuntimeRequest::MemoryForget { .. } => "memory_forget",
+        RuntimeRequest::Reflect => "reflect",
     }
 }
 

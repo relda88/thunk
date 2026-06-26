@@ -203,6 +203,8 @@ pub struct Runtime {
     pending_memory: Option<crate::storage::memory::MemoryFact>,
     /// True when pending_memory represents a deletion proposal rather than a write.
     pending_memory_is_delete: bool,
+    /// Queue of memory proposals from /reflect. Drained one-at-a-time after each approve/reject.
+    pending_memory_queue: Vec<crate::storage::memory::MemoryFact>,
     /// In-progress chunked embed state between IndexEmbedChunk dispatches.
     /// Set by handle_index_embed, consumed by handle_index_embed_chunk, cleared on reset.
     pub(super) pending_embed: Option<embed_handlers::PendingEmbedState>,
@@ -332,6 +334,7 @@ impl Runtime {
             pending_plan: None,
             pending_memory: None,
             pending_memory_is_delete: false,
+            pending_memory_queue: Vec::new(),
             pending_embed: None,
             investigation_depth: config.investigation.depth,
             investigation_hop_limit: config.investigation.hop_limit,
@@ -580,6 +583,7 @@ impl Runtime {
             RuntimeRequest::Remember { fact } => self.handle_remember(fact, on_event),
             RuntimeRequest::MemoryList => self.handle_memory_list(on_event),
             RuntimeRequest::MemoryForget { id } => self.handle_memory_forget(id, on_event),
+            RuntimeRequest::Reflect => self.handle_reflect(on_event),
         }
     }
 

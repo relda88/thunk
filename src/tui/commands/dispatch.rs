@@ -133,6 +133,7 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::Remember(fact) => CommandAction::Runtime(RuntimeRequest::Remember { fact }),
         Command::Memory => CommandAction::Runtime(RuntimeRequest::MemoryList),
         Command::Forget(id) => CommandAction::Runtime(RuntimeRequest::MemoryForget { id }),
+        Command::Reflect => CommandAction::Runtime(RuntimeRequest::Reflect),
     }
 }
 
