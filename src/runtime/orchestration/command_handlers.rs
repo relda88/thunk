@@ -558,6 +558,8 @@ impl Runtime {
         self.pending_memory_queue.clear();
         self.pending_embed = None;
         self.active_sequence_id = None;
+        // exec mode is session-scoped — a reset returns it to the default-deny state.
+        self.exec_enabled = false;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,

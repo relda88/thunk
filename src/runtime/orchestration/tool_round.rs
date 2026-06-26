@@ -1296,6 +1296,15 @@ pub(crate) fn run_tool_round(
                         .unwrap_or(true),
                     "tool '{name}' returned Approval but spec declares Immediate"
                 );
+                // An irreversible seed (e.g. a Tier-3 shell command) must never anchor a
+                // transaction — the rollback path assumes every grouped action is undoable.
+                // Return it as a standalone approval before entering the grouping loop.
+                if !pending.reversible {
+                    return ToolRoundOutcome::ApprovalRequired {
+                        accumulated,
+                        pending,
+                    };
+                }
                 // Collect any consecutive edit_file/write_file approvals from remaining calls
                 // into a transaction. ToolCallStarted fires for each during collection;
                 // ToolCallFinished fires during execute_transaction() after approval.

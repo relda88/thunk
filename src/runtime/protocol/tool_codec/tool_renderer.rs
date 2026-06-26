@@ -624,15 +624,19 @@ When a tool is needed, your ENTIRE response must be the call tag only — no pro
 
 Tag names are EXACT. Do not rename, abbreviate, or invent tag names. Use only registered tool tags — those listed here and in the MCP section below.
 
-To run a build or test command, use shell — never use search_code for this:
+To run a shell command, use shell for mutations and arbitrary execution, or shell_read for read-only commands — never use search_code for this:
 [shell: cargo check]
 [shell: cargo test my_filter]
 [shell: cargo clippy]
+Run a mutation: [shell: mkdir foo]
 
 To run a read-only system command without approval (ls, find, cat, grep, wc, head, tail, sed without -i):
 [shell_read: ls src/]
 [shell_read: grep -r foo src/]
 [shell_read: wc -l src/main.rs]
+Run a read-only command: [shell_read: ls src/]
+
+When the user explicitly asks to run a command (e.g. 'run X', 'cat X', 'grep X', 'ls X'), use shell_read for read-only commands and shell for mutations — do not substitute read_file, search_code, list_dir, or mcp::filesystem.
 
 Request a file read:
 [read_file: path/to/file.rs]

@@ -281,15 +281,38 @@ pub(crate) fn requested_shell_command(text: &str) -> Option<String> {
     let prefixes = ["run ", "execute "];
     for prefix in prefixes {
         if let Some(rest) = lower.find(prefix).map(|i| &text[i + prefix.len()..]) {
-            let cmd = rest.trim().to_string();
+            let cmd = strip_command_preamble(rest.trim());
             if !cmd.is_empty() {
-                return Some(cmd);
+                return Some(cmd.to_string());
             }
         }
     }
     None
 }
 
+/// Strips conversational preambles from an extracted command so that
+/// "run the shell command: grep foo" yields "grep foo", not "the shell command: grep foo".
+/// Longest, most-specific preambles are checked first.
+fn strip_command_preamble(cmd: &str) -> &str {
+    let lower = cmd.to_ascii_lowercase();
+    let preambles = [
+        "the shell command: ",
+        "shell command: ",
+        "the command: ",
+        "command: ",
+    ];
+    for preamble in preambles {
+        if lower.starts_with(preamble) {
+            return cmd[preamble.len()..].trim_start();
+        }
+    }
+    cmd
+}
+
+// Retained as the cargo-only allowlist for the NL seeding path's legacy semantics and
+// for documentation of the permitted-command policy; the active shell-seed gate is now
+// the tier classifier. Kept intact per Slice 47.5 (no behavioral callers at present).
+#[allow(dead_code)]
 pub(crate) fn is_permitted_shell_command(cmd: &str) -> bool {
     let first_token = cmd.split_whitespace().next().unwrap_or("");
     matches!(first_token, "cargo")
@@ -1382,5 +1405,33 @@ mod tests {
     fn is_permitted_shell_command_rejects_empty() {
         assert!(!is_permitted_shell_command(""));
         assert!(!is_permitted_shell_command("   "));
+    }
+
+    #[test]
+    fn requested_shell_command_strips_shell_command_preamble() {
+        assert_eq!(
+            requested_shell_command("run the shell command: grep -r foo src/"),
+            Some("grep -r foo src/".to_string())
+        );
+        assert_eq!(
+            requested_shell_command("execute command: ls -la"),
+            Some("ls -la".to_string())
+        );
+        assert_eq!(
+            requested_shell_command("run shell command: cat Cargo.toml"),
+            Some("cat Cargo.toml".to_string())
+        );
+    }
+
+    #[test]
+    fn requested_shell_command_without_preamble_is_unchanged() {
+        assert_eq!(
+            requested_shell_command("run cargo test"),
+            Some("cargo test".to_string())
+        );
+        assert_eq!(
+            requested_shell_command("execute mkdir foo"),
+            Some("mkdir foo".to_string())
+        );
     }
 }

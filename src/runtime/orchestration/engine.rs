@@ -101,13 +101,14 @@ use super::turn_state::{
     AnswerPhaseKind, DeepeningState, PendingRuntimeCall, TurnContext, TurnSignal, TurnState,
 };
 
+use super::super::investigation::prompt_analysis::{
+    classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
+    requested_shell_command, requested_simple_edit, user_requested_execution,
+    user_requested_mutation, DirectReadMode, RetrievalIntent,
+};
 /// Returns true if the prompt contains a token that looks like a code identifier.
 /// Only two structural patterns are checked — no NLP, no heuristics.
-use super::super::investigation::prompt_analysis::{
-    classify_retrieval_intent, extract_investigation_path_scope, is_permitted_shell_command,
-    prompt_requires_investigation, requested_shell_command, requested_simple_edit,
-    user_requested_execution, user_requested_mutation, DirectReadMode, RetrievalIntent,
-};
+use super::super::investigation::shell_tier::{classify_shell_tier, ShellTier};
 
 pub struct Runtime {
     #[allow(dead_code)]
@@ -2550,29 +2551,10 @@ impl TurnContext {
             "tool_surface_selected",
             &[("surface", tool_surface.as_str().into())],
         );
+        // Shell seeding is gated by the tier classifier (in seed_pending_runtime_call),
+        // not by the cargo-only allowlist. Read-only commands seed shell_read (immediate);
+        // mutations and arbitrary execution seed shell (approval-gated / exec-gated downstream).
         let shell_request = original_user_prompt.and_then(requested_shell_command);
-        if !investigation_required && tool_surface != ToolSurface::GitReadOnly {
-            if let Some(cmd) = shell_request.as_ref() {
-                if !is_permitted_shell_command(cmd) {
-                    let first = cmd.split_whitespace().next().unwrap_or(cmd);
-                    trace_runtime_decision(
-                        on_event,
-                        "shell_command_rejected",
-                        &[
-                            ("cmd", first.to_string()),
-                            ("surface", tool_surface.as_str().to_string()),
-                        ],
-                    );
-                    on_event(RuntimeEvent::Failed {
-                        message: format!(
-                            "shell command '{}' is not permitted. Allowed: cargo",
-                            first
-                        ),
-                    });
-                    return Err(());
-                }
-            }
-        }
         Ok(TurnContext {
             retrieval_intent,
             requested_read_path,
@@ -2598,10 +2580,19 @@ fn seed_pending_runtime_call(ctx: &TurnContext, state: &mut TurnState) {
         ));
     if !ctx.investigation_required && ctx.tool_surface != ToolSurface::GitReadOnly {
         if let Some(cmd) = ctx.shell_request.as_ref() {
-            state.pending_runtime_call = Some(PendingRuntimeCall {
-                input: ToolInput::Shell {
+            // Tier classification is the seed gate: read-only commands route to the
+            // immediate shell_read tool; mutations and arbitrary execution route to
+            // shell, where they are approval-gated and (for Tier-3) exec-gated downstream.
+            let input = match classify_shell_tier(cmd) {
+                ShellTier::ReadOnly => ToolInput::ShellRead {
                     command: cmd.clone(),
                 },
+                ShellTier::FsMutation | ShellTier::Exec => ToolInput::Shell {
+                    command: cmd.clone(),
+                },
+            };
+            state.pending_runtime_call = Some(PendingRuntimeCall {
+                input,
                 seeded_pre_generation: true,
             });
         } else if let Some(edit) = ctx.simple_edit_request.as_ref() {
