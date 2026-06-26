@@ -225,10 +225,21 @@ pub(crate) fn user_requested_mutation(text: &str) -> bool {
 /// Triggers on: "remember ...", "don't forget ...", "note that ..."
 pub(crate) fn user_requested_remember(text: &str) -> Option<String> {
     let lower = text.trim().to_lowercase();
-    let prefixes = ["remember ", "remember: ", "don't forget ", "note that "];
+    let prefixes = [
+        "remember that ",
+        "remember ",
+        "remember: ",
+        "don't forget ",
+        "note that ",
+    ];
     for prefix in &prefixes {
         if lower.starts_with(prefix) {
-            return Some(text.trim()[prefix.len()..].trim().to_string());
+            let extracted = text.trim()[prefix.len()..].trim();
+            return Some(
+                extracted
+                    .trim_matches(|c| c == '"' || c == '\'')
+                    .to_string(),
+            );
         }
     }
     None

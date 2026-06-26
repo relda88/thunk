@@ -1,7 +1,7 @@
 use crate::llm::backend::{BackendEvent, GenerateRequest, Message};
 use crate::runtime::memory::MemoryManager;
 use crate::runtime::protocol::memory_parser::parse_memory_proposals;
-use crate::runtime::types::RuntimeEvent;
+use crate::runtime::types::{Activity, RuntimeEvent};
 use crate::storage::memory::{MemoryFact, MemorySource};
 
 use super::Runtime;
@@ -18,6 +18,12 @@ impl Runtime {
         on_event: &mut dyn FnMut(RuntimeEvent),
     ) {
         if !self.config.memory.enabled {
+            return;
+        }
+        if self.pending_memory.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "a memory proposal is already pending — ^Y to confirm, ^N to discard".to_string(),
+            ));
             return;
         }
         self.pending_memory_is_delete = false;
@@ -116,7 +122,7 @@ impl Runtime {
 
     /// Handle /remember <fact> — propose the fact for approval.
     pub(super) fn handle_remember(&mut self, fact: String, on_event: &mut dyn FnMut(RuntimeEvent)) {
-        if !self.pending_memory_queue.is_empty() {
+        if self.pending_memory.is_some() || !self.pending_memory_queue.is_empty() {
             on_event(RuntimeEvent::SystemMessage(
                 "reflect in progress — approve or reject current proposal first".to_string(),
             ));
@@ -213,17 +219,30 @@ impl Runtime {
             on_event(RuntimeEvent::SystemMessage(
                 "reflect: memory is disabled".to_string(),
             ));
+            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             return;
         }
+        if self.pending_memory.is_some() || !self.pending_memory_queue.is_empty() {
+            on_event(RuntimeEvent::SystemMessage(
+                "finish the pending memory proposal first — ^Y to confirm, ^N to discard"
+                    .to_string(),
+            ));
+            return;
+        }
+        on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
         let raw = match self.generate_reflection_text(on_event) {
             Some(t) => t,
-            None => return,
+            None => {
+                on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                return;
+            }
         };
         let proposals = parse_memory_proposals(&raw);
         if proposals.is_empty() {
             on_event(RuntimeEvent::SystemMessage(
                 "reflect: nothing to remember".to_string(),
             ));
+            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             return;
         }
         let scope = self.memory_write_scope();
@@ -251,6 +270,7 @@ impl Runtime {
             delete: false,
         });
         self.pending_memory = Some(first);
+        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
     }
 
     /// Run a single generation pass to extract candidate memory facts from recent conversation.

@@ -179,6 +179,9 @@ When you show code, keep it focused on the user's request.",
         for spec in &visible_specs {
             prompt.push_str(&format!("  {}: {}\n", spec.name, spec.description));
         }
+        for tool in dynamic_tools {
+            prompt.push_str(&format!("  {}: {}\n", tool.name, tool.description));
+        }
         prompt.push('\n');
         prompt.push_str(instructions);
         let dynamic_specs: Vec<DynamicToolSpec> = dynamic_tools

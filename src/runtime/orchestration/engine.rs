@@ -831,6 +831,18 @@ impl Runtime {
             });
             return;
         }
+        if self.pending_memory.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "finish the pending approval first — ^Y to confirm, ^N to discard".to_string(),
+            ));
+            return;
+        }
+        if self.pending_plan.is_some() {
+            on_event(RuntimeEvent::SystemMessage(
+                "finish the pending approval first — ^Y to confirm, ^N to discard".to_string(),
+            ));
+            return;
+        }
 
         let trimmed = text.trim();
         if trimmed.is_empty() {
