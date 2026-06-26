@@ -300,6 +300,7 @@ impl Runtime {
              - No prose, no preamble, no explanation\n\
              - Only facts worth remembering across sessions\n\
              - Omit anything ephemeral or session-specific\n\
+             - Do NOT remember: requests the user made, actions taken this session, questions asked, files created or edited, commands run, or anything that describes what happened rather than who the user is\n\
              - At most 5 facts\n\
              - If nothing is worth remembering, output nothing\n\n\
              Conversation:\n\

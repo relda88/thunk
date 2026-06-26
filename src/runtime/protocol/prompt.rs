@@ -184,6 +184,7 @@ When you show code, keep it focused on the user's request.",
             prompt.push_str(&format!("  {}: {}\n", tool.name, tool.description));
         }
         prompt.push('\n');
+        prompt.push_str("For files or directories outside the project root, use mcp::filesystem tools — native tools are scoped to the project only.\n");
         prompt.push_str(instructions);
         let dynamic_specs: Vec<DynamicToolSpec> = dynamic_tools
             .iter()

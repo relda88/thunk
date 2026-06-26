@@ -23,7 +23,7 @@ impl Tool for ListDirTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "list_dir",
-            description: "List the immediate contents of a directory.",
+            description: "List the immediate contents of a directory within the project root. For directories outside the project root, use mcp::filesystem::list_directory instead.",
             input_hint: "path/to/dir",
             execution_kind: ExecutionKind::Immediate,
             default_risk: None,

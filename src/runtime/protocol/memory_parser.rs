@@ -41,7 +41,19 @@ pub fn parse_memory_proposals(text: &str) -> Vec<MemoryProposal> {
         };
         proposals.push(MemoryProposal { text, category });
     }
+    proposals.retain(|p| !is_imperative(&p.text));
     proposals
+}
+
+const IMPERATIVE_MARKERS: &[&str] = &[
+    "create ", "add ", "fix ", "make ", "build ", "write ", "delete ", "run ", "edit ",
+];
+
+fn is_imperative(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    IMPERATIVE_MARKERS
+        .iter()
+        .any(|marker| lower.starts_with(marker))
 }
 
 #[cfg(test)]
@@ -96,5 +108,23 @@ mod tests {
         assert_eq!(proposals.len(), 2);
         assert_eq!(proposals[0].category, "identity");
         assert_eq!(proposals[1].category, "project");
+    }
+
+    #[test]
+    fn imperative_first_word_is_dropped() {
+        let text = "[REMEMBER: create a new module for auth | project]\n\
+                    [REMEMBER: add logging to the pipeline | workflow]\n\
+                    [REMEMBER: prefers Rust for systems work | preference]";
+        let proposals = parse_memory_proposals(text);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].text, "prefers Rust for systems work");
+    }
+
+    #[test]
+    fn non_imperative_fact_passes_filter() {
+        let text = "[REMEMBER: uses dark mode in all editors | preference]";
+        let proposals = parse_memory_proposals(text);
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].text, "uses dark mode in all editors");
     }
 }
