@@ -130,6 +130,8 @@ pub struct AppState {
     pub(crate) autocomplete_matches: Vec<String>,
     pub(crate) autocomplete_index: usize,
     pub(crate) autocomplete_prefix: Option<String>,
+    /// Last path component of the git root. None when launched in a bare directory.
+    pub(crate) project_label: Option<String>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -187,6 +189,7 @@ impl AppState {
             autocomplete_matches: Vec::new(),
             autocomplete_index: 0,
             autocomplete_prefix: None,
+            project_label: paths.project_label.clone(),
             welcome_message: welcome,
         }
     }
@@ -448,6 +451,7 @@ mod tests {
         let paths = AppPaths {
             root_dir: PathBuf::from("/tmp"),
             project_root: PathBuf::from("/tmp"),
+            project_label: None,
             thunk_dir: PathBuf::from("/tmp/.thunk"),
             config_file: PathBuf::from("/tmp/config.toml"),
             data_dir: PathBuf::from("/tmp/data"),

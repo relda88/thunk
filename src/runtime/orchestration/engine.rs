@@ -397,6 +397,18 @@ impl Runtime {
         self
     }
 
+    /// Returns the memory scope to use when proposing a new fact for persistence.
+    /// None (global) when no .git ancestor was found; Some(project_root) otherwise.
+    /// Read operations always use Some(project_root) — the SQL filter returns global
+    /// facts in both cases. This helper governs writes only.
+    fn memory_write_scope(&self) -> Option<String> {
+        if self.project_root.path().join(".git").exists() {
+            Some(self.project_root.path().to_string_lossy().into_owned())
+        } else {
+            None
+        }
+    }
+
     #[cfg(test)]
     pub fn with_prompt_physics_enabled(mut self) -> Self {
         self.prompt_physics.enabled = true;
@@ -832,7 +844,7 @@ impl Runtime {
             if let Some(fact) =
                 crate::runtime::investigation::prompt_analysis::user_requested_remember(trimmed)
             {
-                let scope = Some(self.project_root.path().to_string_lossy().into_owned());
+                let scope = self.memory_write_scope();
                 self.propose_memory(
                     fact,
                     "user".to_string(),

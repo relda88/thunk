@@ -282,3 +282,31 @@ fn memory_delete_reject_preserves_fact() {
     assert_eq!(stored.len(), 1, "fact must be preserved after reject");
     assert_eq!(stored[0].text, "keep this fact");
 }
+
+#[test]
+fn remember_scope_is_none_in_bare_directory() {
+    // Make a temp dir with no .git — simulates a bare directory launch.
+    let root = tempfile::tempdir().unwrap();
+    let tmp = NamedTempFile::new().unwrap();
+    let mut runtime = make_runtime_in(Vec::<String>::new(), root.path());
+    attach_memory_manager(&mut runtime, tmp.path());
+
+    let events = collect_events(
+        &mut runtime,
+        RuntimeRequest::Remember {
+            fact: "I prefer dark mode".to_string(),
+        },
+    );
+
+    if let Some(RuntimeEvent::MemoryProposalRequired { scope, .. }) = events
+        .iter()
+        .find(|e| matches!(e, RuntimeEvent::MemoryProposalRequired { .. }))
+    {
+        assert_eq!(
+            *scope, None,
+            "scope must be None when project root has no .git"
+        );
+    } else {
+        panic!("expected MemoryProposalRequired event");
+    }
+}

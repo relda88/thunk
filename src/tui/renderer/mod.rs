@@ -358,6 +358,18 @@ impl Renderer {
             }
         }
 
+        {
+            let label = match state.project_label {
+                Some(ref name) => format!(" project: {name} "),
+                None => " no project ".to_string(),
+            };
+            let label_len = label.chars().count() as u16;
+            if w > label_len + 20 {
+                let col = (w / 2).saturating_sub(label_len / 2);
+                self.paint(cur, col, row, &label, label_len, self.theme.muted());
+            }
+        }
+
         if let Some(pct) = state.context_pct {
             let indicator = format!(" ctx: {pct}% ");
             let ind_len = indicator.chars().count() as u16;
@@ -749,6 +761,7 @@ mod tests {
         let paths = AppPaths {
             root_dir: dir.path().to_path_buf(),
             project_root: dir.path().to_path_buf(),
+            project_label: None,
             thunk_dir: dir.path().join(".thunk"),
             config_file: dir.path().join("config.toml"),
             data_dir: dir.path().join("data"),

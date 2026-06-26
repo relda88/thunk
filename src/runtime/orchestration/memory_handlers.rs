@@ -128,7 +128,7 @@ impl Runtime {
             ));
             return;
         }
-        let scope = Some(self.project_root.path().to_string_lossy().into_owned());
+        let scope = self.memory_write_scope();
         self.propose_memory(
             fact,
             "user".to_string(),
@@ -226,7 +226,7 @@ impl Runtime {
             ));
             return;
         }
-        let scope = Some(self.project_root.path().to_string_lossy().into_owned());
+        let scope = self.memory_write_scope();
         let mut facts: Vec<MemoryFact> = proposals
             .into_iter()
             .map(|p| {
