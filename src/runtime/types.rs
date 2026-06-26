@@ -312,6 +312,22 @@ pub enum RuntimeRequest {
     SequenceAbort,
     /// /refactor status — show the active sequence goal and step progress.
     SequenceStatus,
+    /// Approve the pending memory proposal — embed, encode, persist, clear.
+    MemoryApprove,
+    /// Reject the pending memory proposal — clear without persisting.
+    MemoryReject,
+    /// /remember <fact> — propose a fact for approval with User source.
+    Remember {
+        fact: String,
+    },
+    /// /memory — list all stored memory facts.
+    MemoryList,
+    /// /forget <id> — propose deletion of the memory fact with the given id.
+    MemoryForget {
+        id: i64,
+    },
+    /// /reflect — run a generation pass over recent conversation and propose extracted facts.
+    Reflect,
 }
 
 /// Events emitted by the runtime for UI rendering, logging, and lifecycle handling.
@@ -400,4 +416,17 @@ pub enum RuntimeEvent {
     },
     /// Fired after plan approval or abandonment to dismiss the plan approval widget.
     PlanApprovalCleared,
+    /// Fired when a memory fact is proposed for user approval.
+    /// The TUI renders the fact with ^Y remember / ^N discard controls.
+    MemoryProposalRequired {
+        fact: String,
+        category: String,
+        scope: Option<String>,
+        /// MemorySource::as_str() value — avoids importing storage types into types.rs.
+        source: String,
+        /// True when the proposal is for deletion (^Y confirms delete) rather than write.
+        delete: bool,
+    },
+    /// Fired after memory proposal approval or rejection to dismiss the memory widget.
+    MemoryProposalCleared,
 }

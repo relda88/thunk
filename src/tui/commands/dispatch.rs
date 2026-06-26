@@ -130,6 +130,10 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::RefactorApprove => CommandAction::Runtime(RuntimeRequest::SequenceApprove),
         Command::RefactorAbort => CommandAction::Runtime(RuntimeRequest::SequenceAbort),
         Command::RefactorStatus => CommandAction::Runtime(RuntimeRequest::SequenceStatus),
+        Command::Remember(fact) => CommandAction::Runtime(RuntimeRequest::Remember { fact }),
+        Command::Memory => CommandAction::Runtime(RuntimeRequest::MemoryList),
+        Command::Forget(id) => CommandAction::Runtime(RuntimeRequest::MemoryForget { id }),
+        Command::Reflect => CommandAction::Runtime(RuntimeRequest::Reflect),
     }
 }
 

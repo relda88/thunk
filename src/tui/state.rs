@@ -69,6 +69,14 @@ pub(crate) struct PendingPlanApprovalState {
     pub(crate) steps: Vec<(String, String)>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PendingMemoryProposalState {
+    pub(crate) fact: String,
+    pub(crate) category: String,
+    pub(crate) scope: Option<String>,
+    pub(crate) delete: bool,
+}
+
 /// Represents a chat message with a role (system, user, assistant) and content
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
@@ -118,9 +126,12 @@ pub struct AppState {
     pub(crate) scroll_to_message_idx: Option<usize>,
     pub(crate) pending_approval: Option<PendingApprovalState>,
     pub(crate) pending_plan_approval: Option<PendingPlanApprovalState>,
+    pub(crate) pending_memory_proposal: Option<PendingMemoryProposalState>,
     pub(crate) autocomplete_matches: Vec<String>,
     pub(crate) autocomplete_index: usize,
     pub(crate) autocomplete_prefix: Option<String>,
+    /// Last path component of the git root. None when launched in a bare directory.
+    pub(crate) project_label: Option<String>,
     // Stored once at construction; used to restore messages on /clear.
     welcome_message: String,
 }
@@ -174,9 +185,11 @@ impl AppState {
             scroll_to_message_idx: None,
             pending_approval: None,
             pending_plan_approval: None,
+            pending_memory_proposal: None,
             autocomplete_matches: Vec::new(),
             autocomplete_index: 0,
             autocomplete_prefix: None,
+            project_label: paths.project_label.clone(),
             welcome_message: welcome,
         }
     }
@@ -280,6 +293,7 @@ impl AppState {
         self.scroll_to_message_idx = None;
         self.pending_approval = None;
         self.pending_plan_approval = None;
+        self.pending_memory_proposal = None;
         self.reset_scroll();
     }
 
@@ -437,6 +451,7 @@ mod tests {
         let paths = AppPaths {
             root_dir: PathBuf::from("/tmp"),
             project_root: PathBuf::from("/tmp"),
+            project_label: None,
             thunk_dir: PathBuf::from("/tmp/.thunk"),
             config_file: PathBuf::from("/tmp/config.toml"),
             data_dir: PathBuf::from("/tmp/data"),

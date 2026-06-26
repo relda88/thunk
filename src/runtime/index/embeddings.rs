@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::core::error::{AppError, Result};
 
-pub trait EmbeddingProvider: Send {
+pub trait EmbeddingProvider: Send + Sync {
     fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
 }
 

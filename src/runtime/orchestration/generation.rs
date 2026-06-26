@@ -25,6 +25,7 @@ pub(super) fn run_generate_turn(
     investigation_mode: InvestigationMode,
     prompt_physics: &PromptPhysicsConfig,
     constrained_output: bool,
+    recall_facts: &[crate::storage::memory::MemoryFact],
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> Result<Option<String>> {
     let mut messages = conversation.pruned_snapshot();
@@ -63,6 +64,16 @@ pub(super) fn run_generate_turn(
     } else {
         false
     };
+    if !recall_facts.is_empty() {
+        let recall_block = format!(
+            "## Relevant context from memory\n{}",
+            recall_facts
+                .iter()
+                .map(|f| format!("- {}\n", f.text))
+                .collect::<String>()
+        );
+        messages.push(Message::system(recall_block));
+    }
     {
         let mut components = Vec::new();
         if has_primacy {
@@ -136,6 +147,112 @@ pub(super) fn emit_visible_assistant_message(text: &str, on_event: &mut dyn FnMu
     on_event(RuntimeEvent::AssistantMessageStarted);
     on_event(RuntimeEvent::AssistantMessageChunk(text.to_string()));
     on_event(RuntimeEvent::AssistantMessageFinished);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::llm::backend::{
+        BackendCapabilities, BackendEvent, GenerateRequest, Message, ModelBackend, Role,
+    };
+    use crate::runtime::conversation::Conversation;
+    use crate::runtime::investigation::investigation::InvestigationMode;
+    use crate::runtime::investigation::tool_surface::ToolSurface;
+    use crate::runtime::protocol::prompt_physics::PromptPhysicsConfig;
+    use crate::storage::memory::{MemoryFact, MemorySource};
+
+    struct CapturingBackend {
+        captured: Arc<Mutex<Vec<GenerateRequest>>>,
+    }
+
+    impl ModelBackend for CapturingBackend {
+        fn name(&self) -> &str {
+            "capture"
+        }
+        fn capabilities(&self) -> BackendCapabilities {
+            BackendCapabilities {
+                context_window_tokens: None,
+                max_output_tokens: None,
+            }
+        }
+        fn generate(
+            &mut self,
+            req: GenerateRequest,
+            on_event: &mut dyn FnMut(BackendEvent),
+        ) -> crate::core::error::Result<()> {
+            self.captured.lock().unwrap().push(req);
+            on_event(BackendEvent::TextDelta("ok".to_string()));
+            on_event(BackendEvent::Finished);
+            Ok(())
+        }
+    }
+
+    fn make_fact(text: &str) -> MemoryFact {
+        MemoryFact {
+            id: 1,
+            text: text.to_string(),
+            category: "test".to_string(),
+            scope: None,
+            salience: 1.0,
+            embedding: None,
+            model_name: None,
+            source: MemorySource::User,
+            created_at: "2026-01-01".to_string(),
+            updated_at: "2026-01-01".to_string(),
+            last_recalled_at: None,
+        }
+    }
+
+    #[test]
+    fn recall_facts_are_request_local() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let mut backend = CapturingBackend {
+            captured: Arc::clone(&captured),
+        };
+        let mut conversation = Conversation::new("system".to_string());
+        conversation.push_user("hello");
+
+        let fact = make_fact("user prefers dark mode");
+        let recall_facts = [fact];
+
+        let physics = PromptPhysicsConfig::default();
+        super::run_generate_turn(
+            &mut backend,
+            &mut conversation,
+            ToolSurface::RetrievalFirst,
+            None,
+            None,
+            InvestigationMode::General,
+            &physics,
+            false,
+            &recall_facts,
+            &mut |_| {},
+        )
+        .unwrap();
+
+        let reqs = captured.lock().unwrap();
+        let req = reqs.first().expect("backend must have received a request");
+
+        // Recall block must appear in the backend request messages
+        assert!(
+            req.messages.iter().any(|m| {
+                m.role == Role::System && m.content.contains("user prefers dark mode")
+            }),
+            "recall fact must appear in backend request: {:?}",
+            req.messages
+        );
+
+        // Recall block must NOT appear in conversation history
+        let conv_messages: Vec<Message> = conversation.pruned_snapshot();
+        assert!(
+            !conv_messages
+                .iter()
+                .any(|m| m.content.contains("user prefers dark mode")),
+            "recall fact must not persist in conversation history: {:?}",
+            conv_messages
+        );
+    }
 }
 
 fn map_backend_status(status: BackendStatus, investigation_mode: InvestigationMode) -> Activity {

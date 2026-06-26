@@ -104,10 +104,18 @@ pub fn build_system_prompt(
     include_mutation_tools: bool,
     prompt_physics: &PromptPhysicsConfig,
     dynamic_tools: &[McpTool],
+    anchor_facts: &[crate::storage::memory::MemoryFact],
 ) -> String {
     let mut prompt = String::new();
     if let Some(anchor) = prompt_physics::primacy_anchor_block(prompt_physics) {
         prompt.push_str(&anchor);
+        prompt.push('\n');
+    }
+    if !anchor_facts.is_empty() {
+        prompt.push_str("## What I know about you\n");
+        for fact in anchor_facts {
+            prompt.push_str(&format!("- {}\n", fact.text));
+        }
         prompt.push('\n');
     }
     prompt.push_str(&format!(
@@ -198,6 +206,57 @@ mod tests {
         ProjectStructureEntry, ProjectStructureEntryKind, ProjectStructureSnapshot,
     };
     use super::*;
+
+    fn make_fact(text: &str) -> crate::storage::memory::MemoryFact {
+        crate::storage::memory::MemoryFact {
+            id: 1,
+            text: text.to_string(),
+            category: "test".to_string(),
+            scope: None,
+            salience: 1.0,
+            embedding: None,
+            model_name: None,
+            source: crate::storage::memory::MemorySource::User,
+            created_at: "2026-01-01".to_string(),
+            updated_at: "2026-01-01".to_string(),
+            last_recalled_at: None,
+        }
+    }
+
+    fn stub_prompt(anchor_facts: &[crate::storage::memory::MemoryFact]) -> String {
+        use std::path::Path;
+        build_system_prompt(
+            "thunk",
+            Path::new("."),
+            None,
+            &[],
+            false,
+            &PromptPhysicsConfig::default(),
+            &[],
+            anchor_facts,
+        )
+    }
+
+    #[test]
+    fn anchor_facts_appear_in_system_prompt() {
+        let facts = [make_fact("prefers Rust"), make_fact("lives in NYC")];
+        let prompt = stub_prompt(&facts);
+        assert!(
+            prompt.contains("## What I know about you"),
+            "section heading must appear: {prompt}"
+        );
+        assert!(prompt.contains("prefers Rust"), "first fact must appear");
+        assert!(prompt.contains("lives in NYC"), "second fact must appear");
+    }
+
+    #[test]
+    fn empty_anchor_facts_produces_no_section() {
+        let prompt = stub_prompt(&[]);
+        assert!(
+            !prompt.contains("## What I know about you"),
+            "section must be absent when no facts: {prompt}"
+        );
+    }
 
     #[test]
     fn project_snapshot_hint_is_compact_and_bounded() {

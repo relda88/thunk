@@ -221,6 +221,19 @@ pub(crate) fn user_requested_mutation(text: &str) -> bool {
     })
 }
 
+/// Returns the fact text if the user message is a "remember this" intent.
+/// Triggers on: "remember ...", "don't forget ...", "note that ..."
+pub(crate) fn user_requested_remember(text: &str) -> Option<String> {
+    let lower = text.trim().to_lowercase();
+    let prefixes = ["remember ", "remember: ", "don't forget ", "note that "];
+    for prefix in &prefixes {
+        if lower.starts_with(prefix) {
+            return Some(text.trim()[prefix.len()..].trim().to_string());
+        }
+    }
+    None
+}
+
 pub(crate) fn user_requested_execution(text: &str) -> bool {
     text.split(|c: char| {
         c.is_whitespace()

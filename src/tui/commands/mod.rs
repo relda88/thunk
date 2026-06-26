@@ -92,6 +92,14 @@ pub enum Command {
     RefactorAbort,
     /// /refactor status — show active sequence goal and step progress.
     RefactorStatus,
+    /// /remember <fact> — propose a memory fact for user approval.
+    Remember(String),
+    /// /memory — list all stored memory facts.
+    Memory,
+    /// /forget <id> — propose deletion of the memory fact with the given id.
+    Forget(i64),
+    /// /reflect — run a generation pass over recent conversation and propose extracted facts.
+    Reflect,
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -324,6 +332,23 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
                 Some(Ok(Command::Refactor(goal)))
             }
         },
+        "/remember" => match arg {
+            Some(fact) if !fact.trim().is_empty() => {
+                Some(Ok(Command::Remember(fact.trim().to_string())))
+            }
+            _ => Some(Err(ParseError::MissingArgument {
+                command: "/remember",
+            })),
+        },
+        "/memory" => Some(Ok(Command::Memory)),
+        "/forget" => match arg {
+            Some(raw) => match raw.trim().parse::<i64>() {
+                Ok(id) => Some(Ok(Command::Forget(id))),
+                Err(_) => Some(Err(ParseError::UnknownCommand)),
+            },
+            None => Some(Err(ParseError::MissingArgument { command: "/forget" })),
+        },
+        "/reflect" => Some(Ok(Command::Reflect)),
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -375,6 +400,10 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/refactor abort",
         "/refactor status",
         "/reject",
+        "/forget",
+        "/memory",
+        "/reflect",
+        "/remember",
         "/retrieval",
         "/search",
         "/session",
@@ -512,6 +541,22 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/refactor status",
             description: "Show active refactor sequence goal and step progress",
+        },
+        LauncherCommand {
+            name: "/remember",
+            description: "propose a fact for personal memory (/remember <fact>)",
+        },
+        LauncherCommand {
+            name: "/memory",
+            description: "list all stored memory facts",
+        },
+        LauncherCommand {
+            name: "/forget",
+            description: "propose deletion of a stored memory fact (/forget <id>)",
+        },
+        LauncherCommand {
+            name: "/reflect",
+            description: "extract and propose memory facts from recent conversation",
         },
         LauncherCommand {
             name: "/constrain",

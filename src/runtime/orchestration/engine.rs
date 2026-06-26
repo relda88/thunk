@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::core::config::{Config, InvestigationDepth, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
@@ -57,6 +58,9 @@ mod answer_guard;
 
 #[path = "plan_handlers.rs"]
 mod plan_handlers;
+
+#[path = "memory_handlers.rs"]
+mod memory_handlers;
 
 #[path = "embed_handlers.rs"]
 mod embed_handlers;
@@ -138,10 +142,14 @@ pub struct Runtime {
     /// Session-scoped — re-discovered fresh each session, never persisted to SQLite.
     /// Empty when no MCP servers are configured or none expose tools.
     discovered_tools: Vec<crate::runtime::mcp::McpTool>,
+    /// Personal memory manager. None when ~/.thunk/memory.db is unavailable or memory disabled.
+    /// Advisory — session proceeds normally when absent. MemoryStore drops cleanly with no
+    /// explicit shutdown needed.
+    pub(crate) memory_manager: Option<crate::runtime::memory::MemoryManager>,
     /// Symbol index store. `None` when no db_path was supplied (e.g. in tests).
     pub(super) symbol_store: Option<SymbolStore>,
     /// Embedding provider for vector search. `None` when unconfigured.
-    pub(super) embedding_provider: Option<Box<dyn EmbeddingProvider + Send>>,
+    pub(super) embedding_provider: Option<Arc<dyn EmbeddingProvider + Send + Sync>>,
     pub(super) retrieval_config: RetrievalConfig,
     /// Plan/task store. `None` when no db_path was supplied (e.g. in tests).
     pub(crate) task_store: Option<TaskStore>,
@@ -191,6 +199,12 @@ pub struct Runtime {
     /// Parsed plan awaiting user approval. Set by handle_plan_create, consumed by
     /// handle_plan_approve / handle_plan_abandon. Never persisted; cleared on reset.
     pending_plan: Option<command_handlers::PendingPlanDraft>,
+    /// Proposed memory fact awaiting user approval. Set by propose_memory, cleared by approve/reject.
+    pending_memory: Option<crate::storage::memory::MemoryFact>,
+    /// True when pending_memory represents a deletion proposal rather than a write.
+    pending_memory_is_delete: bool,
+    /// Queue of memory proposals from /reflect. Drained one-at-a-time after each approve/reject.
+    pending_memory_queue: Vec<crate::storage::memory::MemoryFact>,
     /// In-progress chunked embed state between IndexEmbedChunk dispatches.
     /// Set by handle_index_embed, consumed by handle_index_embed_chunk, cleared on reset.
     pub(super) pending_embed: Option<embed_handlers::PendingEmbedState>,
@@ -277,6 +291,7 @@ impl Runtime {
             false,
             &prompt_physics,
             &discovered_tools,
+            &[], // anchor facts injected later by with_memory_manager
         );
         let session_start_ref = capture_session_head(project_root.path());
         Self {
@@ -295,6 +310,7 @@ impl Runtime {
             lsp,
             mcp_manager,
             discovered_tools,
+            memory_manager: None,
             symbol_store: None,
             embedding_provider: None,
             retrieval_config: config.retrieval.clone(),
@@ -316,6 +332,9 @@ impl Runtime {
             web_fetch_enabled: config.web_fetch.enabled,
             session_id,
             pending_plan: None,
+            pending_memory: None,
+            pending_memory_is_delete: false,
+            pending_memory_queue: Vec::new(),
             pending_embed: None,
             investigation_depth: config.investigation.depth,
             investigation_hop_limit: config.investigation.hop_limit,
@@ -353,9 +372,41 @@ impl Runtime {
     }
 
     /// Attaches an embedding provider for vector search. Returns `self` for chaining.
-    pub fn with_embedding_provider(mut self, provider: Box<dyn EmbeddingProvider + Send>) -> Self {
+    pub fn with_embedding_provider(
+        mut self,
+        provider: Arc<dyn EmbeddingProvider + Send + Sync>,
+    ) -> Self {
         self.embedding_provider = Some(provider);
         self
+    }
+
+    /// Attaches a personal memory manager. Returns `self` for chaining.
+    /// Advisory — call only when the home DB is confirmed available.
+    pub fn with_memory_manager(mut self, manager: crate::runtime::memory::MemoryManager) -> Self {
+        let root_str = self.project_root.path().to_string_lossy().into_owned();
+        let anchor_facts = manager.anchor_facts(Some(&root_str), self.config.memory.anchor_limit);
+        if !anchor_facts.is_empty() {
+            self.system_prompt.push_str("## What I know about you\n");
+            for fact in &anchor_facts {
+                self.system_prompt.push_str(&format!("- {}\n", fact.text));
+            }
+            self.system_prompt.push('\n');
+            self.conversation.reset(self.system_prompt.clone());
+        }
+        self.memory_manager = Some(manager);
+        self
+    }
+
+    /// Returns the memory scope to use when proposing a new fact for persistence.
+    /// None (global) when no .git ancestor was found; Some(project_root) otherwise.
+    /// Read operations always use Some(project_root) — the SQL filter returns global
+    /// facts in both cases. This helper governs writes only.
+    fn memory_write_scope(&self) -> Option<String> {
+        if self.project_root.path().join(".git").exists() {
+            Some(self.project_root.path().to_string_lossy().into_owned())
+        } else {
+            None
+        }
     }
 
     #[cfg(test)]
@@ -539,6 +590,12 @@ impl Runtime {
             RuntimeRequest::SequenceExecuteStep => self.handle_sequence_execute_step(on_event),
             RuntimeRequest::SequenceAbort => self.handle_sequence_abort(on_event),
             RuntimeRequest::SequenceStatus => self.handle_sequence_status(on_event),
+            RuntimeRequest::MemoryApprove => self.handle_memory_approve(on_event),
+            RuntimeRequest::MemoryReject => self.handle_memory_reject(on_event),
+            RuntimeRequest::Remember { fact } => self.handle_remember(fact, on_event),
+            RuntimeRequest::MemoryList => self.handle_memory_list(on_event),
+            RuntimeRequest::MemoryForget { id } => self.handle_memory_forget(id, on_event),
+            RuntimeRequest::Reflect => self.handle_reflect(on_event),
         }
     }
 
@@ -781,6 +838,22 @@ impl Runtime {
                 message: "Cannot submit an empty prompt.".to_string(),
             });
             return;
+        }
+
+        if self.config.memory.enabled {
+            if let Some(fact) =
+                crate::runtime::investigation::prompt_analysis::user_requested_remember(trimmed)
+            {
+                let scope = self.memory_write_scope();
+                self.propose_memory(
+                    fact,
+                    "user".to_string(),
+                    scope,
+                    crate::storage::memory::MemorySource::User,
+                    on_event,
+                );
+                return;
+            }
         }
 
         let is_last_read_file_anchor = is_last_read_file_anchor_prompt(trimmed);
@@ -1712,58 +1785,72 @@ impl Runtime {
             on_event,
         );
 
-        let (calls, response, seeded_pre_generation) =
-            if let Some(pending) = state.pending_runtime_call.take() {
-                (vec![pending.input], None, pending.seeded_pre_generation)
-            } else {
-                let response = {
-                    let mut perf_on_event = |event| {
-                        if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
-                            state.turn_perf.record_backend_timing(*stage, *elapsed_ms);
+        let (calls, response, seeded_pre_generation) = if let Some(pending) =
+            state.pending_runtime_call.take()
+        {
+            (vec![pending.input], None, pending.seeded_pre_generation)
+        } else {
+            let response = {
+                let recall_facts: Vec<crate::storage::memory::MemoryFact> =
+                    if self.config.memory.enabled {
+                        if let Some(ref mgr) = self.memory_manager {
+                            let query = self.conversation.last_user_content().unwrap_or("");
+                            let root_str = self.project_root.path().to_string_lossy().into_owned();
+                            mgr.recall(query, Some(&root_str), self.config.memory.recall_top_k)
+                        } else {
+                            vec![]
                         }
-                        if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
-                            state.turn_perf.record_token_counts(*prompt, *completion);
-                        }
-                        on_event(event);
+                    } else {
+                        vec![]
                     };
-
-                    match run_generate_turn(
-                        self.backend.as_mut(),
-                        &mut self.conversation,
-                        effective_surface,
-                        project_snapshot_hint.as_deref(),
-                        test_coverage_hint.as_deref(),
-                        ctx.investigation_mode,
-                        &self.prompt_physics,
-                        self.constrained_output,
-                        &mut perf_on_event,
-                    ) {
-                        Ok(Some(r)) => r,
-                        Ok(None) => {
-                            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
-                            on_event(RuntimeEvent::Failed {
-                                message: format!("{} returned no output.", self.backend.name()),
-                            });
-                            return TurnSignal::Finish;
-                        }
-                        Err(e) => {
-                            on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
-                            on_event(RuntimeEvent::Failed {
-                                message: e.to_string(),
-                            });
-                            return TurnSignal::Finish;
-                        }
+                let mut perf_on_event = |event| {
+                    if let RuntimeEvent::BackendTiming { stage, elapsed_ms } = &event {
+                        state.turn_perf.record_backend_timing(*stage, *elapsed_ms);
                     }
+                    if let RuntimeEvent::BackendTokenCounts { prompt, completion } = &event {
+                        state.turn_perf.record_token_counts(*prompt, *completion);
+                    }
+                    on_event(event);
                 };
 
-                let dynamic_names: Vec<&str> = self
-                    .discovered_tools
-                    .iter()
-                    .map(|t| t.name.as_str())
-                    .collect();
-                let calls = tool_codec::parse_all_tool_inputs(&response, &dynamic_names);
-                (calls, Some(response), false)
+                match run_generate_turn(
+                    self.backend.as_mut(),
+                    &mut self.conversation,
+                    effective_surface,
+                    project_snapshot_hint.as_deref(),
+                    test_coverage_hint.as_deref(),
+                    ctx.investigation_mode,
+                    &self.prompt_physics,
+                    self.constrained_output,
+                    &recall_facts,
+                    &mut perf_on_event,
+                ) {
+                    Ok(Some(r)) => r,
+                    Ok(None) => {
+                        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                        on_event(RuntimeEvent::Failed {
+                            message: format!("{} returned no output.", self.backend.name()),
+                        });
+                        return TurnSignal::Finish;
+                    }
+                    Err(e) => {
+                        on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
+                        on_event(RuntimeEvent::Failed {
+                            message: e.to_string(),
+                        });
+                        return TurnSignal::Finish;
+                    }
+                }
             };
+
+            let dynamic_names: Vec<&str> = self
+                .discovered_tools
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect();
+            let calls = tool_codec::parse_all_tool_inputs(&response, &dynamic_names);
+            (calls, Some(response), false)
+        };
 
         if let Some(signal) =
             self.check_tool_call_gates(ctx, state, &calls, response.as_deref(), on_event)

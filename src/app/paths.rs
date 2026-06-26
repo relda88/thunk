@@ -16,6 +16,9 @@ pub struct AppPaths {
     /// Runtime project root: nearest .git ancestor, or cwd as fallback.
     /// This is what ProjectRoot and all runtime tools operate within.
     pub project_root: PathBuf,
+    /// Last path component of the git root, when a .git ancestor was found.
+    /// None when launched from a bare directory with no .git ancestor.
+    pub project_label: Option<String>,
     /// Thunk-specific project config directory: <project_root>/.thunk/
     pub thunk_dir: PathBuf,
     pub config_file: PathBuf,
@@ -45,7 +48,13 @@ impl AppPaths {
         let root_dir = find_config_root(&start_dir).unwrap_or_else(|| start_dir.clone());
 
         // Runtime project root: nearest .git ancestor, or cwd as fallback.
-        let project_root = find_git_root(&start_dir).unwrap_or_else(|| start_dir.clone());
+        let git_root = find_git_root(&start_dir);
+        let project_label = git_root
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string());
+        let project_root = git_root.unwrap_or_else(|| start_dir.clone());
 
         let home_mcp_config = std::env::var("HOME")
             .ok()
@@ -58,6 +67,7 @@ impl AppPaths {
             session_db: root_dir.join("data").join("sessions.db"),
             thunk_dir: project_root.join(".thunk"),
             home_mcp_config,
+            project_label,
             root_dir,
             project_root,
         })
@@ -114,7 +124,13 @@ mod tests {
             }
         };
         let root_dir = find_config_root(&start_dir).unwrap_or_else(|| start_dir.clone());
-        let project_root = find_git_root(&start_dir).unwrap_or_else(|| start_dir.clone());
+        let git_root = find_git_root(&start_dir);
+        let project_label = git_root
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string());
+        let project_root = git_root.unwrap_or_else(|| start_dir.clone());
         AppPaths {
             config_file: root_dir.join(CONFIG_FILE_NAME),
             data_dir: root_dir.join("data"),
@@ -122,6 +138,7 @@ mod tests {
             session_db: root_dir.join("data").join("sessions.db"),
             thunk_dir: project_root.join(".thunk"),
             home_mcp_config: None,
+            project_label,
             root_dir,
             project_root,
         }
@@ -180,6 +197,27 @@ mod tests {
         // No config, no .git: both roots fall back to cwd.
         assert_eq!(paths.root_dir, dir.path().canonicalize().unwrap());
         assert_eq!(paths.project_root, dir.path().canonicalize().unwrap());
+        // No git root found: project_label must be None.
+        assert_eq!(paths.project_label, None);
+    }
+
+    #[test]
+    fn project_label_set_when_git_root_found() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let paths = discover_from(dir.path());
+
+        // .git present: project_label is the last path component of the git root.
+        let expected = dir
+            .path()
+            .canonicalize()
+            .unwrap()
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string());
+        assert_eq!(paths.project_label, expected);
+        assert!(paths.project_label.is_some());
     }
 
     #[test]

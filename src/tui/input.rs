@@ -544,6 +544,7 @@ mod tests {
         let paths = AppPaths {
             root_dir: PathBuf::from("/tmp"),
             project_root: PathBuf::from("/tmp"),
+            project_label: None,
             thunk_dir: PathBuf::from("/tmp/.thunk"),
             config_file: PathBuf::from("/tmp/config.toml"),
             data_dir: PathBuf::from("/tmp/data"),
