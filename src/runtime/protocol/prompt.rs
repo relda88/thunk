@@ -10,16 +10,17 @@ use super::tool_codec;
 
 /// Builds the ephemeral per-turn tool-surface hint injected before generation.
 /// This is not persisted in conversation history.
-pub(crate) fn render_tool_surface_hint<I>(surface_name: &str, allowed_tools: I) -> String
+pub(crate) fn render_tool_surface_hint<I, S>(surface_name: &str, allowed_tools: I) -> String
 where
-    I: IntoIterator<Item = &'static str>,
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
 {
     let mut tools = String::new();
     for tool in allowed_tools {
         if !tools.is_empty() {
             tools.push_str(", ");
         }
-        tools.push_str(tool);
+        tools.push_str(tool.as_ref());
     }
     if tools.is_empty() {
         format!("Active tool surface: {surface_name}. No tools are available. Provide your final answer now.")

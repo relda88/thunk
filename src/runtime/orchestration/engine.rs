@@ -1825,6 +1825,11 @@ impl Runtime {
                     on_event(event);
                 };
 
+                let dynamic_tool_names: Vec<&str> = self
+                    .discovered_tools
+                    .iter()
+                    .map(|t| t.name.as_str())
+                    .collect();
                 match run_generate_turn(
                     self.backend.as_mut(),
                     &mut self.conversation,
@@ -1835,6 +1840,7 @@ impl Runtime {
                     &self.prompt_physics,
                     self.constrained_output,
                     &recall_facts,
+                    &dynamic_tool_names,
                     &mut perf_on_event,
                 ) {
                     Ok(Some(r)) => r,
