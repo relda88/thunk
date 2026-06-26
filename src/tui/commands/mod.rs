@@ -100,6 +100,9 @@ pub enum Command {
     Forget(i64),
     /// /reflect — run a generation pass over recent conversation and propose extracted facts.
     Reflect,
+    /// /exec on|off|status — session-scoped Tier-3 exec mode toggle.
+    /// Some(true) enables, Some(false) disables, None queries current status.
+    Exec(Option<bool>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -349,6 +352,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             None => Some(Err(ParseError::MissingArgument { command: "/forget" })),
         },
         "/reflect" => Some(Ok(Command::Reflect)),
+        "/exec" => match arg {
+            Some("on") => Some(Ok(Command::Exec(Some(true)))),
+            Some("off") => Some(Ok(Command::Exec(Some(false)))),
+            Some("status") | None => Some(Ok(Command::Exec(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -379,6 +388,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/diff",
         "/context",
         "/depth",
+        "/exec",
         "/exit",
         "/fetch",
         "/git",
@@ -473,6 +483,10 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/context",
             description: "show context window usage stats",
+        },
+        LauncherCommand {
+            name: "/exec",
+            description: "enable or disable Tier-3 arbitrary shell execution (/exec on|off|status)",
         },
         LauncherCommand {
             name: "/exit",
@@ -1215,5 +1229,21 @@ mod tests {
             parse("/refactor extract helpers"),
             Some(Ok(Command::Refactor(Some("extract helpers".to_string()))))
         );
+    }
+
+    #[test]
+    fn exec_toggle_enables() {
+        assert_eq!(parse("/exec on"), Some(Ok(Command::Exec(Some(true)))));
+    }
+
+    #[test]
+    fn exec_toggle_disables() {
+        assert_eq!(parse("/exec off"), Some(Ok(Command::Exec(Some(false)))));
+    }
+
+    #[test]
+    fn exec_toggle_status() {
+        assert_eq!(parse("/exec status"), Some(Ok(Command::Exec(None))));
+        assert_eq!(parse("/exec"), Some(Ok(Command::Exec(None))));
     }
 }

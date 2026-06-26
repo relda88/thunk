@@ -214,6 +214,11 @@ pub enum RuntimeRequest {
     VerifyMutationToggle {
         command: Option<String>,
     },
+    /// Session-scoped exec mode toggle. `Some(true)` enables, `Some(false)` disables,
+    /// `None` queries current status. Does not mutate conversation or trigger session save.
+    ExecToggle {
+        enabled: Option<bool>,
+    },
     /// Read-only query: returns the current pending transaction state as a SystemMessage.
     /// Does not mutate conversation state or trigger session save.
     TransactionStatus,

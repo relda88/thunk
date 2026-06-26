@@ -173,6 +173,10 @@ pub struct Runtime {
     /// (display-only, no correction loop). When false, verification runs synchronously
     /// with the correction loop. Defaults to true.
     deferred_verify: bool,
+    /// Session-scoped exec mode. When true, Tier-3 arbitrary shell commands are
+    /// allowed through the approval gate. Resets to false on session reset.
+    /// Controlled via /exec on|off.
+    exec_enabled: bool,
     /// Tracks how many correction attempts have been made for the current mutation.
     /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
     correction_attempts: u32,
@@ -322,6 +326,7 @@ impl Runtime {
             prompt_physics,
             verify_command: config.project.verify_command.clone(),
             deferred_verify: true,
+            exec_enabled: false,
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
             session_start_ref,
@@ -556,6 +561,7 @@ impl Runtime {
             RuntimeRequest::VerifyMutationToggle { command } => {
                 self.handle_verify_mutation_toggle(command, on_event)
             }
+            RuntimeRequest::ExecToggle { enabled } => self.handle_exec_toggle(enabled, on_event),
             RuntimeRequest::TransactionStatus => self.handle_transaction_status(on_event),
             RuntimeRequest::AbilityToggle { name } => self.handle_ability_toggle(name, on_event),
             RuntimeRequest::SkillToggle { name } => self.handle_skill_toggle(name, on_event),
