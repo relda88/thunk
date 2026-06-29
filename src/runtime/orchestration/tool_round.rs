@@ -918,15 +918,25 @@ pub(crate) fn run_tool_round(
         // because Tool::run() has no access to runtime state.
         if let super::super::project::ResolvedToolInput::Shell { ref command } = resolved {
             if matches!(classify_shell_tier(command), ShellTier::Exec) && !exec_enabled {
+                const EXEC_DISABLED_MSG: &str =
+                    "exec mode is disabled — run /exec on to enable arbitrary execution";
+                // Surface the denial to the user. The model cannot self-correct this
+                // (only /exec on can), so the reason must reach the TUI as a SystemMessage,
+                // not just the model-facing `accumulated` buffer.
+                on_event(RuntimeEvent::SystemMessage(EXEC_DISABLED_MSG.to_string()));
                 on_event(RuntimeEvent::ToolCallFinished {
                     name: name.clone(),
                     summary: None,
                 });
-                accumulated.push_str(&tool_codec::format_tool_error(
-                    &name,
-                    "exec mode is disabled — run /exec on to enable arbitrary execution",
-                ));
-                continue;
+                accumulated.push_str(&tool_codec::format_tool_error(&name, EXEC_DISABLED_MSG));
+                // Terminate the turn instead of `continue`. A `continue` would let the
+                // model retry the same blocked command (failed calls don't update
+                // last_call_key), causing a deny→retry spiral.
+                return ToolRoundOutcome::TerminalAnswer {
+                    results: accumulated,
+                    answer: EXEC_DISABLED_MSG.to_string(),
+                    reason: RuntimeTerminalReason::ExecDisabled,
+                };
             }
         }
 

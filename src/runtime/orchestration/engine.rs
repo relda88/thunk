@@ -1977,6 +1977,16 @@ impl Runtime {
                             state.answer_phase = Some(AnswerPhaseKind::PostRead);
                         }
                     }
+                    // A seeded read-only shell command (shell_read) completed. Mirror the
+                    // DirectoryListing arm above: signal the model to synthesize an answer
+                    // from the result rather than continue investigating. shell_read is
+                    // invisible to reads_this_turn (only read_file populates it), so without
+                    // this it never enters the PostRead answer phase. FsMutation shell
+                    // returns ApprovalRequired and Tier-3 exec-denied returns TerminalAnswer,
+                    // so only ReadOnly shell_read reaches this Completed branch.
+                    if ctx.shell_request.is_some() {
+                        state.answer_phase = Some(AnswerPhaseKind::PostRead);
+                    }
                 }
                 if let Some(t) = t_tool_start {
                     state
