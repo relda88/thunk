@@ -67,3 +67,10 @@ enabled = true
 [retrieval]
 embedding_model = "nomic-embed-text"
 vector_weight = 0.3
+
+# Proactive intelligence: a background worker periodically scans personal memory
+# for stale facts and surfaces approval-gated proposals. Always respects /dnd.
+[proactive]
+enabled = true
+interval_secs = 300
+staleness_days = 7

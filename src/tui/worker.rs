@@ -11,6 +11,7 @@ pub(crate) enum WorkerCmd {
     ListSessions,
     ClearSessions,
     RebuildFile(std::path::PathBuf),
+    ProactiveScan,
 }
 
 pub(super) enum WorkerReply {
@@ -211,6 +212,12 @@ pub(super) fn run_worker(
                         let _ = bg_tx.send(WorkerReply::DeferredVerification(msg));
                     });
                 }
+            }
+            WorkerCmd::ProactiveScan => {
+                let tx = reply_tx.clone();
+                app.proactive_scan(&mut |ev| {
+                    let _ = tx.send(WorkerReply::Event(ev));
+                });
             }
         }
     }

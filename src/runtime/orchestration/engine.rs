@@ -181,6 +181,12 @@ pub struct Runtime {
     /// Session-scoped do-not-disturb mode. When true, proactive suggestions are
     /// paused. Resets to false on session reset. Controlled via /dnd on|off.
     dnd_enabled: bool,
+    /// Timestamp of the last proactive scan that ran (not necessarily surfaced).
+    /// Used to enforce `proactive_min_interval`. Resets to None on session reset.
+    last_proactive_at: Option<std::time::Instant>,
+    /// Minimum wall-clock interval between proactive scans. Anti-spam floor enforced
+    /// in `proactive_scan`, decoupled from the timer thread's cadence.
+    proactive_min_interval: std::time::Duration,
     /// Tracks how many correction attempts have been made for the current mutation.
     /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
     correction_attempts: u32,
@@ -332,6 +338,8 @@ impl Runtime {
             deferred_verify: true,
             exec_enabled: false,
             dnd_enabled: false,
+            last_proactive_at: None,
+            proactive_min_interval: std::time::Duration::from_secs(300),
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
             session_start_ref,

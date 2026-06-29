@@ -562,6 +562,8 @@ impl Runtime {
         self.exec_enabled = false;
         // do-not-disturb is session-scoped — a reset returns it to the default off state.
         self.dnd_enabled = false;
+        // proactive cadence is session-scoped — clear the floor so the next session can scan.
+        self.last_proactive_at = None;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,

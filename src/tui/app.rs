@@ -119,6 +119,18 @@ pub(crate) fn run_app(
         });
     }
 
+    {
+        let proactive_cmd_tx = cmd_tx.clone();
+        let proactive_enabled = config.proactive.enabled;
+        let interval_secs: u64 = config.proactive.interval_secs;
+        if proactive_enabled {
+            thread::spawn(move || loop {
+                thread::sleep(Duration::from_secs(interval_secs));
+                let _ = proactive_cmd_tx.send(WorkerCmd::ProactiveScan);
+            });
+        }
+    }
+
     loop {
         while let Ok(reply) = reply_rx.try_recv() {
             handle_worker_reply(&mut state, reply);
