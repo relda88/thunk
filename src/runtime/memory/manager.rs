@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::core::error::Result;
 use crate::runtime::index::EmbeddingProvider;
 use crate::storage::memory::{MemoryFact, MemorySource, MemoryStore};
 
@@ -63,6 +64,12 @@ impl MemoryManager {
             }
             Err(_) => vec![],
         }
+    }
+
+    /// Facts last recalled before `before` (a Unix timestamp string), or never
+    /// recalled. Delegates to the store; scope filter matches `anchor_facts`.
+    pub(crate) fn stale_facts(&self, scope: Option<&str>, before: &str) -> Result<Vec<MemoryFact>> {
+        self.store.stale_facts(scope, before)
     }
 
     /// Construct a MemoryFact proposal without persisting it.

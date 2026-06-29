@@ -90,6 +90,31 @@ impl MemoryStore {
         Ok(facts)
     }
 
+    /// Facts last recalled before `before` (a Unix timestamp string), or never
+    /// recalled (NULL `last_recalled_at`). Scope filter follows `list_facts`.
+    pub(crate) fn stale_facts(&self, scope: Option<&str>, before: &str) -> Result<Vec<MemoryFact>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, text, category, scope, salience, embedding, model_name, source, \
+                 created_at, updated_at, last_recalled_at \
+                 FROM personal_memories \
+                 WHERE (?1 IS NULL OR scope IS NULL OR scope = ?1) \
+                 AND (last_recalled_at IS NULL OR last_recalled_at < ?2)",
+            )
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let rows = stmt
+            .query_map(params![scope, before], row_to_fact)
+            .map_err(|e| AppError::Storage(e.to_string()))?;
+
+        let mut facts = Vec::new();
+        for row in rows {
+            facts.push(row.map_err(|e| AppError::Storage(e.to_string()))?);
+        }
+        Ok(facts)
+    }
+
     pub(crate) fn update_last_recalled(&self, id: i64) -> Result<()> {
         let now = now_str();
         self.conn
@@ -239,6 +264,81 @@ mod tests {
 
         let in_a = s.list_facts(Some("proj_a")).unwrap();
         assert_eq!(in_a.len(), 2);
+    }
+
+    #[test]
+    fn stale_facts_returns_never_recalled() {
+        let s = store();
+        s.upsert_fact(
+            "never recalled",
+            "misc",
+            None,
+            1.0,
+            None,
+            None,
+            MemorySource::User,
+        )
+        .unwrap();
+
+        let result = s.stale_facts(None, "9999999999").unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "never recalled");
+        assert!(result[0].last_recalled_at.is_none());
+    }
+
+    #[test]
+    fn stale_facts_excludes_recently_recalled() {
+        let s = store();
+        let id = s
+            .upsert_fact(
+                "recently recalled",
+                "misc",
+                None,
+                1.0,
+                None,
+                None,
+                MemorySource::User,
+            )
+            .unwrap();
+        // Set last_recalled_at to "now" (current Unix epoch seconds).
+        s.update_last_recalled(id).unwrap();
+
+        // Cutoff is in the past, so a now-recalled fact is not stale.
+        let result = s.stale_facts(None, "0").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn stale_facts_scope_filter() {
+        let s = store();
+        s.upsert_fact(
+            "global fact",
+            "identity",
+            None,
+            1.0,
+            None,
+            None,
+            MemorySource::User,
+        )
+        .unwrap();
+        s.upsert_fact(
+            "proj fact",
+            "project",
+            Some("proj"),
+            1.0,
+            None,
+            None,
+            MemorySource::User,
+        )
+        .unwrap();
+
+        // Both facts are never recalled, so the cutoff admits both before scope filtering.
+        let in_other = s.stale_facts(Some("proj_b"), "9999999999").unwrap();
+        assert_eq!(in_other.len(), 1);
+        assert_eq!(in_other[0].text, "global fact");
+
+        let in_proj = s.stale_facts(Some("proj"), "9999999999").unwrap();
+        assert_eq!(in_proj.len(), 2);
     }
 
     #[test]
