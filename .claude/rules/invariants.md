@@ -7,9 +7,15 @@ Single approvals and grouped approvals are wrapped in `PendingApprovalStage` / `
 There is no bypass. Never add one.
 
 ## Shell Allowlist
-`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs:269` — matches only `"cargo"`.
-Enforced in `TurnContext` construction in `engine.rs`: non-permitted commands suppress shell seeding.
-Shell seeding is suppressed entirely on `GitReadOnly` turns.
+NL seeding is tier-based, enforced in `TurnContext` construction in `engine.rs`; suppressed entirely on `GitReadOnly` turns:
+- **ReadOnly commands** seed `[shell_read: ...]` (immediate execution, no approval).
+- **FsMutation commands** (including `cargo`) seed `[shell: ...]` (approval-gated, `reversible: true`).
+- **Exec commands** seed `[shell: ...]` (approval-gated, `reversible: false`, default-deny until `/exec on`).
+`is_permitted_shell_command()` at `src/runtime/investigation/prompt_analysis.rs:269` is retained but has no production callers.
+Model-emitted `[shell: ...]` is tiered by `classify_shell_tier()` in `src/runtime/investigation/shell_tier.rs`:
+- **Tier 1 (ReadOnly)**: `ls`, `find`, `cat`, `grep`, `wc`, `head`, `tail`, `sed` (read-only flags) — rejected by `ShellTool::run()` with a steering error to `[shell_read: ...]`.
+- **Tier 2 (FsMutation)**: `mkdir`, `rmdir`, `cp`, `mv`, `cargo` — approval-gated, `reversible: true`.
+- **Tier 3 (Exec)**: `rm`, `bash`, `python`, unknown programs, or any command with pipes/redirects — approval-gated, `reversible: false`, default-deny until `/exec on` is set for the session. The deny fires in `run_tool_round` (exec-gate intercept before `registry.dispatch()`) because `Tool::run()` has no access to runtime state.
 
 ## Surface Enforcement
 `tool_allowed_for_surface()` at `src/runtime/investigation/tool_surface.rs:260`.

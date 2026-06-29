@@ -17,6 +17,7 @@ mod trace;
 mod types;
 
 pub(crate) use index::{SymbolConfidence, SymbolKind};
+pub(crate) use investigation::shell_tier::{classify_shell_tier, ShellTier};
 pub use orchestration::Runtime;
 pub use project::ProjectRoot;
 pub use project::ResolvedToolInput;

@@ -144,7 +144,7 @@ pub(super) const TOOL_CALL_GRAMMAR: &str = r#"root        ::= pre-text tool-call
 pre-text    ::= [^\[]*
 tool-call   ::= named-call | static-call
 named-call  ::= "[" tool-name ": " arg "]"
-tool-name   ::= "read_file" | "list_dir" | "search_code" | "write_file" | "shell"
+tool-name   ::= "read_file" | "list_dir" | "search_code" | "write_file" | "shell" | "shell_read"
 arg         ::= [^\]]+
 static-call ::= "[" static-name "]"
 static-name ::= "git_status" | "git_diff" | "git_diff_staged" | "git_log" | "git_branch"

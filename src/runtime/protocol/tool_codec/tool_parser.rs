@@ -83,6 +83,7 @@ fn scan_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
         ("search_code", "[search_code:"),
         ("write_file", "[write_file:"),
         ("shell", "[shell:"),
+        ("shell_read", "[shell_read:"),
     ];
 
     for (tool_name, prefix) in named_tools {
@@ -210,6 +211,9 @@ fn make_bracket_input(tool_name: &str, arg: &str) -> Option<ToolInput> {
             })
         }
         "shell" if !arg.is_empty() => Some(ToolInput::Shell {
+            command: arg.to_string(),
+        }),
+        "shell_read" if !arg.is_empty() => Some(ToolInput::ShellRead {
             command: arg.to_string(),
         }),
         _ => None,

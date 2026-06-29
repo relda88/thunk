@@ -240,6 +240,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::Compact => "compact",
         RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",
         RuntimeRequest::VerifyMutationToggle { .. } => "verify_mutation_toggle",
+        RuntimeRequest::ExecToggle { .. } => "exec_toggle",
         RuntimeRequest::TransactionStatus => "transaction_status",
         RuntimeRequest::Diff { .. } => "diff",
         RuntimeRequest::AbilityToggle { .. } => "ability_toggle",

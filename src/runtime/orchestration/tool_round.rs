@@ -16,6 +16,7 @@ use super::super::investigation::investigation::{
     InvestigationMode, InvestigationState, ReadClassification,
 };
 use super::super::investigation::search_query::{simplify_search_input, weak_search_query_reason};
+use super::super::investigation::shell_tier::{classify_shell_tier, ShellTier};
 use super::super::investigation::tool_surface::{
     is_git_read_only_tool_input, tool_allowed_for_surface, ToolSurface,
 };
@@ -113,6 +114,7 @@ fn call_fingerprint(input: &ToolInput) -> String {
             format!("write_file\x00{path}\x00{content}")
         }
         ToolInput::Shell { command } => format!("shell\x00{command}"),
+        ToolInput::ShellRead { command } => format!("shell_read\x00{command}"),
         ToolInput::LspDefinition { path, line, col } => {
             format!("lsp_definition\x00{path}\x00{line}\x00{col}")
         }
@@ -225,6 +227,7 @@ pub(crate) fn run_tool_round(
     embedding_provider: Option<&(dyn EmbeddingProvider + Send + Sync)>,
     retrieval_config: &RetrievalConfig,
     dynamic_allowed: &HashSet<String>,
+    exec_enabled: bool,
     on_event: &mut dyn FnMut(RuntimeEvent),
 ) -> ToolRoundOutcome {
     let mut accumulated = String::new();
@@ -910,6 +913,33 @@ pub(crate) fn run_tool_round(
             }
         }
 
+        // Exec-gate intercept: deny Tier-3 shell commands when exec_enabled is false.
+        // Runs after resolve() (command is available) and before registry.dispatch()
+        // because Tool::run() has no access to runtime state.
+        if let super::super::project::ResolvedToolInput::Shell { ref command } = resolved {
+            if matches!(classify_shell_tier(command), ShellTier::Exec) && !exec_enabled {
+                const EXEC_DISABLED_MSG: &str =
+                    "exec mode is disabled — run /exec on to enable arbitrary execution";
+                // Surface the denial to the user. The model cannot self-correct this
+                // (only /exec on can), so the reason must reach the TUI as a SystemMessage,
+                // not just the model-facing `accumulated` buffer.
+                on_event(RuntimeEvent::SystemMessage(EXEC_DISABLED_MSG.to_string()));
+                on_event(RuntimeEvent::ToolCallFinished {
+                    name: name.clone(),
+                    summary: None,
+                });
+                accumulated.push_str(&tool_codec::format_tool_error(&name, EXEC_DISABLED_MSG));
+                // Terminate the turn instead of `continue`. A `continue` would let the
+                // model retry the same blocked command (failed calls don't update
+                // last_call_key), causing a deny→retry spiral.
+                return ToolRoundOutcome::TerminalAnswer {
+                    results: accumulated,
+                    answer: EXEC_DISABLED_MSG.to_string(),
+                    reason: RuntimeTerminalReason::ExecDisabled,
+                };
+            }
+        }
+
         match registry.dispatch(resolved) {
             Ok(ToolRunResult::Immediate(output)) => {
                 // Guard: spec must agree that this tool is Immediate.
@@ -1276,6 +1306,15 @@ pub(crate) fn run_tool_round(
                         .unwrap_or(true),
                     "tool '{name}' returned Approval but spec declares Immediate"
                 );
+                // An irreversible seed (e.g. a Tier-3 shell command) must never anchor a
+                // transaction — the rollback path assumes every grouped action is undoable.
+                // Return it as a standalone approval before entering the grouping loop.
+                if !pending.reversible {
+                    return ToolRoundOutcome::ApprovalRequired {
+                        accumulated,
+                        pending,
+                    };
+                }
                 // Collect any consecutive edit_file/write_file approvals from remaining calls
                 // into a transaction. ToolCallStarted fires for each during collection;
                 // ToolCallFinished fires during execute_transaction() after approval.
@@ -1636,6 +1675,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         )
     }
@@ -1876,6 +1916,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -1911,6 +1952,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -1971,6 +2013,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2000,6 +2043,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2035,6 +2079,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2099,6 +2144,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2128,6 +2174,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
         assert!(
@@ -2161,6 +2208,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
         assert!(
@@ -2225,6 +2273,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2258,6 +2307,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2318,6 +2368,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2358,6 +2409,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2398,6 +2450,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2461,6 +2514,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2534,6 +2588,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2597,6 +2652,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2663,6 +2719,7 @@ mod tests {
             None,
             &RetrievalConfig::default(),
             &HashSet::new(),
+            false,
             &mut |_| {},
         );
 
@@ -2750,6 +2807,7 @@ mod tests {
             Some(&provider as &(dyn EmbeddingProvider + Send + Sync)),
             &retrieval_config,
             &HashSet::new(),
+            false,
             &mut |e| events.push(e),
         );
 

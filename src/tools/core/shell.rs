@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::runtime::ResolvedToolInput;
+use crate::runtime::{classify_shell_tier, ShellTier};
 
 use crate::tools::pending::{PendingAction, RiskLevel};
 use crate::tools::types::{
@@ -37,8 +38,8 @@ impl Tool for ShellTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell",
-            description: "Run a shell command inside the project root. Requires approval.",
-            input_hint: "[shell: cargo check]",
+            description: "Run a shell command. Commands are tiered by safety: read-only commands (ls, find, cat, grep, etc.) should use [shell_read: ...] instead. Filesystem mutations (mkdir, rmdir, cp, mv) require approval and are reversible. Arbitrary execution (bash, rm, unknown programs) requires approval, is irreversible, and requires /exec on. For pipes, globs, or redirects use bash -c via /exec on.",
+            input_hint: "[shell: mkdir build]",
             execution_kind: ExecutionKind::RequiresApproval,
             default_risk: Some(RiskLevel::High),
         }
@@ -57,13 +58,22 @@ impl Tool for ShellTool {
             ));
         }
 
+        let tier = classify_shell_tier(command);
+
+        if matches!(tier, ShellTier::ReadOnly) {
+            return Err(ToolError::InvalidInput(
+                "read-only command — use [shell_read: ...] instead".to_string(),
+            ));
+        }
+
+        let reversible = matches!(tier, ShellTier::FsMutation);
         let summary = format!("run: {}", command);
 
         Ok(ToolRunResult::Approval(PendingAction {
             tool_name: "shell".to_string(),
             summary,
             risk: RiskLevel::High,
-            reversible: true,
+            reversible,
             payload: command.clone(),
         }))
     }
@@ -226,16 +236,42 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let tool = tool_in(&dir);
 
-        let result = run_shell(&tool, "cargo check").unwrap();
+        let result = run_shell(&tool, "mkdir foo").unwrap();
         let ToolRunResult::Approval(pending) = result else {
             panic!("expected approval");
         };
 
         assert_eq!(pending.tool_name, "shell");
-        assert_eq!(pending.summary, "run: cargo check");
+        assert_eq!(pending.summary, "run: mkdir foo");
         assert_eq!(pending.risk, RiskLevel::High);
         assert!(pending.reversible);
-        assert_eq!(pending.payload, "cargo check");
+        assert_eq!(pending.payload, "mkdir foo");
+    }
+
+    #[test]
+    fn exec_tier_returns_irreversible_approval() {
+        let dir = TempDir::new().unwrap();
+        let tool = tool_in(&dir);
+
+        let result = run_shell(&tool, "bash -c 'echo hi'").unwrap();
+        let ToolRunResult::Approval(pending) = result else {
+            panic!("expected approval");
+        };
+
+        assert!(!pending.reversible);
+        assert_eq!(pending.risk, RiskLevel::High);
+    }
+
+    #[test]
+    fn readonly_tier_is_rejected_with_steer_error() {
+        let dir = TempDir::new().unwrap();
+        let tool = tool_in(&dir);
+
+        let result = run_shell(&tool, "ls .");
+        assert!(
+            matches!(result, Err(ToolError::InvalidInput(_))),
+            "expected InvalidInput for read-only command"
+        );
     }
 
     #[test]

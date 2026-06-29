@@ -101,13 +101,14 @@ use super::turn_state::{
     AnswerPhaseKind, DeepeningState, PendingRuntimeCall, TurnContext, TurnSignal, TurnState,
 };
 
+use super::super::investigation::prompt_analysis::{
+    classify_retrieval_intent, extract_investigation_path_scope, prompt_requires_investigation,
+    requested_shell_command, requested_simple_edit, user_requested_execution,
+    user_requested_mutation, DirectReadMode, RetrievalIntent,
+};
 /// Returns true if the prompt contains a token that looks like a code identifier.
 /// Only two structural patterns are checked — no NLP, no heuristics.
-use super::super::investigation::prompt_analysis::{
-    classify_retrieval_intent, extract_investigation_path_scope, is_permitted_shell_command,
-    prompt_requires_investigation, requested_shell_command, requested_simple_edit,
-    user_requested_execution, user_requested_mutation, DirectReadMode, RetrievalIntent,
-};
+use super::super::investigation::shell_tier::{classify_shell_tier, ShellTier};
 
 pub struct Runtime {
     #[allow(dead_code)]
@@ -173,6 +174,10 @@ pub struct Runtime {
     /// (display-only, no correction loop). When false, verification runs synchronously
     /// with the correction loop. Defaults to true.
     deferred_verify: bool,
+    /// Session-scoped exec mode. When true, Tier-3 arbitrary shell commands are
+    /// allowed through the approval gate. Resets to false on session reset.
+    /// Controlled via /exec on|off.
+    exec_enabled: bool,
     /// Tracks how many correction attempts have been made for the current mutation.
     /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
     correction_attempts: u32,
@@ -322,6 +327,7 @@ impl Runtime {
             prompt_physics,
             verify_command: config.project.verify_command.clone(),
             deferred_verify: true,
+            exec_enabled: false,
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
             session_start_ref,
@@ -556,6 +562,7 @@ impl Runtime {
             RuntimeRequest::VerifyMutationToggle { command } => {
                 self.handle_verify_mutation_toggle(command, on_event)
             }
+            RuntimeRequest::ExecToggle { enabled } => self.handle_exec_toggle(enabled, on_event),
             RuntimeRequest::TransactionStatus => self.handle_transaction_status(on_event),
             RuntimeRequest::AbilityToggle { name } => self.handle_ability_toggle(name, on_event),
             RuntimeRequest::SkillToggle { name } => self.handle_skill_toggle(name, on_event),
@@ -1945,6 +1952,7 @@ impl Runtime {
             self.embedding_provider.as_deref(),
             &self.retrieval_config,
             &dynamic_allowed,
+            self.exec_enabled,
             on_event,
         ) {
             ToolRoundOutcome::Completed {
@@ -1968,6 +1976,16 @@ impl Runtime {
                         if matches!(ctx.direct_read_mode, Some(DirectReadMode::Explain)) {
                             state.answer_phase = Some(AnswerPhaseKind::PostRead);
                         }
+                    }
+                    // A seeded read-only shell command (shell_read) completed. Mirror the
+                    // DirectoryListing arm above: signal the model to synthesize an answer
+                    // from the result rather than continue investigating. shell_read is
+                    // invisible to reads_this_turn (only read_file populates it), so without
+                    // this it never enters the PostRead answer phase. FsMutation shell
+                    // returns ApprovalRequired and Tier-3 exec-denied returns TerminalAnswer,
+                    // so only ReadOnly shell_read reaches this Completed branch.
+                    if ctx.shell_request.is_some() {
+                        state.answer_phase = Some(AnswerPhaseKind::PostRead);
                     }
                 }
                 if let Some(t) = t_tool_start {
@@ -2543,29 +2561,10 @@ impl TurnContext {
             "tool_surface_selected",
             &[("surface", tool_surface.as_str().into())],
         );
+        // Shell seeding is gated by the tier classifier (in seed_pending_runtime_call),
+        // not by the cargo-only allowlist. Read-only commands seed shell_read (immediate);
+        // mutations and arbitrary execution seed shell (approval-gated / exec-gated downstream).
         let shell_request = original_user_prompt.and_then(requested_shell_command);
-        if !investigation_required && tool_surface != ToolSurface::GitReadOnly {
-            if let Some(cmd) = shell_request.as_ref() {
-                if !is_permitted_shell_command(cmd) {
-                    let first = cmd.split_whitespace().next().unwrap_or(cmd);
-                    trace_runtime_decision(
-                        on_event,
-                        "shell_command_rejected",
-                        &[
-                            ("cmd", first.to_string()),
-                            ("surface", tool_surface.as_str().to_string()),
-                        ],
-                    );
-                    on_event(RuntimeEvent::Failed {
-                        message: format!(
-                            "shell command '{}' is not permitted. Allowed: cargo",
-                            first
-                        ),
-                    });
-                    return Err(());
-                }
-            }
-        }
         Ok(TurnContext {
             retrieval_intent,
             requested_read_path,
@@ -2591,10 +2590,19 @@ fn seed_pending_runtime_call(ctx: &TurnContext, state: &mut TurnState) {
         ));
     if !ctx.investigation_required && ctx.tool_surface != ToolSurface::GitReadOnly {
         if let Some(cmd) = ctx.shell_request.as_ref() {
-            state.pending_runtime_call = Some(PendingRuntimeCall {
-                input: ToolInput::Shell {
+            // Tier classification is the seed gate: read-only commands route to the
+            // immediate shell_read tool; mutations and arbitrary execution route to
+            // shell, where they are approval-gated and (for Tier-3) exec-gated downstream.
+            let input = match classify_shell_tier(cmd) {
+                ShellTier::ReadOnly => ToolInput::ShellRead {
                     command: cmd.clone(),
                 },
+                ShellTier::FsMutation | ShellTier::Exec => ToolInput::Shell {
+                    command: cmd.clone(),
+                },
+            };
+            state.pending_runtime_call = Some(PendingRuntimeCall {
+                input,
                 seeded_pre_generation: true,
             });
         } else if let Some(edit) = ctx.simple_edit_request.as_ref() {

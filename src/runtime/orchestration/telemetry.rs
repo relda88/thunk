@@ -330,6 +330,7 @@ pub(crate) fn short_tool_name(tool_name: &str) -> &str {
         "edit_file" => "edit",
         "write_file" => "write",
         "shell" => "shell",
+        "shell_read" => "shell_read",
         "git_status" | "git_diff" | "git_log" => "git",
         other => other,
     }
@@ -343,6 +344,7 @@ pub(crate) fn tool_input_activity(input: Option<&ToolInput>) -> Activity {
         Some(ToolInput::EditFile { path, .. }) => ("edit".to_string(), Some(path.clone())),
         Some(ToolInput::WriteFile { path, .. }) => ("write".to_string(), Some(path.clone())),
         Some(ToolInput::Shell { command }) => ("shell".to_string(), Some(command.clone())),
+        Some(ToolInput::ShellRead { command }) => ("shell_read".to_string(), Some(command.clone())),
         Some(
             ToolInput::GitStatus
             | ToolInput::GitDiff

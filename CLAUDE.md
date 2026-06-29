@@ -4,7 +4,7 @@ Local-first AI coding assistant CLI in Rust. Runtime owns all control flow — m
 
 ## Hard Stop
 Before any commit: `just verify` (fmt --check + check + clippy + test)
-Test baseline: 1330 passing via `just verify`
+Test baseline: 1431 passing via `just verify`
 Never make commits — user commits manually.
 
 ## Current Phase State
@@ -23,6 +23,7 @@ Never make commits — user commits manually.
 - Phase 44: COMPLETE — background save verification surfaced as a passive notification (RebuildFile trigger)
 - Phase 45: COMPLETE — MCP integration: dynamic tool registration, `MCPManager` (process lifecycle, stdio transport, config loading), tool calling + surface threading + telemetry wired (Slices 45.1–45.3)
 - Phase 46: COMPLETE — personal memory: storage/schema, `MemoryManager` (embedding recall + keyword fallback), /remember, /forget, /memory, /reflect, imperative + reflection filters, MCP polish (escape redirect, no-project-root write scope)
+- Phase 47: COMPLETE — tiered shell: `ShellTier` classifier (ReadOnly/FsMutation/Exec), `shell_read` tool, /exec toggle, exec-gate intercept, tier-based NL seeding
 
 ## Core Principles
 - Runtime is the single source of correctness — not the model

@@ -134,6 +134,7 @@ fn resolve_command(cmd: Command) -> CommandAction {
         Command::Memory => CommandAction::Runtime(RuntimeRequest::MemoryList),
         Command::Forget(id) => CommandAction::Runtime(RuntimeRequest::MemoryForget { id }),
         Command::Reflect => CommandAction::Runtime(RuntimeRequest::Reflect),
+        Command::Exec(enabled) => CommandAction::Runtime(RuntimeRequest::ExecToggle { enabled }),
     }
 }
 

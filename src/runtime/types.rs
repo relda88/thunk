@@ -81,6 +81,10 @@ pub enum RuntimeTerminalReason {
     /// Search was attempted but all results were empty and no file was read.
     /// The runtime emits the answer directly rather than letting the model speculate.
     InsufficientEvidence,
+    /// A Tier-3 (arbitrary execution) shell command was denied because exec mode is
+    /// disabled. The runtime ends the turn immediately so the model cannot retry the
+    /// blocked command in a deny→retry spiral.
+    ExecDisabled,
 }
 
 /// How much of the diff to show.
@@ -213,6 +217,11 @@ pub enum RuntimeRequest {
     /// or trigger session save.
     VerifyMutationToggle {
         command: Option<String>,
+    },
+    /// Session-scoped exec mode toggle. `Some(true)` enables, `Some(false)` disables,
+    /// `None` queries current status. Does not mutate conversation or trigger session save.
+    ExecToggle {
+        enabled: Option<bool>,
     },
     /// Read-only query: returns the current pending transaction state as a SystemMessage.
     /// Does not mutate conversation state or trigger session save.

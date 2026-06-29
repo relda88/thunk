@@ -10,6 +10,18 @@ Same as investigation-planner/learnings.md. Graduated entries tagged [GRADUATED]
 
 ---
 
+**2026-06-29 | Phase 47 | orchestration**
+**Observation**: The exec-gate deny (Tier-3 shell with `exec_enabled=false`) must return `TerminalAnswer`, not `continue`. Failed tool calls don't update `last_call_key`, so a `continue` lets the model re-emit the identical blocked command → deny→retry spiral. The denial also needs a `SystemMessage` event because the model cannot self-correct it (only `/exec on` can), so the model-facing `accumulated` buffer alone is insufficient.
+**Evidence**: `src/runtime/orchestration/tool_round.rs:916-940` exec-gate intercept; commits d31b9ef, ac855c7.
+**Action/Rule**: Any runtime-level deny the model cannot fix by retrying must terminate the turn (TerminalAnswer) AND emit a SystemMessage to the TUI. Check whether the deny path updates `last_call_key` before choosing `continue`.
+**Impact**: High
+
+**2026-06-29 | Phase 47 | orchestration**
+**Observation**: A seeded `shell_read` (Tier-1) command completing does NOT enter the PostRead answer phase automatically — `shell_read` is invisible to `reads_this_turn` (only `read_file` populates it), so synthesis never triggers. An explicit `state.answer_phase = PostRead` is required in the Completed branch, mirroring the DirectoryListing arm.
+**Evidence**: `src/runtime/orchestration/engine.rs:1980` (`if ctx.shell_request.is_some()`); commit ac855c7.
+**Action/Rule**: When adding any new immediate/read-only tool whose output should drive answer synthesis, confirm it feeds the answer-phase trigger. If it doesn't populate `reads_this_turn`, set `answer_phase` explicitly in its Completed arm.
+**Impact**: Med
+
 **2026-06-26 | Phase 46 | mcp**
 **Observation**: Symptom "model emits a well-formed `mcp::server::tool` call but nothing executes" almost always means the tool name never reached the per-turn surface hint, so the surface policy rejected it before dispatch — not a transport or registration bug.
 **Evidence**: commit bd689a7; `src/runtime/orchestration/generation.rs` `hint_tools` extension with `dynamic_tool_names`.

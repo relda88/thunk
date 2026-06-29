@@ -558,6 +558,8 @@ impl Runtime {
         self.pending_memory_queue.clear();
         self.pending_embed = None;
         self.active_sequence_id = None;
+        // exec mode is session-scoped — a reset returns it to the default-deny state.
+        self.exec_enabled = false;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,
@@ -1991,6 +1993,36 @@ impl Runtime {
                     None => "verify: disabled".to_string(),
                 };
                 on_event(RuntimeEvent::SystemMessage(status));
+            }
+        }
+    }
+
+    pub(super) fn handle_exec_toggle(
+        &mut self,
+        enabled: Option<bool>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match enabled {
+            Some(true) => {
+                self.exec_enabled = true;
+                on_event(RuntimeEvent::SystemMessage(
+                    "exec mode enabled — arbitrary shell commands will require approval"
+                        .to_string(),
+                ));
+            }
+            Some(false) => {
+                self.exec_enabled = false;
+                on_event(RuntimeEvent::SystemMessage(
+                    "exec mode disabled".to_string(),
+                ));
+            }
+            None => {
+                let status = if self.exec_enabled {
+                    "exec mode: enabled"
+                } else {
+                    "exec mode: disabled"
+                };
+                on_event(RuntimeEvent::SystemMessage(status.to_string()));
             }
         }
     }
