@@ -560,6 +560,8 @@ impl Runtime {
         self.active_sequence_id = None;
         // exec mode is session-scoped — a reset returns it to the default-deny state.
         self.exec_enabled = false;
+        // do-not-disturb is session-scoped — a reset returns it to the default off state.
+        self.dnd_enabled = false;
         self.anchors.clear();
         trace_runtime_decision(
             on_event,
@@ -2021,6 +2023,35 @@ impl Runtime {
                     "exec mode: enabled"
                 } else {
                     "exec mode: disabled"
+                };
+                on_event(RuntimeEvent::SystemMessage(status.to_string()));
+            }
+        }
+    }
+
+    pub(super) fn handle_dnd_toggle(
+        &mut self,
+        enabled: Option<bool>,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) {
+        match enabled {
+            Some(true) => {
+                self.dnd_enabled = true;
+                on_event(RuntimeEvent::SystemMessage(
+                    "do not disturb enabled — proactive suggestions paused".to_string(),
+                ));
+            }
+            Some(false) => {
+                self.dnd_enabled = false;
+                on_event(RuntimeEvent::SystemMessage(
+                    "do not disturb disabled".to_string(),
+                ));
+            }
+            None => {
+                let status = if self.dnd_enabled {
+                    "do not disturb: enabled"
+                } else {
+                    "do not disturb: disabled"
                 };
                 on_event(RuntimeEvent::SystemMessage(status.to_string()));
             }
