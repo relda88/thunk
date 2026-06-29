@@ -11,7 +11,7 @@ Key files: `src/core/config.rs`, `src/core/error.rs`, `src/core/mod.rs`
 Owns concrete filesystem, Git, and web-fetch actions, registration, approval contracts, and the `PendingAction` / `PendingTransaction` / `PendingApprovalStage` / `RiskLevel` types.
 Must not parse assistant text, own conversation mutations, or decide investigation correctness.
 `default_registry()` registers only `read_file` and `list_dir`.
-`ToolRegistry::with_project_root()` adds `search_code`, `git_status`, `git_diff`, `git_diff_staged`, `git_log`, `git_branch`, `git_branch_create`, `git_branch_switch`, `git_commit`, `edit_file`, `write_file`, `shell`.
+`ToolRegistry::with_project_root()` adds `search_code`, `git_status`, `git_diff`, `git_diff_staged`, `git_log`, `git_branch`, `git_branch_create`, `git_branch_switch`, `git_commit`, `edit_file`, `write_file`, `shell`, `shell_read`.
 `ToolRegistry` keys tools by `String` (runtime-owned names), not `&'static str`, so dynamically-registered MCP tools can share the registry. `register()` takes any `impl Tool + 'static`.
 `web_fetch` is not registered in `ToolRegistry` — it is dispatched directly by `handle_fetch_url()` in `command_handlers.rs`.
 `ToolInput::DynamicTool { name, args }` and `DynamicToolSpec` (`types.rs`) carry MCP-registered tool calls and their metadata; `DynamicToolSpec` is separate from `ToolSpec` to avoid `&'static str` name fields.
@@ -42,7 +42,7 @@ Key files: `src/runtime/index/extractor.rs`, `src/runtime/index/types.rs`, `src/
 ## src/runtime/investigation/
 Owns turn classification, investigation state, evidence gates, candidate selection, anchor state, and `InvestigationGraph`.
 `InvestigationGraph` (petgraph) records import and definition edges; `promoted_candidates()` is advisory.
-Key files: `src/runtime/investigation/investigation.rs`, `src/runtime/investigation/graph.rs`, `src/runtime/investigation/anchors.rs`, `src/runtime/investigation/tool_surface.rs`, `src/runtime/investigation/prompt_analysis.rs`, `src/runtime/investigation/search_query.rs`, `src/runtime/investigation/classify.rs` (symbol definition classification: `looks_like_definition`, `is_exact_symbol_definition`, `is_declaration_line`)
+Key files: `src/runtime/investigation/investigation.rs`, `src/runtime/investigation/graph.rs`, `src/runtime/investigation/anchors.rs`, `src/runtime/investigation/tool_surface.rs`, `src/runtime/investigation/prompt_analysis.rs`, `src/runtime/investigation/search_query.rs`, `src/runtime/investigation/classify.rs` (symbol definition classification: `looks_like_definition`, `is_exact_symbol_definition`, `is_declaration_line`), `src/runtime/investigation/shell_tier.rs` (`classify_shell_tier`, `ShellTier` — ReadOnly/FsMutation/Exec)
 
 ## src/runtime/orchestration/
 Owns request dispatch, the turn loop, tool round execution, generation, and context management.

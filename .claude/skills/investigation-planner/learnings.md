@@ -10,6 +10,12 @@ An entry graduates to `rules/invariants.md` (## Evolved Invariants) when: valida
 
 ---
 
+**2026-06-29 | Phase 47 | shell-tier**
+**Observation**: The runtime spawns shell commands directly (no interpreter), so any shell metacharacter (`|` `>` `<` `;` `$` `` ` `` `&` newline) cannot execute and MUST route to Tier-3 (`bash -c`, exec-gated). `classify_shell_tier` checks metachars BEFORE program lookup — `ls | grep` is Exec, not ReadOnly, despite `ls` being a Tier-1 program.
+**Evidence**: `src/runtime/investigation/shell_tier.rs` `has_shell_metachar` (checked before `base_tier`); commit 893a018.
+**Action/Rule**: When classifying or routing a shell command, metachar detection precedes program classification. Never assume a Tier-1 program name makes the whole command read-only — a pipe or redirect overrides it.
+**Impact**: High
+
 **2026-06-26 | Phase 46 | generation/mcp**
 **Observation**: MCP tool names must be threaded into THREE independent per-turn surfaces, not one: the tool-surface hint (`run_generate_turn` → `dynamic_tool_names`), the recency field (`recency_field_message`), and the telemetry estimator (`estimate_generation_prompt_chars`). Missing any single one yields "model can't call the MCP tool" or a silent telemetry undercount.
 **Evidence**: commits bd689a7 (hint), 0899f5d (recency + estimator); `src/runtime/orchestration/generation.rs`, `context_cap.rs`, `prompt_physics.rs:71`.
