@@ -625,9 +625,10 @@ When a tool is needed, your ENTIRE response must be the call tag only — no pro
 Tag names are EXACT. Do not rename, abbreviate, or invent tag names. Use only registered tool tags — those listed here and in the MCP section below.
 
 To run a shell command, use shell for mutations and arbitrary execution, or shell_read for read-only commands — never use search_code for this:
-[shell: cargo check]
+[shell_read: ls src/]
+[shell_read: grep -r "fn main" src/]
+[shell: mkdir foo]
 [shell: cargo test my_filter]
-[shell: cargo clippy]
 Run a mutation: [shell: mkdir foo]
 
 To run a read-only system command without approval (ls, find, cat, grep, wc, head, tail, sed without -i):

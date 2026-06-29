@@ -83,7 +83,7 @@ fn base_tier(program: &str) -> ShellTier {
         "ls" | "find" | "cat" | "grep" | "wc" | "head" | "tail" | "sed" | "echo" | "pwd"
         | "whoami" | "which" | "file" | "stat" | "du" | "df" | "uname" | "date" | "env"
         | "printenv" => ShellTier::ReadOnly,
-        "mkdir" | "rmdir" | "cp" | "mv" | "touch" | "ln" | "chmod" | "chown" => {
+        "mkdir" | "rmdir" | "cp" | "mv" | "touch" | "ln" | "chmod" | "chown" | "cargo" => {
             ShellTier::FsMutation
         }
         _ => ShellTier::Exec,
@@ -195,8 +195,16 @@ mod tests {
     }
 
     #[test]
-    fn cargo_is_exec() {
-        assert_eq!(classify_shell_tier("cargo build"), ShellTier::Exec);
+    fn cargo_is_fsmutation() {
+        assert_eq!(classify_shell_tier("cargo build"), ShellTier::FsMutation);
+    }
+
+    #[test]
+    fn cargo_with_subcommand_is_fsmutation() {
+        assert_eq!(
+            classify_shell_tier("cargo test my_filter"),
+            ShellTier::FsMutation
+        );
     }
 
     // --- Empty input → Exec ---
