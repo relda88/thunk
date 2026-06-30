@@ -7,6 +7,9 @@
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: monospace; background: #1a1a1a; color: #d4d4d4; display: flex; flex-direction: column; height: 100vh; }
+      #status-bar { display: flex; align-items: center; gap: 16px; padding: 4px 12px; background: #111; border-bottom: 1px solid #333; font-size: 0.8em; color: #888; }
+      #status-activity { color: #569cd6; }
+      #status-appname { margin-left: auto; color: #666; }
       #messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
       .msg { padding: 8px 12px; border-radius: 4px; max-width: 90%; white-space: pre-wrap; word-break: break-word; }
       .msg.assistant { background: #2a2a2a; align-self: flex-start; border-left: 2px solid #569cd6; }
@@ -16,12 +19,41 @@
       #input-row { display: flex; padding: 8px; border-top: 1px solid #333; gap: 8px; }
       #input { flex: 1; background: #2a2a2a; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 8px 12px; font-family: monospace; font-size: 14px; outline: none; resize: none; }
       #input:focus { border-color: #569cd6; }
+      #dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+      #dialog-overlay.active { display: flex; }
+      .dialog { background: #252525; border: 1px solid #444; border-radius: 6px; padding: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; }
+      .dialog h3 { font-size: 1em; color: #d4d4d4; margin-bottom: 10px; }
+      .field { margin-bottom: 6px; font-size: 0.9em; }
+      .label { color: #888; }
+      .preview { background: #1e1e1e; border: 1px solid #333; border-radius: 4px; padding: 8px; margin: 8px 0; font-size: 0.85em; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+      .step { margin-bottom: 6px; }
+      .step-title { color: #d4d4d4; }
+      .step-detail { color: #888; font-size: 0.85em; margin-left: 16px; }
+      .actions { display: flex; gap: 8px; margin-top: 12px; }
+      .btn { padding: 6px 14px; border-radius: 4px; border: none; cursor: pointer; font-family: monospace; font-size: 0.9em; }
+      .btn-approve { background: #2a4a2a; color: #4ec94e; border: 1px solid #4ec94e; }
+      .btn-approve:hover { background: #3a5a3a; }
+      .btn-reject { background: #4a2a2a; color: #f44; border: 1px solid #f44; }
+      .btn-reject:hover { background: #5a3a3a; }
+      .risk-low { color: #4ec94e; }
+      .risk-medium { color: #e5c07b; }
+      .risk-high { color: #f44; }
+      .action-block { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #333; }
     </style>
   </head>
   <body>
+    <div id="status-bar">
+      <span id="status-activity">Ready</span>
+      <span id="status-project">no project</span>
+      <span id="status-context"></span>
+      <span id="status-appname">thunk</span>
+    </div>
     <div id="messages"></div>
     <div id="input-row">
       <textarea id="input" rows="2" placeholder="Ask thunk anything... (Enter to send, Shift+Enter for newline)"></textarea>
+    </div>
+    <div id="dialog-overlay">
+      <div class="dialog" id="dialog-content"></div>
     </div>
 
     <script>
@@ -30,6 +62,12 @@
 
       const messagesEl = document.getElementById('messages');
       const inputEl = document.getElementById('input');
+      const dialogOverlay = document.getElementById('dialog-overlay');
+      const dialogContent = document.getElementById('dialog-content');
+      const statusActivity = document.getElementById('status-activity');
+      const statusProject = document.getElementById('status-project');
+      const statusContext = document.getElementById('status-context');
+      const statusAppname = document.getElementById('status-appname');
 
       let currentBubble = null;
 
@@ -40,6 +78,49 @@
         messagesEl.appendChild(div);
         messagesEl.scrollTop = messagesEl.scrollHeight;
         return div;
+      }
+
+      function showDialog(html) {
+        dialogContent.innerHTML = html;
+        dialogOverlay.classList.add('active');
+      }
+
+      function hideDialog() {
+        dialogOverlay.classList.remove('active');
+        dialogContent.innerHTML = '';
+      }
+
+      function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function activityLabel(a) {
+        switch (a.type) {
+          case 'idle': return 'Ready';
+          case 'processing': return 'Processing';
+          case 'loading_model': return 'loading_model';
+          case 'creating_context': return 'creating_context';
+          case 'tokenizing': return 'tokenizing';
+          case 'prefilling': return 'prefilling';
+          case 'generating': return a.mode ? a.mode + '...' : 'Generating...';
+          case 'responding': return 'Responding';
+          case 'executing_tools': return a.detail ? a.tool + ': ' + a.detail : a.tool + '...';
+          case 'awaiting_approval': return 'Awaiting approval: ' + a.tool;
+          default: return a.type;
+        }
+      }
+
+      function pendingActionHtml(p, index) {
+        const heading = index !== undefined
+          ? `<div><span class="label">${index + 1}. tool: </span>${esc(p.tool_name)}</div>`
+          : `<div class="field"><span class="label">tool: </span>${esc(p.tool_name)}</div>`;
+        const previewHtml = p.preview.length
+          ? `<div class="preview">${esc(p.preview.join('\n'))}</div>` : '';
+        return `${heading}
+          <div class="field"><span class="label">summary: </span>${esc(p.summary)}</div>
+          <div class="field"><span class="label">risk: </span><span class="risk-${p.risk}">${esc(p.risk)}</span></div>
+          <div class="field"><span class="label">reversible: </span>${p.reversible ? 'yes' : 'no'}</div>
+          ${previewHtml}`;
       }
 
       listen('runtime-event', (event) => {
@@ -68,10 +149,116 @@
             break;
           case 'answer_ready':
             break;
+
+          case 'activity_changed':
+            statusActivity.textContent = activityLabel(payload.activity);
+            break;
+
+          case 'context_usage': {
+            const pct = Math.min(100, Math.floor(payload.prompt_tokens * 100 / payload.context_window_tokens));
+            statusContext.textContent = 'ctx: ' + pct + '%';
+            break;
+          }
+
+          case 'approval_required': {
+            const evidenceHtml = payload.evidence.length
+              ? `<div class="field"><span class="label">evidence: </span>${esc(payload.evidence.join(', '))}</div>` : '';
+            showDialog(`
+              <h3>Approve action?</h3>
+              ${pendingActionHtml(payload.pending)}
+              ${evidenceHtml}
+              <div class="actions">
+                <button class="btn btn-approve" onclick="doApprove()">Approve</button>
+                <button class="btn btn-reject" onclick="doReject()">Reject</button>
+              </div>`);
+            break;
+          }
+
+          case 'transaction_approval_required': {
+            const actionsHtml = payload.actions.map((p, i) =>
+              `<div class="action-block">${pendingActionHtml(p, i)}</div>`
+            ).join('');
+            showDialog(`
+              <h3>Approve transaction (${payload.actions.length} actions)?</h3>
+              ${actionsHtml}
+              <div class="actions">
+                <button class="btn btn-approve" onclick="doApprove()">Approve all</button>
+                <button class="btn btn-reject" onclick="doReject()">Reject</button>
+              </div>`);
+            break;
+          }
+
+          case 'plan_approval_required': {
+            const stepsHtml = payload.steps.map(([title, detail], i) =>
+              `<div class="step">
+                <div class="step-title">${i + 1}. ${esc(title)}</div>
+                <div class="step-detail">${esc(detail)}</div>
+              </div>`
+            ).join('');
+            showDialog(`
+              <h3>Approve plan?</h3>
+              <div class="field"><span class="label">goal: </span>${esc(payload.goal)}</div>
+              <div style="margin: 10px 0">${stepsHtml}</div>
+              <div class="actions">
+                <button class="btn btn-approve" onclick="doPlanApprove()">Approve</button>
+                <button class="btn btn-reject" onclick="doPlanAbandon()">Abandon</button>
+              </div>`);
+            break;
+          }
+
+          case 'plan_approval_cleared':
+            hideDialog();
+            break;
+
+          case 'memory_proposal_required': {
+            const header = payload.delete ? 'Forget this fact:' : 'Propose memory:';
+            const scopeText = payload.scope || 'global';
+            showDialog(`
+              <h3>${esc(header)}</h3>
+              <div class="field"><span class="label">fact: </span>${esc(payload.fact)}</div>
+              <div class="field"><span class="label">category: </span>${esc(payload.category)}</div>
+              <div class="field"><span class="label">scope: </span>${esc(scopeText)}</div>
+              <div class="field"><span class="label">source: </span>${esc(payload.source)}</div>
+              <div class="actions">
+                <button class="btn btn-approve" onclick="doMemoryApprove()">Approve</button>
+                <button class="btn btn-reject" onclick="doMemoryReject()">Reject</button>
+              </div>`);
+            break;
+          }
+
+          case 'memory_proposal_cleared':
+            hideDialog();
+            break;
+
           default:
             break;
         }
       });
+
+      async function doApprove() {
+        hideDialog();
+        try { await invoke('approve'); } catch (e) { appendMessage('error', 'approve failed: ' + e); }
+      }
+      async function doReject() {
+        hideDialog();
+        try { await invoke('reject'); } catch (e) { appendMessage('error', 'reject failed: ' + e); }
+      }
+      async function doPlanApprove() {
+        hideDialog();
+        try { await invoke('plan_approve'); } catch (e) { appendMessage('error', 'plan_approve failed: ' + e); }
+      }
+      async function doPlanAbandon() {
+        hideDialog();
+        try { await invoke('plan_abandon'); } catch (e) { appendMessage('error', 'plan_abandon failed: ' + e); }
+      }
+      async function doMemoryApprove() {
+        hideDialog();
+        try { await invoke('memory_approve'); } catch (e) { appendMessage('error', 'memory_approve failed: ' + e); }
+      }
+      async function doMemoryReject() {
+        hideDialog();
+        try { await invoke('memory_reject'); } catch (e) { appendMessage('error', 'memory_reject failed: ' + e); }
+      }
 
       inputEl.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -87,6 +274,12 @@
           }
         }
       });
+
+      invoke('app_info').then((info) => {
+        statusProject.textContent = info.project_label ? 'project: ' + info.project_label : 'no project';
+        statusAppname.textContent = info.app_name;
+        document.title = info.app_name + (info.project_label ? ' — ' + info.project_label : '');
+      }).catch(() => {});
     </script>
   </body>
 </html>
