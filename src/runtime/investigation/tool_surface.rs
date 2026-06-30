@@ -196,9 +196,17 @@ pub(crate) fn select_tool_surface(
 /// Returns true only for explicit Git read-only requests.
 ///
 /// The accepted phrases are narrow by design; code-investigation prompts that
-/// merely mention "git" should remain RetrievalFirst.
+/// merely mention "git" should remain RetrievalFirst. Bare "git" (single token)
+/// is mapped to GitReadOnly so the user can invoke git tools by typing just "git".
+/// Git subcommand tokens are matched anywhere in the token stream (not just prefix)
+/// so natural questions like "what git branch am I on?" are correctly classified.
 fn is_explicit_git_tooling_prompt(prompt: &str) -> bool {
     let tokens = normalized_prompt_tokens(prompt);
+    // Bare "git" — single-token input routes to GitReadOnly.
+    if tokens == ["git"] {
+        return true;
+    }
+    // Prefix-style matches (legacy, retained for specificity).
     starts_with_token_phrase(&tokens, &["show", "git", "status"])
         || starts_with_token_phrase(&tokens, &["show", "git", "diff"])
         || starts_with_token_phrase(&tokens, &["show", "git", "log"])
@@ -220,6 +228,23 @@ fn is_explicit_git_tooling_prompt(prompt: &str) -> bool {
         || starts_with_token_phrase(&tokens, &["which", "branch"])
         || starts_with_token_phrase(&tokens, &["current", "branch"])
         || starts_with_token_phrase(&tokens, &["show", "current", "branch"])
+        // Contains-style matches: question-word + "git" + subcommand anywhere in the stream.
+        // Narrow to question-word-prefixed patterns only to avoid false-positives on code
+        // investigation prompts like "where is git status rendered".
+        || contains_token_phrase(&tokens, &["what", "git", "status"])
+        || contains_token_phrase(&tokens, &["what", "git", "diff"])
+        || contains_token_phrase(&tokens, &["what", "git", "log"])
+        || contains_token_phrase(&tokens, &["what", "git", "branch"])
+        || contains_token_phrase(&tokens, &["what", "git", "commit"])
+        || contains_token_phrase(&tokens, &["what", "git", "push"])
+        || contains_token_phrase(&tokens, &["what", "git", "pull"])
+        || contains_token_phrase(&tokens, &["which", "git", "status"])
+        || contains_token_phrase(&tokens, &["which", "git", "diff"])
+        || contains_token_phrase(&tokens, &["which", "git", "log"])
+        || contains_token_phrase(&tokens, &["which", "git", "branch"])
+        || contains_token_phrase(&tokens, &["which", "git", "commit"])
+        || contains_token_phrase(&tokens, &["which", "git", "push"])
+        || contains_token_phrase(&tokens, &["which", "git", "pull"])
 }
 
 fn prompt_requests_directory_navigation(prompt: &str) -> bool {
@@ -254,6 +279,16 @@ fn starts_with_token_phrase(tokens: &[String], phrase: &[&str]) -> bool {
             .take(phrase.len())
             .map(String::as_str)
             .eq(phrase.iter().copied())
+}
+
+/// Returns true if `phrase` appears as a contiguous subsequence anywhere in `tokens`.
+fn contains_token_phrase(tokens: &[String], phrase: &[&str]) -> bool {
+    if phrase.is_empty() || tokens.len() < phrase.len() {
+        return false;
+    }
+    tokens
+        .windows(phrase.len())
+        .any(|w| w.iter().map(String::as_str).eq(phrase.iter().copied()))
 }
 
 /// Enforces whether a tool call is available on the active surface.
@@ -295,4 +330,35 @@ fn tool_surface_for_tool(tool: SurfaceTool) -> Option<ToolSurface> {
         .iter()
         .find(|definition| definition.tools.contains(&tool))
         .map(|definition| definition.surface)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_git_maps_to_git_readonly() {
+        assert!(is_explicit_git_tooling_prompt("git"));
+    }
+
+    #[test]
+    fn natural_git_branch_question_maps_to_git_readonly() {
+        assert!(is_explicit_git_tooling_prompt("what git branch am I on?"));
+        assert!(is_explicit_git_tooling_prompt("which git branch is active"));
+        assert!(is_explicit_git_tooling_prompt(
+            "what git status does this repo have"
+        ));
+    }
+
+    #[test]
+    fn investigation_prompts_with_git_terms_stay_retrieval_first() {
+        // Code investigation prompts that happen to mention git terms must not
+        // be mis-classified as GitReadOnly by the contains matching.
+        assert!(!is_explicit_git_tooling_prompt(
+            "where is git status rendered"
+        ));
+        assert!(!is_explicit_git_tooling_prompt(
+            "find the git integration code"
+        ));
+    }
 }
