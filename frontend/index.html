@@ -147,7 +147,25 @@
           case 'failed':
             appendMessage('error', 'Error: ' + payload.message);
             break;
+          case 'tool_call_started':
+            appendMessage('system', 'tool: ' + payload.name);
+            break;
+          case 'tool_call_finished':
+            if (payload.name === 'read_file' && payload.summary !== null) {
+              // suppress — file_read_finished carries the detail
+            } else if (payload.summary === null) {
+              appendMessage('system', 'tool failed: ' + payload.name);
+            } else {
+              appendMessage('system', payload.summary);
+            }
+            break;
+          case 'file_read_finished':
+            appendMessage('system', 'read ' + payload.path + ' (' + payload.line_count + ' lines)');
+            break;
           case 'answer_ready':
+            if (payload.source && payload.source.type === 'tool_limit_reached') {
+              appendMessage('system', 'Tool limit reached. Response may be incomplete.');
+            }
             break;
 
           case 'activity_changed':
@@ -266,11 +284,19 @@
           const text = inputEl.value.trim();
           if (!text) return;
           inputEl.value = '';
-          appendMessage('user', text);
-          try {
-            await invoke('submit', { text });
-          } catch (err) {
-            appendMessage('error', 'Failed to send: ' + err);
+          if (text.startsWith('/')) {
+            try {
+              await invoke('run_command', { input: text });
+            } catch (err) {
+              appendMessage('system', String(err));
+            }
+          } else {
+            appendMessage('user', text);
+            try {
+              await invoke('submit', { text });
+            } catch (err) {
+              appendMessage('error', 'Failed to send: ' + err);
+            }
           }
         }
       });

@@ -2,7 +2,9 @@ use std::sync::{mpsc::Sender, Mutex};
 
 use serde::Serialize;
 
+use crate::core::config::Config;
 use crate::runtime::RuntimeRequest;
+use crate::tui::commands::{self, CommandAction, ParseError};
 use crate::tui::worker::WorkerCmd;
 
 #[derive(Debug, Clone, Serialize)]
@@ -74,4 +76,48 @@ pub(crate) fn memory_reject(
 #[tauri::command]
 pub(crate) fn app_info(state: tauri::State<'_, AppInfo>) -> AppInfo {
     state.inner().clone()
+}
+
+#[tauri::command]
+pub(crate) fn run_command(
+    input: String,
+    state: tauri::State<'_, Mutex<Sender<WorkerCmd>>>,
+    config: tauri::State<'_, Config>,
+) -> Result<(), String> {
+    let parsed = match commands::parse(&input) {
+        None => return Ok(()),
+        Some(Ok(cmd)) => cmd,
+        Some(Err(ParseError::UnknownCommand)) => {
+            match commands::resolve_custom_command(&config, &input) {
+                None => return Err(commands::help_text().to_string()),
+                Some(Ok(req)) => {
+                    let tx = state.lock().map_err(|e| e.to_string())?;
+                    return tx.send(WorkerCmd::Handle(req)).map_err(|e| e.to_string());
+                }
+                Some(Err(msg)) => return Err(msg),
+            }
+        }
+        Some(Err(e)) => return Err(e.user_message()),
+    };
+
+    match commands::resolve_command(parsed) {
+        CommandAction::Runtime(req) => {
+            let tx = state.lock().map_err(|e| e.to_string())?;
+            tx.send(WorkerCmd::Handle(req)).map_err(|e| e.to_string())
+        }
+        CommandAction::ClearSession => {
+            let tx = state.lock().map_err(|e| e.to_string())?;
+            tx.send(WorkerCmd::Reset).map_err(|e| e.to_string())
+        }
+        CommandAction::ListSessions => {
+            let tx = state.lock().map_err(|e| e.to_string())?;
+            tx.send(WorkerCmd::ListSessions).map_err(|e| e.to_string())
+        }
+        CommandAction::ClearProjectSessions => {
+            let tx = state.lock().map_err(|e| e.to_string())?;
+            tx.send(WorkerCmd::ClearSessions).map_err(|e| e.to_string())
+        }
+        CommandAction::ShowHelp => Err(commands::help_text().to_string()),
+        CommandAction::Quit => Ok(()),
+    }
 }

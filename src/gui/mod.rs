@@ -30,6 +30,7 @@ pub(crate) fn run(config: &Config, paths: &AppPaths, app: AppContext) -> Result<
                 project_label,
                 app_name,
             });
+            tauri_app.manage(config.clone());
 
             let handle = tauri_app.handle().clone();
             std::thread::spawn(move || {
@@ -51,6 +52,7 @@ pub(crate) fn run(config: &Config, paths: &AppPaths, app: AppContext) -> Result<
             commands::memory_approve,
             commands::memory_reject,
             commands::app_info,
+            commands::run_command,
         ])
         .run(tauri::generate_context!())
         .map_err(|e| AppError::Tui(e.to_string()))
