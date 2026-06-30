@@ -14,7 +14,7 @@ pub(crate) enum WorkerCmd {
     ProactiveScan,
 }
 
-pub(super) enum WorkerReply {
+pub(crate) enum WorkerReply {
     Event(RuntimeEvent),
     DeferredVerification(String),
     HandleOk,
@@ -27,7 +27,7 @@ pub(super) enum WorkerReply {
     ClearErr(String),
 }
 
-pub(super) fn run_worker(
+pub(crate) fn run_worker(
     mut app: AppContext,
     cmd_rx: mpsc::Receiver<WorkerCmd>,
     reply_tx: mpsc::Sender<WorkerReply>,

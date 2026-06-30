@@ -8,7 +8,7 @@ mod input;
 mod keybindings;
 mod renderer;
 mod state;
-mod worker;
+pub(crate) mod worker;
 
 use std::io::{self, IsTerminal};
 
