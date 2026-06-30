@@ -24,4 +24,6 @@ pub use project::ResolvedToolInput;
 #[allow(unused_imports)]
 pub use project::{resolve, PathResolutionError};
 pub use project::{ProjectPath, ProjectScope};
-pub use types::{AnswerSource, DiffMode, RuntimeEvent, RuntimeRequest};
+pub use types::{
+    Activity, AnswerSource, DiffMode, RuntimeEvent, RuntimeRequest, RuntimeTerminalReason,
+};
