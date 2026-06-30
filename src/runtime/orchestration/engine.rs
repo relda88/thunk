@@ -2272,7 +2272,10 @@ impl Runtime {
             }
         }
 
-        if state.search_budget.is_closed()
+        // Search budget terminals are investigation-only guards; they must not fire on
+        // MutationEnabled turns where the model is legitimately allowed to search before editing.
+        if !ctx.mutation_allowed
+            && state.search_budget.is_closed()
             && calls
                 .iter()
                 .any(|c| matches!(c, ToolInput::SearchCode { .. }))
@@ -2470,7 +2473,11 @@ impl TurnContext {
         };
         let investigation_required = original_user_prompt
             .map(|prompt| {
-                requested_read_path.is_none()
+                // Shell seed prompts must never trigger investigation: the shell command
+                // is the entire intent, and snake_case arguments (e.g. "rm test_dir")
+                // would otherwise satisfy prompt_requires_investigation's identifier heuristic.
+                requested_shell_command(prompt).is_none()
+                    && requested_read_path.is_none()
                     && !user_requested_mutation(prompt)
                     && prompt_requires_investigation(prompt)
             })

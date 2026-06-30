@@ -122,3 +122,30 @@ fn post_seed_shell_read_sets_answer_phase() {
         assistant_chunks(&events)
     );
 }
+
+/// Bug fix E: shell seed must fire even when the command argument is a snake_case
+/// identifier (e.g. "rm test_dir"). Previously, prompt_requires_investigation saw
+/// "test_dir" as a code identifier and set investigation_required=true, which
+/// suppressed the seed gate.
+#[test]
+fn shell_seed_fires_with_snake_case_argument() {
+    let tmp = TempDir::new().unwrap();
+    // exec_enabled defaults to false — the Tier-3 (rm) command will be denied by the exec gate,
+    // but only AFTER the seed path fires and reaches the gate. This confirms the seed was placed.
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "run rm test_dir".to_string(),
+        },
+    );
+
+    // The exec-gate denial SystemMessage proves the shell seed fired (exec gate only triggers
+    // after the seeded shell command reaches it).
+    let msgs = system_messages(&events);
+    assert!(
+        msgs.iter().any(|m| m.contains("exec mode is disabled")),
+        "expected exec-disabled message proving shell seed fired for snake_case arg; got: {msgs:?}"
+    );
+}
