@@ -12,6 +12,7 @@
       .msg.assistant { background: #2a2a2a; align-self: flex-start; border-left: 2px solid #569cd6; }
       .msg.system { background: #1e1e1e; align-self: center; color: #888; font-size: 0.85em; border-left: 2px solid #555; }
       .msg.error { background: #2a1a1a; align-self: flex-start; border-left: 2px solid #f44; color: #f99; }
+      .msg.user { background: #1e2a1e; align-self: flex-end; border-left: 2px solid #4ec94e; }
       #input-row { display: flex; padding: 8px; border-top: 1px solid #333; gap: 8px; }
       #input { flex: 1; background: #2a2a2a; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 8px 12px; font-family: monospace; font-size: 14px; outline: none; resize: none; }
       #input:focus { border-color: #569cd6; }
@@ -78,6 +79,7 @@
           const text = inputEl.value.trim();
           if (!text) return;
           inputEl.value = '';
+          appendMessage('user', text);
           try {
             await invoke('submit', { text });
           } catch (err) {

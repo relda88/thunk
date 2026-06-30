@@ -29,6 +29,12 @@ trace-fresh:
     just fresh
     just trace
 
+gui:
+    cargo run --release --features gui -- --gui
+
+gui-trace:
+    THUNK_TRACE_RUNTIME=1 cargo run --release --features gui -- --gui
+
 install:
     cargo install --path .
 
