@@ -85,6 +85,9 @@ pub enum RuntimeTerminalReason {
     /// disabled. The runtime ends the turn immediately so the model cannot retry the
     /// blocked command in a deny→retry spiral.
     ExecDisabled,
+    /// An mcp::filesystem mutation tool targeted a path inside the project root.
+    /// Redirect the model to use native write_file/edit_file instead.
+    McpInProjectRedirect,
 }
 
 /// How much of the diff to show.

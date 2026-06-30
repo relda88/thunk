@@ -8,6 +8,7 @@ use super::super::investigation::investigation::InvestigationMode;
 use super::super::investigation::tool_surface::ToolSurface;
 use super::super::protocol::prompt;
 use super::super::protocol::prompt_physics::{self, PromptPhysicsConfig};
+use super::super::protocol::response_text::strip_thunk_context_block;
 use super::super::trace::trace_runtime_decision;
 use super::super::types::{Activity, RuntimeEvent};
 
@@ -60,11 +61,19 @@ pub(super) fn run_generate_turn(
         } else {
             false
         };
-    let has_recency = if let Some(recency) =
-        prompt_physics::recency_field_message(prompt_physics, tool_surface, dynamic_tool_names)
-    {
-        messages.push(Message::system(recency));
-        true
+    // Suppress recency injection on AnswerOnly: this surface covers both pure synthesis turns
+    // and PostRead answer phase (engine maps answer_phase.is_some() → AnswerOnly).
+    // AnswerOnly has no tools and no investigation context to update; the [thunk: current context]
+    // block only adds noise and can leak markers into the admitted answer text.
+    let has_recency = if !matches!(tool_surface, ToolSurface::AnswerOnly) {
+        if let Some(recency) =
+            prompt_physics::recency_field_message(prompt_physics, tool_surface, dynamic_tool_names)
+        {
+            messages.push(Message::system(recency));
+            true
+        } else {
+            false
+        }
     } else {
         false
     };
@@ -149,7 +158,8 @@ pub(super) fn run_generate_turn(
 pub(super) fn emit_visible_assistant_message(text: &str, on_event: &mut dyn FnMut(RuntimeEvent)) {
     on_event(RuntimeEvent::ActivityChanged(Activity::Responding));
     on_event(RuntimeEvent::AssistantMessageStarted);
-    on_event(RuntimeEvent::AssistantMessageChunk(text.to_string()));
+    let clean = strip_thunk_context_block(text);
+    on_event(RuntimeEvent::AssistantMessageChunk(clean.into_owned()));
     on_event(RuntimeEvent::AssistantMessageFinished);
 }
 

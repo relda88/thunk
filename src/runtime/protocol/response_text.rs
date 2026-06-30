@@ -301,3 +301,36 @@ pub(crate) fn non_candidate_read_correction(path: &str, candidate: Option<&str>)
 pub(crate) fn non_candidate_read_terminal_answer() -> &'static str {
     "I could not continue because the model attempted to read a file that was not in the search results."
 }
+
+/// Strips any `[thunk: current context]...[/thunk: current context]` block from `text`.
+/// Defense-in-depth: recency injection is suppressed on synthesis surfaces, but if a block
+/// leaks into an admitted answer (e.g. via a non-AnswerOnly surface), this removes it before
+/// the text reaches the user.
+pub(crate) fn strip_thunk_context_block(text: &str) -> std::borrow::Cow<'_, str> {
+    const OPEN: &str = "[thunk: current context]";
+    const CLOSE: &str = "[/thunk: current context]";
+    if !text.contains(OPEN) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut result = String::with_capacity(text.len());
+    let mut remaining = text;
+    while let Some(start) = remaining.find(OPEN) {
+        result.push_str(&remaining[..start]);
+        remaining = &remaining[start + OPEN.len()..];
+        if let Some(end) = remaining.find(CLOSE) {
+            remaining = &remaining[end + CLOSE.len()..];
+            // Strip a trailing newline after the closing tag if present.
+            if remaining.starts_with('\n') {
+                remaining = &remaining[1..];
+            }
+        }
+        // If no closing tag, stop stripping and keep the rest verbatim.
+        // This avoids silently eating answer content on a partial leak.
+        else {
+            result.push_str(remaining);
+            return std::borrow::Cow::Owned(result);
+        }
+    }
+    result.push_str(remaining);
+    std::borrow::Cow::Owned(result)
+}
