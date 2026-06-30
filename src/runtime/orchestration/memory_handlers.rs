@@ -43,6 +43,58 @@ impl Runtime {
         });
     }
 
+    /// Proactively surface a stale memory fact for user approval, without a user prompt.
+    /// Runtime-owned and approval-gated: the model is not involved in the decision to surface.
+    /// Returns silently (no events) when DND is active, the minimum interval has not elapsed,
+    /// memory is unavailable, or no facts are stale.
+    pub(crate) fn proactive_scan(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        // DND is always checked first — no work done when proactive surfacing is paused.
+        if self.dnd_enabled {
+            return;
+        }
+        // Anti-spam floor: enforce the minimum interval between scans.
+        if self
+            .last_proactive_at
+            .is_some_and(|t| t.elapsed() < self.proactive_min_interval)
+        {
+            return;
+        }
+        if !self.config.memory.enabled || self.memory_manager.is_none() {
+            return;
+        }
+        // Staleness cutoff: facts not recalled within the configured window are candidates.
+        let cutoff = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(self.config.proactive.staleness_days * 24 * 3600)
+            .to_string();
+        let scope = self.memory_write_scope();
+        let stale = match self
+            .memory_manager
+            .as_ref()
+            .unwrap()
+            .stale_facts(scope.as_deref(), &cutoff)
+        {
+            Ok(facts) => facts,
+            Err(_) => return,
+        };
+        // No stale facts: record the scan time and return without surfacing anything.
+        if stale.is_empty() {
+            self.last_proactive_at = Some(std::time::Instant::now());
+            return;
+        }
+        let fact = stale.into_iter().next().unwrap();
+        self.last_proactive_at = Some(std::time::Instant::now());
+        self.propose_memory(
+            fact.text,
+            fact.category,
+            fact.scope,
+            MemorySource::Reflection,
+            on_event,
+        );
+    }
+
     /// Approve the pending memory proposal — either persist (write) or delete, then clear.
     pub(super) fn handle_memory_approve(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
         let fact = match self.pending_memory.take() {

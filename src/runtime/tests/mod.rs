@@ -32,6 +32,7 @@ mod investigation_modes;
 mod memory_command;
 mod path_scope;
 mod plan_command;
+mod proactive_scan;
 mod project_snapshot;
 mod prompt_physics;
 mod read_bounds;

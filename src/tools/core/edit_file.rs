@@ -74,7 +74,7 @@ impl Tool for EditFileTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "edit_file",
-            description: "Replace an exact block of text in an existing file. The search text must match exactly, including whitespace.",
+            description: "Replace an exact block of text in an existing file. The search text must match exactly, including whitespace. Replaces an exact block of text in a file within the project root. For files outside the project root, use mcp::filesystem::edit_file instead.",
             input_hint: "path: path/to/file.rs",
             execution_kind: ExecutionKind::RequiresApproval,
             default_risk: Some(RiskLevel::Medium),

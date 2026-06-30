@@ -893,6 +893,52 @@ pub(crate) fn run_tool_round(
                 let bare_tool = parts.get(2).copied().unwrap_or("").to_string();
                 let parsed_args: serde_json::Value =
                     serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!({}));
+
+                // Reverse MCP intercept: if the model calls an mcp::filesystem mutation tool
+                // targeting a path inside the project root, redirect to the native tools.
+                // Fires before the PendingAction is built so the user never sees the MCP approval
+                // for an in-project path.
+                const MCP_FS_MUTATION_TOOLS: &[&str] =
+                    &["write_file", "create_directory", "edit_file", "move_file"];
+                if MCP_FS_MUTATION_TOOLS.contains(&bare_tool.as_str()) {
+                    // Try common path argument keys used by mcp::filesystem tools.
+                    let candidate_path = ["path", "destination", "source"]
+                        .iter()
+                        .find_map(|key| parsed_args.get(key).and_then(|v| v.as_str()));
+                    if let Some(raw_path) = candidate_path {
+                        let abs = if std::path::Path::new(raw_path).is_absolute() {
+                            std::path::PathBuf::from(raw_path)
+                        } else {
+                            project_root.path().join(raw_path)
+                        };
+                        if let Ok(canonical) = std::fs::canonicalize(&abs).or_else(|_| {
+                            // File may not yet exist; canonicalize the parent instead.
+                            abs.parent()
+                                .ok_or_else(|| std::io::Error::other("no parent"))
+                                .and_then(std::fs::canonicalize)
+                                .map(|p| p.join(abs.file_name().unwrap_or_default()))
+                        }) {
+                            if canonical.starts_with(project_root.path()) {
+                                const REDIRECT_MSG: &str =
+                                    "use native write_file or edit_file for in-project mutations — \
+                                     mcp::filesystem targets paths outside the project root only";
+                                on_event(RuntimeEvent::SystemMessage(REDIRECT_MSG.to_string()));
+                                on_event(RuntimeEvent::ToolCallFinished {
+                                    name: name.clone(),
+                                    summary: None,
+                                });
+                                accumulated
+                                    .push_str(&tool_codec::format_tool_error(&name, REDIRECT_MSG));
+                                return ToolRoundOutcome::TerminalAnswer {
+                                    results: accumulated,
+                                    answer: REDIRECT_MSG.to_string(),
+                                    reason: RuntimeTerminalReason::McpInProjectRedirect,
+                                };
+                            }
+                        }
+                    }
+                }
+
                 let payload = serde_json::json!({
                     "server": server,
                     "tool": bare_tool,

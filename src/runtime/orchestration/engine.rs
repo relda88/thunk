@@ -178,6 +178,15 @@ pub struct Runtime {
     /// allowed through the approval gate. Resets to false on session reset.
     /// Controlled via /exec on|off.
     exec_enabled: bool,
+    /// Session-scoped do-not-disturb mode. When true, proactive suggestions are
+    /// paused. Resets to false on session reset. Controlled via /dnd on|off.
+    dnd_enabled: bool,
+    /// Timestamp of the last proactive scan that ran (not necessarily surfaced).
+    /// Used to enforce `proactive_min_interval`. Resets to None on session reset.
+    last_proactive_at: Option<std::time::Instant>,
+    /// Minimum wall-clock interval between proactive scans. Anti-spam floor enforced
+    /// in `proactive_scan`, decoupled from the timer thread's cadence.
+    proactive_min_interval: std::time::Duration,
     /// Tracks how many correction attempts have been made for the current mutation.
     /// Reset to 0 on cargo check success, exhaustion, or when corrections are disabled.
     correction_attempts: u32,
@@ -328,6 +337,9 @@ impl Runtime {
             verify_command: config.project.verify_command.clone(),
             deferred_verify: true,
             exec_enabled: false,
+            dnd_enabled: false,
+            last_proactive_at: None,
+            proactive_min_interval: std::time::Duration::from_secs(300),
             correction_attempts: 0,
             max_correction_attempts: config.project.max_correction_attempts,
             session_start_ref,
@@ -563,6 +575,7 @@ impl Runtime {
                 self.handle_verify_mutation_toggle(command, on_event)
             }
             RuntimeRequest::ExecToggle { enabled } => self.handle_exec_toggle(enabled, on_event),
+            RuntimeRequest::DndToggle { enabled } => self.handle_dnd_toggle(enabled, on_event),
             RuntimeRequest::TransactionStatus => self.handle_transaction_status(on_event),
             RuntimeRequest::AbilityToggle { name } => self.handle_ability_toggle(name, on_event),
             RuntimeRequest::SkillToggle { name } => self.handle_skill_toggle(name, on_event),
@@ -2259,7 +2272,10 @@ impl Runtime {
             }
         }
 
-        if state.search_budget.is_closed()
+        // Search budget terminals are investigation-only guards; they must not fire on
+        // MutationEnabled turns where the model is legitimately allowed to search before editing.
+        if !ctx.mutation_allowed
+            && state.search_budget.is_closed()
             && calls
                 .iter()
                 .any(|c| matches!(c, ToolInput::SearchCode { .. }))
@@ -2457,7 +2473,11 @@ impl TurnContext {
         };
         let investigation_required = original_user_prompt
             .map(|prompt| {
-                requested_read_path.is_none()
+                // Shell seed prompts must never trigger investigation: the shell command
+                // is the entire intent, and snake_case arguments (e.g. "rm test_dir")
+                // would otherwise satisfy prompt_requires_investigation's identifier heuristic.
+                requested_shell_command(prompt).is_none()
+                    && requested_read_path.is_none()
                     && !user_requested_mutation(prompt)
                     && prompt_requires_investigation(prompt)
             })

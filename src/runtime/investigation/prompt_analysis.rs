@@ -229,6 +229,8 @@ pub(crate) fn user_requested_remember(text: &str) -> Option<String> {
         "remember that ",
         "remember ",
         "remember: ",
+        "dont forget that ",
+        "dont forget ",
         "don't forget ",
         "note that ",
     ];
@@ -1432,6 +1434,20 @@ mod tests {
         assert_eq!(
             requested_shell_command("execute mkdir foo"),
             Some("mkdir foo".to_string())
+        );
+    }
+
+    #[test]
+    fn user_requested_remember_apostrophe_less_form() {
+        assert!(user_requested_remember("dont forget my API key is abc123").is_some());
+        assert!(user_requested_remember("dont forget that the deadline is Friday").is_some());
+        assert_eq!(
+            user_requested_remember("dont forget my API key is abc123"),
+            Some("my API key is abc123".to_string())
+        );
+        assert_eq!(
+            user_requested_remember("dont forget that the deadline is Friday"),
+            Some("the deadline is Friday".to_string())
         );
     }
 }

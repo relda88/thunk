@@ -103,6 +103,9 @@ pub enum Command {
     /// /exec on|off|status — session-scoped Tier-3 exec mode toggle.
     /// Some(true) enables, Some(false) disables, None queries current status.
     Exec(Option<bool>),
+    /// /dnd on|off|status — session-scoped do-not-disturb mode toggle.
+    /// Some(true) enables, Some(false) disables, None queries current status.
+    Dnd(Option<bool>),
 }
 
 /// A parse-level error for slash commands. Returned when input begins with `/`
@@ -358,6 +361,12 @@ pub fn parse(input: &str) -> Option<Result<Command, ParseError>> {
             Some("status") | None => Some(Ok(Command::Exec(None))),
             _ => Some(Err(ParseError::UnknownCommand)),
         },
+        "/dnd" => match arg {
+            Some("on") => Some(Ok(Command::Dnd(Some(true)))),
+            Some("off") => Some(Ok(Command::Dnd(Some(false)))),
+            Some("status") | None => Some(Ok(Command::Dnd(None))),
+            _ => Some(Err(ParseError::UnknownCommand)),
+        },
         "/ls" => Some(Ok(Command::Ls(arg.unwrap_or(".").to_string()))),
         "/sessions" => Some(Ok(Command::Sessions)),
         "/session" => match arg {
@@ -388,6 +397,7 @@ pub(crate) fn autocomplete_names() -> &'static [&'static str] {
         "/diff",
         "/context",
         "/depth",
+        "/dnd",
         "/exec",
         "/exit",
         "/fetch",
@@ -483,6 +493,11 @@ pub(crate) fn launcher_commands() -> &'static [LauncherCommand] {
         LauncherCommand {
             name: "/context",
             description: "show context window usage stats",
+        },
+        LauncherCommand {
+            name: "/dnd",
+            description:
+                "enable or disable do-not-disturb / proactive suggestions (/dnd on|off|status)",
         },
         LauncherCommand {
             name: "/exec",
@@ -1245,5 +1260,15 @@ mod tests {
     fn exec_toggle_status() {
         assert_eq!(parse("/exec status"), Some(Ok(Command::Exec(None))));
         assert_eq!(parse("/exec"), Some(Ok(Command::Exec(None))));
+    }
+
+    #[test]
+    fn dnd_toggle_enables() {
+        assert_eq!(parse("/dnd on"), Some(Ok(Command::Dnd(Some(true)))));
+    }
+
+    #[test]
+    fn dnd_toggle_disables() {
+        assert_eq!(parse("/dnd off"), Some(Ok(Command::Dnd(Some(false)))));
     }
 }

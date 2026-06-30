@@ -184,7 +184,7 @@ When you show code, keep it focused on the user's request.",
             prompt.push_str(&format!("  {}: {}\n", tool.name, tool.description));
         }
         prompt.push('\n');
-        prompt.push_str("For files or directories that are outside the project root by absolute path, use mcp::filesystem tools. Files within the project directory tree are accessible via native tools (read_file, list_dir, shell_read).\n");
+        prompt.push_str("For mutations (creating, editing, moving files) within the project root, use native tools write_file and edit_file — not mcp::filesystem. Use mcp::filesystem tools only for absolute paths outside the project root.\n");
         prompt.push_str(instructions);
         let dynamic_specs: Vec<DynamicToolSpec> = dynamic_tools
             .iter()

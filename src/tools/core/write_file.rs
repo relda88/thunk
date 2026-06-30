@@ -68,7 +68,7 @@ impl Tool for WriteFileTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "write_file",
-            description: "Create a new file or overwrite an existing file with the given content.",
+            description: "Create a new file or overwrite an existing file with the given content. Creates or overwrites a file within the project root. For files outside the project root, use mcp::filesystem::write_file instead.",
             input_hint: "path: path/to/file.rs",
             execution_kind: ExecutionKind::RequiresApproval,
             default_risk: Some(RiskLevel::Medium),

@@ -130,6 +130,13 @@ impl AppContext {
         self.runtime.rebuild_file(&path);
     }
 
+    /// Runs a proactive memory scan, surfacing a stale-fact proposal if one is due.
+    /// Best-effort and silent — delegates to Runtime::proactive_scan, which respects
+    /// /dnd, the minimum interval floor, and the pending-proposal overlap guard.
+    pub fn proactive_scan(&mut self, on_event: &mut dyn FnMut(RuntimeEvent)) {
+        self.runtime.proactive_scan(on_event);
+    }
+
     /// Deletes all sessions for the current project, resets the runtime, and starts fresh.
     /// The TUI handles its own message-list clearing separately.
     pub fn clear_sessions(&mut self) -> Result<()> {
@@ -241,6 +248,7 @@ fn request_label(request: &RuntimeRequest) -> &'static str {
         RuntimeRequest::PromptPhysicsToggle { .. } => "prompt_physics_toggle",
         RuntimeRequest::VerifyMutationToggle { .. } => "verify_mutation_toggle",
         RuntimeRequest::ExecToggle { .. } => "exec_toggle",
+        RuntimeRequest::DndToggle { .. } => "dnd_toggle",
         RuntimeRequest::TransactionStatus => "transaction_status",
         RuntimeRequest::Diff { .. } => "diff",
         RuntimeRequest::AbilityToggle { .. } => "ability_toggle",

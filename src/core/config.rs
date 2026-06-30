@@ -330,6 +330,27 @@ pub struct Config {
     pub retrieval: RetrievalConfig,
     pub investigation: InvestigationConfig,
     pub memory: MemoryConfig,
+    pub proactive: ProactiveConfig,
+}
+
+/// Proactive intelligence configuration: controls background staleness scans
+/// that surface stale memory facts for re-confirmation without a user prompt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ProactiveConfig {
+    pub enabled: bool,
+    pub interval_secs: u64,
+    pub staleness_days: u64,
+}
+
+impl Default for ProactiveConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 300,
+            staleness_days: 7,
+        }
+    }
 }
 
 /// Application configuration for the app

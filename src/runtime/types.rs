@@ -85,6 +85,9 @@ pub enum RuntimeTerminalReason {
     /// disabled. The runtime ends the turn immediately so the model cannot retry the
     /// blocked command in a deny→retry spiral.
     ExecDisabled,
+    /// An mcp::filesystem mutation tool targeted a path inside the project root.
+    /// Redirect the model to use native write_file/edit_file instead.
+    McpInProjectRedirect,
 }
 
 /// How much of the diff to show.
@@ -221,6 +224,12 @@ pub enum RuntimeRequest {
     /// Session-scoped exec mode toggle. `Some(true)` enables, `Some(false)` disables,
     /// `None` queries current status. Does not mutate conversation or trigger session save.
     ExecToggle {
+        enabled: Option<bool>,
+    },
+    /// Session-scoped do-not-disturb mode toggle. `Some(true)` enables, `Some(false)`
+    /// disables, `None` queries current status. Does not mutate conversation or trigger
+    /// session save.
+    DndToggle {
         enabled: Option<bool>,
     },
     /// Read-only query: returns the current pending transaction state as a SystemMessage.
