@@ -39,6 +39,10 @@
       .risk-medium { color: #e5c07b; }
       .risk-high { color: #f44; }
       .action-block { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid #333; }
+      .ctx-low { color: #4ec94e; }
+      .ctx-mid { color: #e5c07b; }
+      .ctx-high { color: #f44; }
+      .warning-banner { background: #3a1a1a; border: 1px solid #f44; color: #f99; padding: 6px 10px; border-radius: 4px; margin-bottom: 8px; font-size: 0.9em; }
     </style>
   </head>
   <body>
@@ -72,11 +76,12 @@
       let currentBubble = null;
 
       function appendMessage(cls, text) {
+        const isAtBottom = messagesEl.scrollTop + messagesEl.clientHeight >= messagesEl.scrollHeight - 10;
         const div = document.createElement('div');
         div.className = 'msg ' + cls;
         div.textContent = text;
         messagesEl.appendChild(div);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
         return div;
       }
 
@@ -110,16 +115,39 @@
         }
       }
 
+      function toolLabel(name) {
+        const map = {
+          'edit_file': 'Edit File',
+          'write_file': 'Create/Overwrite File',
+          'read_file': 'Read File',
+          'list_dir': 'List Directory',
+          'search_code': 'Search Code',
+          'shell': 'Shell Command',
+          'shell_read': 'Shell (Read)',
+          'git_status': 'Git Status',
+          'git_diff': 'Git Diff',
+          'git_log': 'Git Log',
+          'git_branch': 'Git Branch',
+          'lsp_definition': 'LSP Definition',
+        };
+        if (name.startsWith('mcp::')) return 'MCP: ' + name.slice(5);
+        return map[name] || name;
+      }
+
       function pendingActionHtml(p, index) {
+        const label = toolLabel(p.tool_name);
         const heading = index !== undefined
-          ? `<div><span class="label">${index + 1}. tool: </span>${esc(p.tool_name)}</div>`
-          : `<div class="field"><span class="label">tool: </span>${esc(p.tool_name)}</div>`;
+          ? `<div><span class="label">${index + 1}. tool: </span>${esc(label)}</div>`
+          : `<div class="field"><span class="label">tool: </span>${esc(label)}</div>`;
+        const irreversibleHtml = !p.reversible
+          ? `<div class="warning-banner">&#9888; This action cannot be undone</div>` : '';
         const previewHtml = p.preview.length
           ? `<div class="preview">${esc(p.preview.join('\n'))}</div>` : '';
         return `${heading}
           <div class="field"><span class="label">summary: </span>${esc(p.summary)}</div>
           <div class="field"><span class="label">risk: </span><span class="risk-${p.risk}">${esc(p.risk)}</span></div>
           <div class="field"><span class="label">reversible: </span>${p.reversible ? 'yes' : 'no'}</div>
+          ${irreversibleHtml}
           ${previewHtml}`;
       }
 
@@ -131,8 +159,9 @@
             break;
           case 'assistant_message_chunk':
             if (currentBubble) {
+              const isAtBottom = messagesEl.scrollTop + messagesEl.clientHeight >= messagesEl.scrollHeight - 10;
               currentBubble.textContent += payload.chunk;
-              messagesEl.scrollTop = messagesEl.scrollHeight;
+              if (isAtBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
             }
             break;
           case 'assistant_message_finished':
@@ -145,16 +174,18 @@
             appendMessage('system', payload.text);
             break;
           case 'failed':
+            hideDialog();
             appendMessage('error', 'Error: ' + payload.message);
+            statusActivity.textContent = 'Ready';
             break;
           case 'tool_call_started':
-            appendMessage('system', 'tool: ' + payload.name);
+            appendMessage('system', 'tool: ' + toolLabel(payload.name));
             break;
           case 'tool_call_finished':
             if (payload.name === 'read_file' && payload.summary !== null) {
               // suppress — file_read_finished carries the detail
             } else if (payload.summary === null) {
-              appendMessage('system', 'tool failed: ' + payload.name);
+              appendMessage('system', 'tool failed: ' + toolLabel(payload.name));
             } else {
               appendMessage('system', payload.summary);
             }
@@ -163,6 +194,7 @@
             appendMessage('system', 'read ' + payload.path + ' (' + payload.line_count + ' lines)');
             break;
           case 'answer_ready':
+            hideDialog();
             if (payload.source && payload.source.type === 'tool_limit_reached') {
               appendMessage('system', 'Tool limit reached. Response may be incomplete.');
             }
@@ -175,16 +207,20 @@
           case 'context_usage': {
             const pct = Math.min(100, Math.floor(payload.prompt_tokens * 100 / payload.context_window_tokens));
             statusContext.textContent = 'ctx: ' + pct + '%';
+            statusContext.className = pct < 50 ? 'ctx-low' : pct <= 75 ? 'ctx-mid' : 'ctx-high';
             break;
           }
 
           case 'approval_required': {
             const evidenceHtml = payload.evidence.length
               ? `<div class="field"><span class="label">evidence: </span>${esc(payload.evidence.join(', '))}</div>` : '';
+            const impactHtml = payload.impact && payload.impact.length > 0
+              ? `<div class="field"><span class="label" style="color:#888">affects: </span><span style="color:#888">${esc(payload.impact.join(', '))}</span></div>` : '';
             showDialog(`
               <h3>Approve action?</h3>
               ${pendingActionHtml(payload.pending)}
               ${evidenceHtml}
+              ${impactHtml}
               <div class="actions">
                 <button class="btn btn-approve" onclick="doApprove()">Approve</button>
                 <button class="btn btn-reject" onclick="doReject()">Reject</button>
@@ -196,9 +232,12 @@
             const actionsHtml = payload.actions.map((p, i) =>
               `<div class="action-block">${pendingActionHtml(p, i)}</div>`
             ).join('');
+            const txImpactHtml = payload.impact && payload.impact.length > 0
+              ? `<div class="field"><span class="label" style="color:#888">affects: </span><span style="color:#888">${esc(payload.impact.join(', '))}</span></div>` : '';
             showDialog(`
               <h3>Approve transaction (${payload.actions.length} actions)?</h3>
               ${actionsHtml}
+              ${txImpactHtml}
               <div class="actions">
                 <button class="btn btn-approve" onclick="doApprove()">Approve all</button>
                 <button class="btn btn-reject" onclick="doReject()">Reject</button>

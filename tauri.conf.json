@@ -10,7 +10,8 @@
       {
         "title": "thunk",
         "width": 1200,
-        "height": 800
+        "height": 800,
+        "backgroundColor": "#1a1a1a"
       }
     ],
     "security": {
