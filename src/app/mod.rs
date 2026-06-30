@@ -16,8 +16,8 @@ use crate::tui;
 
 // Bootstraps the application: prepares paths and config, builds the backend and tools, restores session state,
 // attaches logging, and starts the TUI.
-pub fn run(cli: cli::Cli) -> Result<()> {
-    let paths = paths::AppPaths::discover()?;
+pub fn run(cli: cli::Cli, start_dir: Option<std::path::PathBuf>) -> Result<()> {
+    let paths = paths::AppPaths::discover(start_dir)?;
     paths.ensure_runtime_dirs()?;
     load_dotenv(&paths.project_root);
 
