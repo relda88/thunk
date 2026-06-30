@@ -4,8 +4,87 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>thunk</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: monospace; background: #1a1a1a; color: #d4d4d4; display: flex; flex-direction: column; height: 100vh; }
+      #messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+      .msg { padding: 8px 12px; border-radius: 4px; max-width: 90%; white-space: pre-wrap; word-break: break-word; }
+      .msg.assistant { background: #2a2a2a; align-self: flex-start; border-left: 2px solid #569cd6; }
+      .msg.system { background: #1e1e1e; align-self: center; color: #888; font-size: 0.85em; border-left: 2px solid #555; }
+      .msg.error { background: #2a1a1a; align-self: flex-start; border-left: 2px solid #f44; color: #f99; }
+      #input-row { display: flex; padding: 8px; border-top: 1px solid #333; gap: 8px; }
+      #input { flex: 1; background: #2a2a2a; color: #d4d4d4; border: 1px solid #444; border-radius: 4px; padding: 8px 12px; font-family: monospace; font-size: 14px; outline: none; resize: none; }
+      #input:focus { border-color: #569cd6; }
+    </style>
   </head>
   <body>
-    <h1>thunk</h1>
+    <div id="messages"></div>
+    <div id="input-row">
+      <textarea id="input" rows="2" placeholder="Ask thunk anything... (Enter to send, Shift+Enter for newline)"></textarea>
+    </div>
+
+    <script>
+      const { listen } = window.__TAURI__.event;
+      const { invoke } = window.__TAURI__.core;
+
+      const messagesEl = document.getElementById('messages');
+      const inputEl = document.getElementById('input');
+
+      let currentBubble = null;
+
+      function appendMessage(cls, text) {
+        const div = document.createElement('div');
+        div.className = 'msg ' + cls;
+        div.textContent = text;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return div;
+      }
+
+      listen('runtime-event', (event) => {
+        const payload = event.payload;
+        switch (payload.type) {
+          case 'assistant_message_started':
+            currentBubble = appendMessage('assistant', '');
+            break;
+          case 'assistant_message_chunk':
+            if (currentBubble) {
+              currentBubble.textContent += payload.chunk;
+              messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+            break;
+          case 'assistant_message_finished':
+            currentBubble = null;
+            break;
+          case 'system_message':
+            appendMessage('system', payload.text);
+            break;
+          case 'info_message':
+            appendMessage('system', payload.text);
+            break;
+          case 'failed':
+            appendMessage('error', 'Error: ' + payload.message);
+            break;
+          case 'answer_ready':
+            break;
+          default:
+            break;
+        }
+      });
+
+      inputEl.addEventListener('keydown', async (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const text = inputEl.value.trim();
+          if (!text) return;
+          inputEl.value = '';
+          try {
+            await invoke('submit', { text });
+          } catch (err) {
+            appendMessage('error', 'Failed to send: ' + err);
+          }
+        }
+      });
+    </script>
   </body>
 </html>
