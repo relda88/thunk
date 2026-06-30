@@ -48,6 +48,16 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         paths.thunk_dir.clone(),
     )?;
 
+    #[cfg(feature = "gui")]
+    if cli.gui {
+        return crate::gui::run(&config, &paths, app);
+    }
+    #[cfg(not(feature = "gui"))]
+    if cli.gui {
+        eprintln!("GUI support not compiled in. Rebuild with --features gui.");
+        std::process::exit(1);
+    }
+
     tui::run(&config, &paths, app)
 }
 
