@@ -13,4 +13,5 @@ export default defineConfig({
     target: 'safari13',
     outDir: 'dist',
   },
+  base: './',
 })
