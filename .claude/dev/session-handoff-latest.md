@@ -1,31 +1,29 @@
-# Session Handoff — 2026-06-29 | Phase 47
+# Session Handoff — 2026-06-30 | Phase 49 (IN PROGRESS, slice 49.8)
 
 ## Decisions Made
-- Shell safety is a 3-tier classifier (`shell_tier.rs`), replacing the cargo-only allowlist: ReadOnly → shell_read (immediate); FsMutation (mkdir/cp/mv/cargo) → shell (approval, reversible:true); Exec (rm/bash/unknown/metachars) → shell (approval, reversible:false, default-deny until /exec on).
-- Metachar detection precedes program classification — runtime spawns directly with no interpreter, so pipes/redirects/compound ops route to Tier-3.
-- cargo is FsMutation, not Exec (writes to target/ but reversible) — corrected in 3701d62.
-- Exec-gate lives in tool_round.rs (before registry.dispatch) because Tool::run() has no runtime state; deny returns TerminalAnswer + SystemMessage to avoid retry spiral.
-- exec_enabled is session-scoped, default-deny, reset on /reset.
-- shell_read needs an explicit PostRead answer phase (invisible to reads_this_turn).
-- find -exec/-delete/-fprint* and sed -i escalate tier via flag inspection (token match, not substring).
+- GUI is a second frontend over the SAME worker channel, not a parallel stack. `spawn_backend` (src/app/backend.rs) returns BackendHandle{cmd_tx, reply_rx}; both TUI and GUI drive WorkerCmd / consume WorkerReply.
+- Event bridge is a pure projection: `RuntimeEventDto::try_from` drops advisory variants (BackendTiming, BackendTokenCounts, RuntimeTrace, PromptAssembled) via Err(()); `worker_reply_to_dto` is the single WorkerReply→event map (src/app/dto.rs).
+- GUI slash commands delegate to crate::tui::commands (parse/resolve_command/resolve_custom_command) — command semantics single-sourced (src/gui/commands.rs).
+- cwd must be captured in main() before WebKit/AppKit chdir; threaded via AppPaths::discover(start_dir_override) (a82c4c7).
+- Bundled Tauri needs Vite `base: './'` and tauri.conf.json trimmed to frontendDist only — no devUrl (7b6ac6a).
+- Frontend rewritten from plain HTML to React + Vite + Tailwind (b5fd8bd); all GUI Rust behind `gui` feature.
 
 ## Open Questions / Next
-- Scope Phase 48.
-- Consider whether shell_read output should populate reads_this_turn uniformly rather than the per-tool answer_phase patch.
-- Watch for graduation of the metachar-precedence rule if Phase 48+ re-touches shell routing.
+- Complete slice 49.8 polish (tool alignment, markdown, raw-result filtering, spinner already in 8e0e7dc); confirm remaining 49.8 scope.
+- Run `just verify` and refresh the CLAUDE.md test baseline (1431 is pre-Phase-48).
+- Decide dev-mode story: devUrl was removed for the bundled build — is a separate dev config needed for hot reload?
+- Phase 48 shipped without a handoff entry — no blocking debt, but note for continuity.
 
 ## Key Files Changed
-- New: src/runtime/investigation/shell_tier.rs, src/tools/core/shell_read.rs, src/runtime/tests/shell_exec.rs
-- Reworked: src/tools/core/shell.rs, tool_round.rs, engine.rs, command_handlers.rs, tool_surface.rs, prompt_analysis.rs, prompt.rs, tool_parser.rs, tool_renderer.rs
-- Wiring: types.rs, registry.rs, resolved_input.rs, resolver.rs, tui/commands/{mod,dispatch}.rs
-- Docs: .claude/rules/invariants.md (Shell Allowlist section)
+- New: src/gui/mod.rs, src/gui/commands.rs, src/app/dto.rs, src/app/backend.rs, tauri.conf.json, frontend/** (React/Vite/Tailwind)
+- Reworked: src/app/mod.rs (run(cli, start_dir) + gui dispatch), src/app/paths.rs (discover override), src/main.rs (cwd capture), src/tui/commands/{mod,dispatch}.rs, justfile, Cargo.toml/.lock
 
 ## Learnings Added
-- 1 → investigation-planner/learnings.md (metachar precedence [High])
-- 2 → debug-runtime/learnings.md (exec-gate TerminalAnswer+SystemMessage [High], shell_read PostRead admission [Med])
+- 2 → debug-runtime/learnings.md (cwd-before-WebKit [High], Tauri white-screen [Med])
+- 2 → investigation-planner/learnings.md (DTO projection parity [Med], shared spawn_backend/command layer [Med])
 
 ## Invariants Graduated
-- None (single-phase arc; re-evaluate next phase).
+- None (single-phase). Watch: "thread runtime-owned names into every consumer" now spans P45–46 (MCP) + P49 (DTO).
 
 ## Resume Prompt
-"Phase 47 complete (tiered shell). Test baseline now 1431. Sync CLAUDE.md phase state + baseline if not yet written, then scope Phase 48."
+"Continue Phase 49 slice 49.8 (Tauri GUI polish): finish frontend rendering fixes, run just verify, refresh CLAUDE.md phase state + test baseline."

@@ -95,7 +95,16 @@ Owns bootstrap, config loading, path discovery, backend construction, tool-regis
 Bootstrap reads optional project `.thunk/THUNK.md` (falling back to `THUNK.md` at project root) and passes it into runtime prompt physics config; it does not persist `THUNK.md` content into sessions.
 `paths.rs` discovers `home_mcp_config` (`$HOME`-based path) for MCP server config loading.
 Must not implement runtime policy or parse tool syntax.
-Key files: `src/app/mod.rs`, `src/app/context.rs`, `src/app/session.rs`, `src/app/paths.rs`, `src/app/config.rs`
+`backend.rs` owns `spawn_backend` — the frontend-agnostic bootstrap (worker + fs-watcher + proactive-scan threads) returning `BackendHandle { cmd_tx, reply_rx }`, shared by both TUI and GUI.
+`dto.rs` owns the serializable `RuntimeEvent` → GUI projection (`RuntimeEventDto`, `worker_reply_to_dto`); advisory variants are dropped via `TryFrom` returning `Err(())`. No policy — a pure projection mirroring `tui/events.rs`.
+`paths.rs::discover(start_dir_override)` accepts an explicit cwd (captured in `main()` before WebKit chdir) for the GUI build.
+Key files: `src/app/mod.rs`, `src/app/context.rs`, `src/app/session.rs`, `src/app/paths.rs`, `src/app/config.rs`, `src/app/backend.rs`, `src/app/dto.rs`
+
+## src/gui/
+Owns the Tauri host: window setup, `tauri::command` handlers, and the event-bridge thread (worker `reply_rx` → `worker_reply_to_dto` → `emit("runtime-event")`). Behind the `gui` feature flag.
+No business logic — commands forward `RuntimeRequest`/`WorkerCmd` to the shared worker; `run_command` delegates slash-command parsing to `crate::tui::commands`.
+Frontend lives in `frontend/` (React + Vite + Tailwind); bundled via `frontendDist` with Vite `base: './'`.
+Key files: `src/gui/mod.rs` (Tauri builder, backend spawn, event thread), `src/gui/commands.rs` (invoke handlers, command routing)
 
 ## src/tui/
 Owns command parsing (`tui/commands/mod.rs`), input handling, screen rendering, and `RuntimeEvent` → UI state mapping.

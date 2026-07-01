@@ -10,6 +10,18 @@ Same as investigation-planner/learnings.md. Graduated entries tagged [GRADUATED]
 
 ---
 
+**2026-06-30 | Phase 49 | app-paths/gui**
+**Observation**: WebKit/AppKit (pulled in by the `gui` feature) change the process cwd during library init, before `main()` regains control. If `AppPaths::discover` reads `env::current_dir()`, the session DB and project root resolve against the post-chdir path, silently pointing the GUI at the wrong project.
+**Evidence**: commit a82c4c7; `src/main.rs` captures `current_dir` at the top of `main()`; `AppPaths::discover(start_dir_override)` in `src/app/paths.rs`; test `discover_with_override_uses_provided_dir_not_env_cwd`.
+**Action/Rule**: Never call `env::current_dir()` inside GUI-reachable path discovery. Capture cwd in `main()` before any framework init and thread it in as an override.
+**Impact**: High
+
+**2026-06-30 | Phase 49 | gui**
+**Observation**: Tauri renders a white screen in the bundled app when Vite emits absolute asset paths (`/assets/...`) — the `tauri://` scheme can't resolve them — and/or when `devUrl`/`beforeDevCommand` remain in `tauri.conf.json`, making it load a dead `localhost:5173` instead of `frontendDist`.
+**Evidence**: commit 7b6ac6a; `frontend/vite.config.ts` `base: './'`; `tauri.conf.json` trimmed to `frontendDist` only.
+**Action/Rule**: For the bundled GUI, set `base: './'` in Vite and keep only `frontendDist` in `tauri.conf.json`. A blank window is an asset-resolution/config symptom, not a Rust bridge bug — check these before the event pipeline.
+**Impact**: Med
+
 **2026-06-29 | Phase 47 | orchestration**
 **Observation**: The exec-gate deny (Tier-3 shell with `exec_enabled=false`) must return `TerminalAnswer`, not `continue`. Failed tool calls don't update `last_call_key`, so a `continue` lets the model re-emit the identical blocked command → deny→retry spiral. The denial also needs a `SystemMessage` event because the model cannot self-correct it (only `/exec on` can), so the model-facing `accumulated` buffer alone is insufficient.
 **Evidence**: `src/runtime/orchestration/tool_round.rs:916-940` exec-gate intercept; commits d31b9ef, ac855c7.
