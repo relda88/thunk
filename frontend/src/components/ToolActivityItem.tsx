@@ -21,7 +21,7 @@ export default function ToolActivityItem({ name, status, summary }: Props) {
 
   return (
     <div
-      className="self-center max-w-[90%] cursor-pointer select-none"
+      className="self-start max-w-[90%] cursor-pointer select-none"
       onClick={() => summary && setExpanded(e => !e)}
     >
       <div
