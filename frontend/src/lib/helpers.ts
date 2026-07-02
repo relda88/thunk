@@ -34,3 +34,25 @@ export function toolLabel(name: string): string {
   if (name.startsWith('mcp::')) return 'MCP: ' + name.slice(5)
   return TOOL_LABELS[name] ?? name
 }
+
+export function summarizeInfoMessage(text: string): string {
+  const headerPattern = /^=== tool_result:\s*(\S+)\s*===$/m
+  const headerMatch = headerPattern.exec(text)
+  if (!headerMatch) return text
+
+  const name = headerMatch[1]
+  const bodyLines = text
+    .slice(headerMatch.index + headerMatch[0].length)
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && l !== '=== /tool_result ===')
+
+  const firstLine = bodyLines[0] ?? ''
+  const lineCountMatch = /(\d+)\s+lines?/i.exec(firstLine)
+  if (lineCountMatch) {
+    return 'tool: ' + name + ' → ' + lineCountMatch[1] + ' lines'
+  }
+
+  const detail = firstLine.length > 60 ? firstLine.slice(0, 60) + '...' : firstLine
+  return detail ? 'tool: ' + name + ' → ' + detail : 'tool: ' + name
+}

@@ -27,8 +27,8 @@ export default function InputBar({ onUserMessage, onSystemMessage }: Props) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const text = value.trim()
-      if (!text) return
       setValue('')
+      if (!text) return
       if (text.startsWith('/')) {
         try {
           await runCommand(text)

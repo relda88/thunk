@@ -37,7 +37,8 @@ export type RuntimeEventDto =
   | { type: 'failed'; message: string }
   | { type: 'tool_call_started'; name: string }
   | { type: 'tool_call_finished'; name: string; summary: string | null }
-  | { type: 'file_read_finished'; path: string; line_count: number }
+  | { type: 'file_read_finished'; path: string; line_count: number; content: string }
+  | { type: 'direct_read_completed' }
   | { type: 'answer_ready'; source: AnswerSourceDto | null }
   | { type: 'activity_changed'; activity: ActivityDto }
   | { type: 'context_usage'; prompt_tokens: number; context_window_tokens: number }
@@ -59,5 +60,5 @@ export type ThreadItem =
   | { kind: 'assistant'; text: string; isStreaming: boolean; id: number }
   | { kind: 'system'; text: string; id: number }
   | { kind: 'error'; text: string; id: number }
-  | { kind: 'file_read'; path: string; lineCount: number; id: number }
+  | { kind: 'file_read'; path: string; lineCount: number; content: string; id: number }
   | { kind: 'tool_activity'; name: string; status: 'running' | 'done' | 'failed'; summary: string | null; id: number }

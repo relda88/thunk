@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { appInfo, onRuntimeEvent } from './lib/ipc'
 import type { ActivityDto, AppInfoDto, DialogState, RuntimeEventDto, ThreadItem } from './lib/types'
+import { activityLabel, summarizeInfoMessage } from './lib/helpers'
 import ChatView from './components/ChatView'
 import StatusBar from './components/StatusBar'
 import InputBar from './components/InputBar'
@@ -19,11 +20,13 @@ export default function App() {
   }
 
   function addUserMessage(text: string) {
-    setThread(prev => [...prev, { kind: 'user', text, id: nextId() }])
+    const id = nextId()
+    setThread(prev => [...prev, { kind: 'user', text, id }])
   }
 
   function addSystemMessage(text: string) {
-    setThread(prev => [...prev, { kind: 'system', text, id: nextId() }])
+    const id = nextId()
+    setThread(prev => [...prev, { kind: 'system', text, id }])
   }
 
   useEffect(() => {
@@ -34,9 +37,11 @@ export default function App() {
 
     const unlistenPromise = onRuntimeEvent((payload: RuntimeEventDto) => {
       switch (payload.type) {
-        case 'assistant_message_started':
-          setThread(prev => [...prev, { kind: 'assistant', text: '', isStreaming: true, id: idRef.current++ }])
+        case 'assistant_message_started': {
+          const id = idRef.current++
+          setThread(prev => [...prev, { kind: 'assistant', text: '', isStreaming: true, id }])
           break
+        }
 
         case 'assistant_message_chunk':
           setThread(prev => {
@@ -58,26 +63,38 @@ export default function App() {
           })
           break
 
-        case 'system_message':
-        case 'info_message':
-          setThread(prev => [...prev, { kind: 'system', text: payload.text, id: idRef.current++ }])
+        case 'system_message': {
+          const id = idRef.current++
+          setThread(prev => [...prev, { kind: 'system', text: payload.text, id }])
           break
+        }
 
-        case 'failed':
+        case 'info_message': {
+          const id = idRef.current++
+          const summarized = summarizeInfoMessage(payload.text)
+          setThread(prev => [...prev, { kind: 'system', text: summarized, id }])
+          break
+        }
+
+        case 'failed': {
           setDialog(null)
-          setThread(prev => [...prev, { kind: 'error', text: 'Error: ' + payload.message, id: idRef.current++ }])
+          const id = idRef.current++
+          setThread(prev => [...prev, { kind: 'error', text: 'Error: ' + payload.message, id }])
           setActivity({ type: 'idle' })
           break
+        }
 
-        case 'tool_call_started':
+        case 'tool_call_started': {
+          const id = idRef.current++
           setThread(prev => [...prev, {
             kind: 'tool_activity',
             name: payload.name,
             status: 'running',
             summary: null,
-            id: idRef.current++,
+            id,
           }])
           break
+        }
 
         case 'tool_call_finished':
           setThread(prev => {
@@ -99,22 +116,30 @@ export default function App() {
           })
           break
 
-        case 'file_read_finished':
+        case 'file_read_finished': {
+          const id = idRef.current++
           setThread(prev => [...prev, {
             kind: 'file_read',
             path: payload.path,
             lineCount: payload.line_count,
-            id: idRef.current++,
+            content: payload.content,
+            id,
           }])
+          break
+        }
+
+        case 'direct_read_completed':
+          // no UI output needed; content arrives on file_read_finished
           break
 
         case 'answer_ready':
           setDialog(null)
           if (payload.source?.type === 'tool_limit_reached') {
+            const id = idRef.current++
             setThread(prev => [...prev, {
               kind: 'system',
               text: 'Tool limit reached. Response may be incomplete.',
-              id: idRef.current++,
+              id,
             }])
           }
           break
@@ -168,9 +193,12 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex flex-col h-screen font-mono" style={{ background: '#1a1a1a', color: '#d4d4d4' }}>
+    <div className="flex flex-col h-screen overflow-hidden font-mono" style={{ background: '#1a1a1a', color: '#d4d4d4' }}>
       <StatusBar activity={activity} contextPct={contextPct} appInfo={info} />
       <ChatView thread={thread} />
+      {activity.type !== 'idle' && (
+        <div className="text-blue-400 text-sm px-4 py-1 text-left">{activityLabel(activity)}</div>
+      )}
       <InputBar onUserMessage={addUserMessage} onSystemMessage={addSystemMessage} />
       {dialog && <ApprovalDialog dialog={dialog} onClose={() => setDialog(null)} />}
     </div>

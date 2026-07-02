@@ -18,7 +18,7 @@ function renderItem(item: ThreadItem) {
     case 'error':
       return <ErrorBubble key={item.id} text={item.text} />
     case 'file_read':
-      return <FileReadItem key={item.id} path={item.path} lineCount={item.lineCount} />
+      return <FileReadItem key={item.id} path={item.path} lineCount={item.lineCount} content={item.content} />
     case 'tool_activity':
       return <ToolActivityItem key={item.id} name={item.name} status={item.status} summary={item.summary} />
   }
@@ -44,7 +44,7 @@ export default function ChatView({ thread }: { thread: ThreadItem[] }) {
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto p-3 flex flex-col gap-2"
+      className="flex-1 min-h-0 overflow-y-auto p-3 flex flex-col gap-2"
     >
       {thread.map(item => renderItem(item))}
     </div>
