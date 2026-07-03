@@ -16,6 +16,12 @@ An entry graduates to `rules/invariants.md` (## Evolved Invariants) when: valida
 **Action/Rule**: When adding a `RuntimeEvent`/`WorkerReply` variant, update BOTH frontend projections (`tui/events.rs` and `app/dto.rs`) and decide advisory-vs-surfaced explicitly. Keep all business logic upstream of the DTO; the DTO carries no policy.
 **Impact**: Med
 
+**2026-07-02 | Phase 49 | gui/dto**
+**Observation**: Twice within slice 49.9, a distinct backend outcome was folded into a generic carrier instead of getting its own variant — `WorkerReply::ResetOk` originally mapped to `RuntimeEventDto::SystemMessage{text: "Session cleared."}`, and `/help` was dispatched through `run_command`'s `Err(String)` channel as a formatted text blob. Both were fixed by adding a dedicated discriminator instead.
+**Evidence**: commit 1ff210c; `src/app/dto.rs:232` (`ResetOk` variant + test `reset_ok_maps_to_reset_ok_dto_and_serializes`); `src/gui/commands.rs:23` (`get_help_commands`), comment at line 137 noting the frontend now intercepts `/help` directly.
+**Action/Rule**: When a backend outcome needs frontend-specific rendering (a toast, a structured list, a distinct UI state), give it its own DTO variant or command — never route it through `SystemMessage{text}` or a stringly-typed `Err()` as an implicit discriminator. Both occurrences so far are within the same slice (49.9) — this has not yet cleared the 2-phase graduation bar; revisit if a third instance appears in a later phase.
+**Impact**: High
+
 **2026-06-30 | Phase 49 | app/backend**
 **Observation**: Both frontends share one bootstrap: `spawn_backend` returns a `BackendHandle { cmd_tx, reply_rx }` wiring the worker + fs-watcher + proactive-scan threads, and `src/gui/commands.rs::run_command` delegates straight to `crate::tui::commands::{parse, resolve_command, resolve_custom_command}`. Slash-command semantics and backend threading are single-sourced, not duplicated in `gui/`.
 **Evidence**: `src/app/backend.rs` `spawn_backend`; `src/gui/commands.rs`; commits 0d32298, 09677c5.
