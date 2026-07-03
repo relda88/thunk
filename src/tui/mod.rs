@@ -8,7 +8,9 @@ mod input;
 mod keybindings;
 mod renderer;
 mod state;
-mod worker;
+pub(crate) mod worker;
+
+pub(crate) use events::decode_approval_preview;
 
 use std::io::{self, IsTerminal};
 

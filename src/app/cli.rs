@@ -2,18 +2,23 @@
 pub struct Cli {
     /// Provider name supplied via `--model <provider>`, if present.
     pub model: Option<String>,
+    /// Launch the Tauri GUI instead of the TUI (`--gui`).
+    pub gui: bool,
 }
 
 impl Cli {
     pub fn parse() -> Self {
         let mut args = std::env::args().skip(1);
         let mut model = None;
+        let mut gui = false;
         while let Some(arg) = args.next() {
             if arg == "--model" {
                 model = args.next().map(|v| v.trim().to_string());
+            } else if arg == "--gui" {
+                gui = true;
             }
         }
-        Self { model }
+        Self { model, gui }
     }
 }
 
@@ -25,12 +30,15 @@ mod tests {
         // Simulate Cli::parse() against a fixed list rather than std::env::args().
         let mut iter = args.iter().map(|s| s.to_string());
         let mut model = None;
+        let mut gui = false;
         while let Some(arg) = iter.next() {
             if arg == "--model" {
                 model = iter.next().map(|v| v.trim().to_string());
+            } else if arg == "--gui" {
+                gui = true;
             }
         }
-        Cli { model }
+        Cli { model, gui }
     }
 
     #[test]
@@ -55,5 +63,17 @@ mod tests {
     fn unknown_flags_are_ignored() {
         let cli = parse_from(&["--verbose", "--model", "mock"]);
         assert_eq!(cli.model.as_deref(), Some("mock"));
+    }
+
+    #[test]
+    fn gui_flag_is_captured() {
+        let cli = parse_from(&["--gui"]);
+        assert!(cli.gui);
+    }
+
+    #[test]
+    fn gui_flag_absent_is_false() {
+        let cli = parse_from(&[]);
+        assert!(!cli.gui);
     }
 }

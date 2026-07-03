@@ -1,10 +1,9 @@
 use std::io;
-use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event};
 
+use crate::app::backend::{spawn_backend, BackendHandle};
 use crate::app::paths::AppPaths;
 use crate::app::AppContext;
 use crate::core::config::Config;
@@ -15,7 +14,7 @@ use super::cursor::{sync_terminal_affordances, CursorShape};
 use super::keybindings::handle_key_event;
 use super::renderer::Renderer;
 use super::state::{AppState, DirtySections};
-use super::worker::{run_worker, WorkerCmd, WorkerReply};
+use super::worker::WorkerReply;
 use super::{events, format};
 
 const ACTIVE_MS: u64 = 33;
@@ -81,55 +80,7 @@ pub(crate) fn run_app(
     let mut scheduler = RenderScheduler::new();
     let mut last_cursor_shape: Option<CursorShape> = None;
 
-    let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCmd>();
-    let (reply_tx, reply_rx) = mpsc::channel::<WorkerReply>();
-    thread::spawn(move || run_worker(app, cmd_rx, reply_tx));
-
-    {
-        let watcher_cmd_tx = cmd_tx.clone();
-        let watch_root = paths.project_root.clone();
-        thread::spawn(move || {
-            let (watcher_tx, watcher_rx) = mpsc::channel::<notify::Result<notify::Event>>();
-            let mut watcher =
-                match notify::RecommendedWatcher::new(watcher_tx, notify::Config::default()) {
-                    Ok(w) => w,
-                    Err(_) => return,
-                };
-            use notify::Watcher as _;
-            if watcher
-                .watch(&watch_root, notify::RecursiveMode::Recursive)
-                .is_err()
-            {
-                return;
-            }
-            for res in watcher_rx {
-                match res {
-                    Ok(event) => {
-                        for path in event.paths {
-                            if should_rebuild(&path, &watch_root) {
-                                if watcher_cmd_tx.send(WorkerCmd::RebuildFile(path)).is_err() {
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => return,
-                }
-            }
-        });
-    }
-
-    {
-        let proactive_cmd_tx = cmd_tx.clone();
-        let proactive_enabled = config.proactive.enabled;
-        let interval_secs: u64 = config.proactive.interval_secs;
-        if proactive_enabled {
-            thread::spawn(move || loop {
-                thread::sleep(Duration::from_secs(interval_secs));
-                let _ = proactive_cmd_tx.send(WorkerCmd::ProactiveScan);
-            });
-        }
-    }
+    let BackendHandle { cmd_tx, reply_rx } = spawn_backend(app, config, paths);
 
     loop {
         while let Ok(reply) = reply_rx.try_recv() {
@@ -201,14 +152,6 @@ fn handle_worker_reply(state: &mut AppState, reply: WorkerReply) {
     }
 }
 
-fn should_rebuild(path: &std::path::Path, root: &std::path::Path) -> bool {
-    path.extension().map_or(false, |e| e == "rs")
-        && path.starts_with(root)
-        && !path
-            .components()
-            .any(|c| c.as_os_str() == "target" || c.as_os_str() == ".git")
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -224,9 +167,9 @@ mod tests {
     use crate::storage::session::{SessionStore, StoredMessage};
     use crate::tools::default_registry;
 
-    use super::{handle_key_event, handle_worker_reply, WorkerCmd};
+    use super::{handle_key_event, handle_worker_reply};
     use crate::tui::state::{AppState, ApprovalRisk, PendingApprovalState};
-    use crate::tui::worker::WorkerReply;
+    use crate::tui::worker::{WorkerCmd, WorkerReply};
 
     #[test]
     fn session_clear_removes_old_project_sessions_and_leaves_fresh_active_session() {
@@ -498,38 +441,5 @@ mod tests {
             WorkerCmd::Handle(RuntimeRequest::Approve) => {}
             other => panic!("expected Approve, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn should_rebuild_filter() {
-        use std::path::PathBuf;
-        let root = PathBuf::from("/proj");
-
-        // source file inside project — passes
-        assert!(super::should_rebuild(&root.join("src/lib.rs"), &root));
-
-        // nested source file — passes
-        assert!(super::should_rebuild(&root.join("src/tui/app.rs"), &root));
-
-        // inside target/ — excluded
-        assert!(!super::should_rebuild(
-            &root.join("target/debug/build/foo.rs"),
-            &root
-        ));
-
-        // inside .git/ — excluded
-        assert!(!super::should_rebuild(
-            &root.join(".git/hooks/post-commit"),
-            &root
-        ));
-
-        // non-.rs extension — excluded
-        assert!(!super::should_rebuild(&root.join("src/main.toml"), &root));
-
-        // outside project root — excluded
-        assert!(!super::should_rebuild(
-            &PathBuf::from("/other/src/lib.rs"),
-            &root
-        ));
     }
 }

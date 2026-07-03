@@ -1,6 +1,6 @@
 [package]
 name = "thunk"
-version = "0.33.87"
+version = "0.35.94"
 edition = "2021"
 
 [dependencies]
@@ -24,6 +24,13 @@ ureq = { version = "2", features = ["tls"] }
 mpatch = "1.6.4"
 notify = "6"
 similar = "2"
+tauri = { version = "2", optional = true }
+# Pin time below 0.3.48: cookie 0.18.1 (a tauri-runtime dep) calls Parsable::parse
+# with the old 1-arg signature, which time 0.3.48+ changed to 2 args.
+time = { version = ">=0.3, <0.3.48", optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
 
 [features]
 local = ["llama-cpp-2", "llama-cpp-sys-2"]
@@ -35,6 +42,7 @@ tree-sitter-parsing = [
     "tree-sitter-typescript",
 ]
 vector-extensions = ["rusqlite/load_extension"]
+gui = ["dep:tauri", "dep:tauri-build", "dep:time"]
 default = ["local"]
 
 [dev-dependencies]

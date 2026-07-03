@@ -29,10 +29,18 @@ pub struct AppPaths {
     pub home_mcp_config: Option<PathBuf>,
 }
 
-/// Discovers the necessary paths for the application based on the current working directory
+/// Discovers the necessary paths for the application based on the current working directory.
+///
+/// `start_dir_override` lets the caller supply the working directory explicitly instead of
+/// calling `env::current_dir()`. This is required for the GUI build: WebKit changes the
+/// process cwd during library initialization before `main()` returns control, so the override
+/// is captured at the top of `main()` and threaded here to avoid using the post-chdir value.
 impl AppPaths {
-    pub fn discover() -> Result<Self> {
-        let start_dir = env::current_dir()?.canonicalize()?;
+    pub fn discover(start_dir_override: Option<std::path::PathBuf>) -> Result<Self> {
+        let start_dir = match start_dir_override {
+            Some(dir) => dir.canonicalize()?,
+            None => env::current_dir()?.canonicalize()?,
+        };
 
         #[cfg(target_os = "windows")]
         let start_dir = {
@@ -239,6 +247,26 @@ mod tests {
         assert_eq!(paths.root_dir, canonical_root);
         // Git root discovery also walks up to git_root.
         assert_eq!(paths.project_root, canonical_root);
+    }
+
+    #[test]
+    fn discover_with_override_uses_provided_dir_not_env_cwd() {
+        // Confirm that discover(Some(dir)) uses the supplied directory as start_dir,
+        // not env::current_dir(). The two will differ when WebKit chdirs the process
+        // (GUI build), so this override must bypass the env::current_dir() call entirely.
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("config.toml"), "").unwrap();
+        fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let paths = AppPaths::discover(Some(dir.path().to_path_buf())).unwrap();
+
+        let canonical = dir.path().canonicalize().unwrap();
+        assert_eq!(
+            paths.root_dir, canonical,
+            "root_dir should reflect the override, not cwd"
+        );
+        assert_eq!(paths.project_root, canonical);
+        assert_eq!(paths.session_db, canonical.join("data").join("sessions.db"));
     }
 
     #[test]

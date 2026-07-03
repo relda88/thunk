@@ -29,6 +29,27 @@ trace-fresh:
     just fresh
     just trace
 
+frontend-install:
+    cd frontend && npm install
+
+frontend-build:
+    cd frontend && npm run build
+
+gui: frontend-build
+    cargo run --features gui -- --gui
+
+gui-trace: frontend-build
+    THUNK_TRACE_RUNTIME=1 cargo run --features gui -- --gui
+
+gui-release: frontend-build
+    cargo run --release --features gui -- --gui
+
+gui-trace-release: frontend-build
+    THUNK_TRACE_RUNTIME=1 cargo run --release --features gui -- --gui
+
+gui-dev:
+    cargo tauri dev --features gui -- -- --gui
+
 install:
     cargo install --path .
 

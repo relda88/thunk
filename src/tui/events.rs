@@ -7,7 +7,7 @@ use super::state::{
     PendingPlanApprovalState,
 };
 
-pub(super) fn decode_approval_preview(tool_name: &str, payload: &str) -> Vec<String> {
+pub(crate) fn decode_approval_preview(tool_name: &str, payload: &str) -> Vec<String> {
     match tool_name {
         "edit_file" => {
             let parts: Vec<&str> = payload.splitn(5, '\x00').collect();

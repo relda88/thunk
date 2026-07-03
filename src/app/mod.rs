@@ -1,6 +1,8 @@
+pub mod backend;
 pub mod cli;
 pub mod config;
 pub mod context;
+pub(crate) mod dto;
 pub mod error;
 pub mod paths;
 pub mod session;
@@ -14,8 +16,8 @@ use crate::tui;
 
 // Bootstraps the application: prepares paths and config, builds the backend and tools, restores session state,
 // attaches logging, and starts the TUI.
-pub fn run(cli: cli::Cli) -> Result<()> {
-    let paths = paths::AppPaths::discover()?;
+pub fn run(cli: cli::Cli, start_dir: Option<std::path::PathBuf>) -> Result<()> {
+    let paths = paths::AppPaths::discover(start_dir)?;
     paths.ensure_runtime_dirs()?;
     load_dotenv(&paths.project_root);
 
@@ -45,6 +47,16 @@ pub fn run(cli: cli::Cli) -> Result<()> {
         thunk_md,
         paths.thunk_dir.clone(),
     )?;
+
+    #[cfg(feature = "gui")]
+    if cli.gui {
+        return crate::gui::run(&config, &paths, app);
+    }
+    #[cfg(not(feature = "gui"))]
+    if cli.gui {
+        eprintln!("GUI support not compiled in. Rebuild with --features gui.");
+        std::process::exit(1);
+    }
 
     tui::run(&config, &paths, app)
 }

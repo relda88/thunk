@@ -10,6 +10,24 @@ An entry graduates to `rules/invariants.md` (## Evolved Invariants) when: valida
 
 ---
 
+**2026-06-30 | Phase 49 | gui/dto**
+**Observation**: The GUI is a pure projection of the same worker channel the TUI uses — not a parallel implementation. `RuntimeEventDto::try_from` returns `Err(())` for advisory variants (`BackendTiming`, `BackendTokenCounts`, `RuntimeTrace`, `PromptAssembled`) so they never reach the webview, and `worker_reply_to_dto` is the single `WorkerReply`→event map. Adding a `RuntimeEvent` variant without a DTO arm is a compile error (good), but a wrong classification silently leaks or drops UI events.
+**Evidence**: `src/app/dto.rs` (`RuntimeEventDto`, `worker_reply_to_dto`); commit 29a7abe; mirrors `src/tui/events.rs`.
+**Action/Rule**: When adding a `RuntimeEvent`/`WorkerReply` variant, update BOTH frontend projections (`tui/events.rs` and `app/dto.rs`) and decide advisory-vs-surfaced explicitly. Keep all business logic upstream of the DTO; the DTO carries no policy.
+**Impact**: Med
+
+**2026-07-02 | Phase 49 | gui/dto**
+**Observation**: Twice within slice 49.9, a distinct backend outcome was folded into a generic carrier instead of getting its own variant — `WorkerReply::ResetOk` originally mapped to `RuntimeEventDto::SystemMessage{text: "Session cleared."}`, and `/help` was dispatched through `run_command`'s `Err(String)` channel as a formatted text blob. Both were fixed by adding a dedicated discriminator instead.
+**Evidence**: commit 1ff210c; `src/app/dto.rs:232` (`ResetOk` variant + test `reset_ok_maps_to_reset_ok_dto_and_serializes`); `src/gui/commands.rs:23` (`get_help_commands`), comment at line 137 noting the frontend now intercepts `/help` directly.
+**Action/Rule**: When a backend outcome needs frontend-specific rendering (a toast, a structured list, a distinct UI state), give it its own DTO variant or command — never route it through `SystemMessage{text}` or a stringly-typed `Err()` as an implicit discriminator. Both occurrences so far are within the same slice (49.9) — this has not yet cleared the 2-phase graduation bar; revisit if a third instance appears in a later phase.
+**Impact**: High
+
+**2026-06-30 | Phase 49 | app/backend**
+**Observation**: Both frontends share one bootstrap: `spawn_backend` returns a `BackendHandle { cmd_tx, reply_rx }` wiring the worker + fs-watcher + proactive-scan threads, and `src/gui/commands.rs::run_command` delegates straight to `crate::tui::commands::{parse, resolve_command, resolve_custom_command}`. Slash-command semantics and backend threading are single-sourced, not duplicated in `gui/`.
+**Evidence**: `src/app/backend.rs` `spawn_backend`; `src/gui/commands.rs`; commits 0d32298, 09677c5.
+**Action/Rule**: A new frontend must consume `spawn_backend` + `tui::commands`, never re-implement command parsing or thread wiring. If either needs frontend-specific behavior, push the split into the shared layer, not into `gui/`.
+**Impact**: Med
+
 **2026-06-29 | Phase 47 | shell-tier**
 **Observation**: The runtime spawns shell commands directly (no interpreter), so any shell metacharacter (`|` `>` `<` `;` `$` `` ` `` `&` newline) cannot execute and MUST route to Tier-3 (`bash -c`, exec-gated). `classify_shell_tier` checks metachars BEFORE program lookup — `ls | grep` is Exec, not ReadOnly, despite `ls` being a Tier-1 program.
 **Evidence**: `src/runtime/investigation/shell_tier.rs` `has_shell_metachar` (checked before `base_tier`); commit 893a018.

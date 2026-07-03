@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "dev.thunk.app",
+  "build": {
+    "frontendDist": "./frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "thunk",
+        "width": 1200,
+        "height": 800,
+        "backgroundColor": "#1a1a1a"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "icon": []
+  }
+}

@@ -1,6 +1,8 @@
 pub mod app;
 pub mod core;
 pub(crate) mod dirs;
+#[cfg(feature = "gui")]
+pub(crate) mod gui;
 pub(crate) mod llm;
 pub(crate) mod logging;
 pub(crate) mod runtime;

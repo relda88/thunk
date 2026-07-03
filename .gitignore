@@ -29,6 +29,10 @@ sandbox/
 !.claude/rules/
 !.claude/rules/**
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 # OS
 .DS_Store
 *.swp
