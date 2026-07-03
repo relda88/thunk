@@ -53,6 +53,7 @@ pub(crate) fn run(config: &Config, paths: &AppPaths, app: AppContext) -> Result<
             commands::memory_reject,
             commands::app_info,
             commands::run_command,
+            commands::get_help_commands,
         ])
         .run(tauri::generate_context!())
         .map_err(|e| AppError::Tui(e.to_string()))

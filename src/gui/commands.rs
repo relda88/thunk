@@ -13,6 +13,23 @@ pub(crate) struct AppInfo {
     pub app_name: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HelpCommandDto {
+    pub name: String,
+    pub description: String,
+}
+
+#[tauri::command]
+pub(crate) fn get_help_commands() -> Vec<HelpCommandDto> {
+    commands::launcher_commands()
+        .iter()
+        .map(|c| HelpCommandDto {
+            name: c.name.to_string(),
+            description: c.description.to_string(),
+        })
+        .collect()
+}
+
 #[tauri::command]
 pub(crate) fn submit(
     text: String,
@@ -117,7 +134,26 @@ pub(crate) fn run_command(
             let tx = state.lock().map_err(|e| e.to_string())?;
             tx.send(WorkerCmd::ClearSessions).map_err(|e| e.to_string())
         }
-        CommandAction::ShowHelp => Err(commands::help_text().to_string()),
+        // The frontend intercepts "/help" and calls `get_help_commands` directly,
+        // so this arm is unreachable from the GUI in practice.
+        CommandAction::ShowHelp => Ok(()),
         CommandAction::Quit => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_help_commands_mirrors_launcher_commands() {
+        let launcher = commands::launcher_commands();
+        let dtos = get_help_commands();
+
+        assert_eq!(dtos.len(), launcher.len());
+        for (dto, entry) in dtos.iter().zip(launcher.iter()) {
+            assert_eq!(dto.name, entry.name);
+            assert_eq!(dto.description, entry.description);
+        }
     }
 }

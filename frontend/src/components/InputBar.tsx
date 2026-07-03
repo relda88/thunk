@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { submitMessage, runCommand } from '../lib/ipc'
+import { submitMessage, runCommand, getHelpCommands } from '../lib/ipc'
+import type { HelpCommandDto } from '../lib/types'
 
 type Props = {
   onUserMessage: (text: string) => void
   onSystemMessage: (text: string) => void
+  onHelp: (commands: HelpCommandDto[]) => void
 }
 
-export default function InputBar({ onUserMessage, onSystemMessage }: Props) {
+export default function InputBar({ onUserMessage, onSystemMessage, onHelp }: Props) {
   const [value, setValue] = useState('')
+  const [commandInFlight, setCommandInFlight] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -26,14 +29,24 @@ export default function InputBar({ onUserMessage, onSystemMessage }: Props) {
   async function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      if (commandInFlight) return
       const text = value.trim()
       setValue('')
       if (!text) return
       if (text.startsWith('/')) {
+        const commandName = text.split(/\s+/)[0]
+        setCommandInFlight(true)
         try {
-          await runCommand(text)
+          if (commandName === '/help') {
+            const commands = await getHelpCommands()
+            onHelp(commands)
+          } else {
+            await runCommand(text)
+          }
         } catch (err) {
           onSystemMessage(String(err))
+        } finally {
+          setCommandInFlight(false)
         }
       } else {
         onUserMessage(text)
@@ -56,9 +69,10 @@ export default function InputBar({ onUserMessage, onSystemMessage }: Props) {
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
+        disabled={commandInFlight}
         rows={2}
         placeholder="Ask thunk anything... (Enter to send, Shift+Enter for newline)"
-        className="w-full rounded px-3 py-2 text-sm outline-none resize-none font-mono"
+        className="w-full rounded px-3 py-2 text-sm outline-none resize-none font-mono disabled:opacity-50"
         style={{
           background: '#2a2a2a',
           color: '#d4d4d4',

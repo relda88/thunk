@@ -22,7 +22,13 @@ export default function StatusBar({ activity, contextPct, appInfo }: Props) {
       className="flex items-center gap-4 px-3 py-1 text-xs shrink-0"
       style={{ background: '#111', borderBottom: '1px solid #333', color: '#888' }}
     >
-      <span className="text-[10px]" style={{ color: '#666' }}>
+      <span className="flex items-center gap-1.5 text-[10px]" style={{ color: '#666' }}>
+        {activity.type !== 'idle' && (
+          <span
+            className="inline-block w-1.5 h-1.5 rounded-full animate-pulse"
+            style={{ background: '#569cd6' }}
+          />
+        )}
         {label}
       </span>
       <span>{projectText}</span>

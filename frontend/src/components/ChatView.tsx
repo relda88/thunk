@@ -6,6 +6,7 @@ import SystemMessage from './SystemMessage'
 import ErrorBubble from './ErrorBubble'
 import FileReadItem from './FileReadItem'
 import ToolActivityItem from './ToolActivityItem'
+import HelpMessage from './HelpMessage'
 
 function renderItem(item: ThreadItem) {
   switch (item.kind) {
@@ -21,6 +22,8 @@ function renderItem(item: ThreadItem) {
       return <FileReadItem key={item.id} path={item.path} lineCount={item.lineCount} content={item.content} />
     case 'tool_activity':
       return <ToolActivityItem key={item.id} name={item.name} status={item.status} summary={item.summary} />
+    case 'help':
+      return <HelpMessage key={item.id} commands={item.commands} />
   }
 }
 

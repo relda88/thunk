@@ -28,6 +28,11 @@ export type AppInfoDto = {
   app_name: string
 }
 
+export type HelpCommandDto = {
+  name: string
+  description: string
+}
+
 export type RuntimeEventDto =
   | { type: 'assistant_message_started' }
   | { type: 'assistant_message_chunk'; chunk: string }
@@ -48,6 +53,7 @@ export type RuntimeEventDto =
   | { type: 'plan_approval_cleared' }
   | { type: 'memory_proposal_required'; fact: string; category: string; scope: string | null; source: string; delete: boolean }
   | { type: 'memory_proposal_cleared' }
+  | { type: 'reset_ok' }
 
 export type DialogState =
   | { kind: 'mutation'; pending: PendingActionDto; evidence: string[]; impact: string[] }
@@ -62,3 +68,4 @@ export type ThreadItem =
   | { kind: 'error'; text: string; id: number }
   | { kind: 'file_read'; path: string; lineCount: number; content: string; id: number }
   | { kind: 'tool_activity'; name: string; status: 'running' | 'done' | 'failed'; summary: string | null; id: number }
+  | { kind: 'help'; commands: HelpCommandDto[]; id: number }

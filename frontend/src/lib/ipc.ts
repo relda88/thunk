@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { AppInfoDto, RuntimeEventDto } from './types'
+import type { AppInfoDto, HelpCommandDto, RuntimeEventDto } from './types'
 
 export function submitMessage(text: string): Promise<void> {
   return invoke('submit', { text })
@@ -36,6 +36,10 @@ export function memoryReject(): Promise<void> {
 
 export function appInfo(): Promise<AppInfoDto> {
   return invoke('app_info')
+}
+
+export function getHelpCommands(): Promise<HelpCommandDto[]> {
+  return invoke('get_help_commands')
 }
 
 export function onRuntimeEvent(

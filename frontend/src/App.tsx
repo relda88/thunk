@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { appInfo, onRuntimeEvent } from './lib/ipc'
-import type { ActivityDto, AppInfoDto, DialogState, RuntimeEventDto, ThreadItem } from './lib/types'
-import { activityLabel, summarizeInfoMessage } from './lib/helpers'
+import type { ActivityDto, AppInfoDto, DialogState, HelpCommandDto, RuntimeEventDto, ThreadItem } from './lib/types'
+import { summarizeInfoMessage } from './lib/helpers'
 import ChatView from './components/ChatView'
 import StatusBar from './components/StatusBar'
 import InputBar from './components/InputBar'
@@ -27,6 +27,11 @@ export default function App() {
   function addSystemMessage(text: string) {
     const id = nextId()
     setThread(prev => [...prev, { kind: 'system', text, id }])
+  }
+
+  function addHelpMessage(commands: HelpCommandDto[]) {
+    const id = nextId()
+    setThread(prev => [...prev, { kind: 'help', commands, id }])
   }
 
   useEffect(() => {
@@ -66,6 +71,12 @@ export default function App() {
         case 'system_message': {
           const id = idRef.current++
           setThread(prev => [...prev, { kind: 'system', text: payload.text, id }])
+          break
+        }
+
+        case 'reset_ok': {
+          const id = idRef.current++
+          setThread([{ kind: 'system', text: 'Session cleared.', id }])
           break
         }
 
@@ -196,10 +207,7 @@ export default function App() {
     <div className="flex flex-col h-screen overflow-hidden font-mono" style={{ background: '#1a1a1a', color: '#d4d4d4' }}>
       <StatusBar activity={activity} contextPct={contextPct} appInfo={info} />
       <ChatView thread={thread} />
-      {activity.type !== 'idle' && (
-        <div className="text-blue-400 text-sm px-4 py-1 text-left">{activityLabel(activity)}</div>
-      )}
-      <InputBar onUserMessage={addUserMessage} onSystemMessage={addSystemMessage} />
+      <InputBar onUserMessage={addUserMessage} onSystemMessage={addSystemMessage} onHelp={addHelpMessage} />
       {dialog && <ApprovalDialog dialog={dialog} onClose={() => setDialog(null)} />}
     </div>
   )

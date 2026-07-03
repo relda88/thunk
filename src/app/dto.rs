@@ -229,6 +229,7 @@ pub enum RuntimeEventDto {
         delete: bool,
     },
     MemoryProposalCleared,
+    ResetOk,
 }
 
 impl TryFrom<RuntimeEvent> for RuntimeEventDto {
@@ -316,7 +317,7 @@ impl TryFrom<RuntimeEvent> for RuntimeEventDto {
 /// Convert a `WorkerReply` to an optional GUI event DTO.
 ///
 /// Returns `None` for replies with no visual representation in the GUI
-/// (e.g. `HandleOk`, `ResetOk`). Returns `Some` for anything the frontend
+/// (e.g. `HandleOk`). Returns `Some` for anything the frontend
 /// should render or react to.
 pub fn worker_reply_to_dto(reply: WorkerReply) -> Option<RuntimeEventDto> {
     match reply {
@@ -326,9 +327,7 @@ pub fn worker_reply_to_dto(reply: WorkerReply) -> Option<RuntimeEventDto> {
         }
         WorkerReply::HandleOk => None,
         WorkerReply::HandleErr(msg) => Some(RuntimeEventDto::Failed { message: msg }),
-        WorkerReply::ResetOk => Some(RuntimeEventDto::SystemMessage {
-            text: "Session cleared.".to_string(),
-        }),
+        WorkerReply::ResetOk => Some(RuntimeEventDto::ResetOk),
         WorkerReply::ResetErr(msg) => Some(RuntimeEventDto::Failed { message: msg }),
         WorkerReply::SessionsOk(sessions) => Some(RuntimeEventDto::SystemMessage {
             text: format_sessions_list(&sessions),
@@ -430,6 +429,21 @@ mod tests {
         let dto = RuntimeEventDto::try_from(ev).unwrap();
         let json = serde_json::to_string(&dto).unwrap();
         assert_eq!(json, r#"{"type":"system_message","text":"hello"}"#);
+    }
+
+    #[test]
+    fn reset_ok_maps_to_reset_ok_dto_and_serializes() {
+        let dto = worker_reply_to_dto(WorkerReply::ResetOk).expect("ResetOk must produce a DTO");
+        let json = serde_json::to_string(&dto).unwrap();
+        assert_eq!(json, r#"{"type":"reset_ok"}"#);
+    }
+
+    #[test]
+    fn reset_err_still_maps_to_failed() {
+        let dto = worker_reply_to_dto(WorkerReply::ResetErr("boom".into()))
+            .expect("ResetErr must produce a DTO");
+        let json = serde_json::to_string(&dto).unwrap();
+        assert_eq!(json, r#"{"type":"failed","message":"boom"}"#);
     }
 
     #[test]
