@@ -26,62 +26,65 @@ export default function InputBar({ onUserMessage, onSystemMessage, onHelp }: Pro
     el.style.height = Math.min(el.scrollHeight, 144) + 'px'
   }
 
-  async function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      if (commandInFlight) return
-      const text = value.trim()
-      setValue('')
-      if (!text) return
-      if (text.startsWith('/')) {
-        const commandName = text.split(/\s+/)[0]
-        setCommandInFlight(true)
-        try {
-          if (commandName === '/help') {
-            const commands = await getHelpCommands()
-            onHelp(commands)
-          } else {
-            await runCommand(text)
-          }
-        } catch (err) {
-          onSystemMessage(String(err))
-        } finally {
-          setCommandInFlight(false)
+  async function submit() {
+    if (commandInFlight) return
+    const text = value.trim()
+    setValue('')
+    if (!text) return
+    if (text.startsWith('/')) {
+      const commandName = text.split(/\s+/)[0]
+      setCommandInFlight(true)
+      try {
+        if (commandName === '/help') {
+          const commands = await getHelpCommands()
+          onHelp(commands)
+        } else {
+          await runCommand(text)
         }
-      } else {
-        onUserMessage(text)
-        try {
-          await submitMessage(text)
-        } catch (err) {
-          onSystemMessage('Failed to send: ' + String(err))
-        }
+      } catch (err) {
+        onSystemMessage(String(err))
+      } finally {
+        setCommandInFlight(false)
+      }
+    } else {
+      onUserMessage(text)
+      try {
+        await submitMessage(text)
+      } catch (err) {
+        onSystemMessage('Failed to send: ' + String(err))
       }
     }
   }
 
+  async function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      await submit()
+    }
+  }
+
   return (
-    <div
-      className="shrink-0 p-2"
-      style={{ borderTop: '1px solid #333' }}
-    >
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        disabled={commandInFlight}
-        rows={2}
-        placeholder="Ask thunk anything... (Enter to send, Shift+Enter for newline)"
-        className="w-full rounded px-3 py-2 text-sm outline-none resize-none font-mono disabled:opacity-50"
-        style={{
-          background: '#2a2a2a',
-          color: '#d4d4d4',
-          border: '1px solid #444',
-          maxHeight: '144px',
-        }}
-        onFocus={e => { e.target.style.borderColor = '#569cd6' }}
-        onBlur={e => { e.target.style.borderColor = '#444' }}
-      />
+    <div className="shrink-0 p-2 border-t border-border">
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          disabled={commandInFlight}
+          rows={2}
+          placeholder="Ask thunk anything... (Enter to send, Shift+Enter for newline)"
+          className="w-full rounded px-3 py-2 text-sm outline-none resize-none font-mono disabled:opacity-50 disabled:cursor-not-allowed bg-input-bg text-text-primary border border-border-strong focus:border-accent-blue max-h-36"
+        />
+        <button
+          type="button"
+          onClick={submit}
+          disabled={commandInFlight}
+          className="shrink-0 rounded px-3 py-2 text-sm font-mono cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-surface-raised text-accent-blue border border-border-strong hover:border-accent-blue"
+        >
+          Send
+        </button>
+      </div>
     </div>
   )
 }

@@ -10,8 +10,7 @@ type Props = {
 function ApproveBtn({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
-      className="rounded px-4 py-1 text-sm cursor-pointer font-mono"
-      style={{ background: '#2a4a2a', color: '#4ec94e', border: '1px solid #4ec94e' }}
+      className="rounded px-4 py-1 text-sm cursor-pointer font-mono bg-approve-bg text-accent-green border border-accent-green"
       onClick={onClick}
     >
       {label}
@@ -22,8 +21,7 @@ function ApproveBtn({ label, onClick }: { label: string; onClick: () => void }) 
 function RejectBtn({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
-      className="rounded px-4 py-1 text-sm cursor-pointer font-mono"
-      style={{ background: '#4a2a2a', color: '#f44444', border: '1px solid #f44444' }}
+      className="rounded px-4 py-1 text-sm cursor-pointer font-mono bg-reject-bg text-accent-red border border-accent-red"
       onClick={onClick}
     >
       {label}
@@ -35,8 +33,8 @@ function ImpactRow({ impact }: { impact: string[] }) {
   if (!impact.length) return null
   return (
     <div className="text-sm mb-2">
-      <span style={{ color: '#888' }}>affects: </span>
-      <span style={{ color: '#888' }}>{impact.join(', ')}</span>
+      <span className="text-text-muted">affects: </span>
+      <span className="text-text-muted">{impact.join(', ')}</span>
     </div>
   )
 }
@@ -45,8 +43,8 @@ function EvidenceRow({ evidence }: { evidence: string[] }) {
   if (!evidence.length) return null
   return (
     <div className="text-sm mb-2">
-      <span style={{ color: '#888' }}>evidence: </span>
-      <span style={{ color: '#888' }}>{evidence.join(', ')}</span>
+      <span className="text-text-muted">evidence: </span>
+      <span className="text-text-muted">{evidence.join(', ')}</span>
     </div>
   )
 }
@@ -78,14 +76,8 @@ export default function ApprovalDialog({ dialog, onClose }: Props) {
   }
 
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center z-50"
-      style={{ background: 'rgba(0,0,0,0.7)' }}
-    >
-      <div
-        className="rounded-md p-4 w-[90%] max-w-xl max-h-[80vh] overflow-y-auto"
-        style={{ background: '#252525', border: '1px solid #444', color: '#d4d4d4' }}
-      >
+    <div className="fixed inset-0 flex items-center justify-center z-50 bg-black/70">
+      <div className="rounded-md p-4 w-[90%] max-w-xl max-h-[80vh] overflow-y-auto bg-surface-overlay border border-border-strong text-text-primary">
         {dialog.kind === 'mutation' && (
           <>
             <h3 className="text-sm font-bold mb-3">Approve action?</h3>
@@ -107,8 +99,7 @@ export default function ApprovalDialog({ dialog, onClose }: Props) {
             {dialog.actions.map((action, i) => (
               <div
                 key={i}
-                className="mb-3 pb-3"
-                style={{ borderBottom: i < dialog.actions.length - 1 ? '1px solid #333' : undefined }}
+                className={`mb-3 pb-3 ${i < dialog.actions.length - 1 ? 'border-b border-border' : ''}`}
               >
                 <PendingActionCard pending={action} index={i} />
               </div>
@@ -125,13 +116,13 @@ export default function ApprovalDialog({ dialog, onClose }: Props) {
           <>
             <h3 className="text-sm font-bold mb-3">Approve plan?</h3>
             <div className="text-sm mb-3">
-              <span style={{ color: '#888' }}>goal: </span>{dialog.goal}
+              <span className="text-text-muted">goal: </span>{dialog.goal}
             </div>
             <div className="mb-3">
               {dialog.steps.map(([title, detail], i) => (
                 <div key={i} className="mb-2">
                   <div className="text-sm">{i + 1}. {title}</div>
-                  <div className="text-xs ml-4" style={{ color: '#888' }}>{detail}</div>
+                  <div className="text-xs ml-4 text-text-muted">{detail}</div>
                 </div>
               ))}
             </div>
@@ -148,16 +139,16 @@ export default function ApprovalDialog({ dialog, onClose }: Props) {
               {dialog.delete ? 'Forget this fact:' : 'Propose memory:'}
             </h3>
             <div className="text-sm mb-1">
-              <span style={{ color: '#888' }}>fact: </span>{dialog.fact}
+              <span className="text-text-muted">fact: </span>{dialog.fact}
             </div>
             <div className="text-sm mb-1">
-              <span style={{ color: '#888' }}>category: </span>{dialog.category}
+              <span className="text-text-muted">category: </span>{dialog.category}
             </div>
             <div className="text-sm mb-1">
-              <span style={{ color: '#888' }}>scope: </span>{dialog.scope ?? 'global'}
+              <span className="text-text-muted">scope: </span>{dialog.scope ?? 'global'}
             </div>
             <div className="text-sm mb-1">
-              <span style={{ color: '#888' }}>source: </span>{dialog.source}
+              <span className="text-text-muted">source: </span>{dialog.source}
             </div>
             <div className="flex gap-2 mt-3">
               <ApproveBtn label="Approve" onClick={doMemoryApprove} />

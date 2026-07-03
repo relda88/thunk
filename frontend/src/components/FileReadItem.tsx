@@ -4,10 +4,8 @@ export default function FileReadItem({ path, lineCount, content }: { path: strin
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div
-      className="self-start rounded px-3 py-1 text-xs max-w-[90%]"
-      style={{ background: '#1e1e1e', borderLeft: '2px solid #555', color: '#888' }}
-    >
+    <div className="self-start rounded px-3 py-1 text-xs max-w-[90%] bg-surface border-l-2 border-border-accent text-text-muted">
+      <div className="text-[10px] text-text-faint uppercase tracking-wide mb-1">FILE</div>
       <div
         className="cursor-pointer flex items-center gap-1"
         onClick={() => setExpanded(e => !e)}

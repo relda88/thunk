@@ -204,7 +204,7 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden font-mono" style={{ background: '#1a1a1a', color: '#d4d4d4' }}>
+    <div className="flex flex-col h-screen overflow-hidden font-mono bg-bg text-text-primary">
       <StatusBar activity={activity} contextPct={contextPct} appInfo={info} />
       <ChatView thread={thread} />
       <InputBar onUserMessage={addUserMessage} onSystemMessage={addSystemMessage} onHelp={addHelpMessage} />
