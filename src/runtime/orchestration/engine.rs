@@ -2463,9 +2463,22 @@ impl TurnContext {
         let retrieval_intent = original_user_prompt
             .map(classify_retrieval_intent)
             .unwrap_or(RetrievalIntent::None);
+        // Agent runs seed a runtime-owned ReadFile for explicit file-path targets
+        // (handle_agent_run), but the augmented agent prompt cannot be classified as
+        // a DirectRead — its "Read X first" anchor is mid-prompt. Register the seeded
+        // path here so the read is classified as Direct evidence downstream instead
+        // of being rejected as a non-candidate.
+        let seeded_read_path: Option<String> = runtime
+            .pending_runtime_call
+            .as_ref()
+            .filter(|call| call.seeded_pre_generation)
+            .and_then(|call| match &call.input {
+                ToolInput::ReadFile { path } => Some(path.clone()),
+                _ => None,
+            });
         let requested_read_path: Option<String> = match &retrieval_intent {
             RetrievalIntent::DirectRead { path, .. } => Some(path.clone()),
-            _ => None,
+            _ => seeded_read_path,
         };
         let direct_read_mode = match &retrieval_intent {
             RetrievalIntent::DirectRead { mode, .. } => Some(*mode),

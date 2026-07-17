@@ -284,6 +284,9 @@ pub struct LspDefinitionOutput {
     pub source_path: String,
     pub target_path: String,
     pub target_line: u32,
+    /// Set when the LSP query itself failed. Distinguishes "the server errored"
+    /// from a successful query that found no definition (empty `target_path`).
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone)]

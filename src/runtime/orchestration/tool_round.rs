@@ -443,8 +443,12 @@ pub(crate) fn run_tool_round(
             continue;
         }
 
+        // Once the requested read has completed, further reads are allowed to diverge:
+        // agent-seeded direct-read turns keep investigating after the seeded target
+        // is in context. Classic direct-read turns finish or enter the answer phase
+        // after the requested read, so they never reach this guard post-completion.
         if let (Some(requested), ToolInput::ReadFile { path }) = (requested_read_path, &input) {
-            if !path_matches_requested(path, requested) {
+            if !*requested_read_completed && !path_matches_requested(path, requested) {
                 let error = format!(
                     "read_file path `{path}` does not match the requested path `{requested}`"
                 );
@@ -829,12 +833,17 @@ pub(crate) fn run_tool_round(
                         source_path: path.clone(),
                         target_path,
                         target_line,
+                        error: None,
                     })
                 }
-                Err(_) => ToolOutput::LspDefinition(LspDefinitionOutput {
+                // LSP is never load-bearing: a failed query still produces an
+                // LspDefinition output, but carries the error so it renders as
+                // "LSP failed", not as "no definition found".
+                Err(e) => ToolOutput::LspDefinition(LspDefinitionOutput {
                     source_path: path.clone(),
                     target_path: String::new(),
                     target_line: 0,
+                    error: Some(e.to_string()),
                 }),
             };
             if let ToolOutput::LspDefinition(ref d) = output {
@@ -1086,7 +1095,13 @@ pub(crate) fn run_tool_round(
                             &[("kind", "last_read_file".into()), ("path", path)],
                         );
                     }
-                    let classification = if requested_read_path.is_some() {
+                    // Only the read of the requested path itself is Direct evidence.
+                    // Post-completion divergent reads (agent turns investigating past
+                    // the seeded target) are ordinary candidate reads.
+                    let classification = if requested_read_path
+                        .zip(read_path.as_deref())
+                        .is_some_and(|(requested, rp)| path_matches_requested(rp, requested))
+                    {
                         ReadClassification::Direct
                     } else {
                         ReadClassification::Candidate

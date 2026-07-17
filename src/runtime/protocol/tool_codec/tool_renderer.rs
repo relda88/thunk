@@ -131,7 +131,9 @@ pub fn render_compact_summary(output: &ToolOutput) -> String {
             }
         }
         ToolOutput::LspDefinition(d) => {
-            if d.target_path.is_empty() {
+            if let Some(err) = &d.error {
+                format!("lsp_definition: LSP failed: {err}")
+            } else if d.target_path.is_empty() {
                 format!("lsp_definition: no definition found for {}", d.source_path)
             } else {
                 format!("lsp_definition: {} line {}", d.target_path, d.target_line)
@@ -570,7 +572,9 @@ fn render_git_commit(o: &crate::tools::types::GitCommitOutput) -> String {
 }
 
 fn render_lsp_definition(d: &LspDefinitionOutput) -> String {
-    if d.target_path.is_empty() {
+    if let Some(err) = &d.error {
+        format!("LSP failed: {err}")
+    } else if d.target_path.is_empty() {
         "no definition found".to_string()
     } else {
         format!("definition found: {} line {}", d.target_path, d.target_line)
@@ -1547,6 +1551,7 @@ mod tests {
             source_path: "src/main.rs".into(),
             target_path: "src/lib.rs".into(),
             target_line: 42,
+            error: None,
         });
         let result = format_tool_result("lsp_definition", &output);
         assert!(result.starts_with("=== tool_result: lsp_definition ==="));
@@ -1562,9 +1567,33 @@ mod tests {
             source_path: "src/main.rs".into(),
             target_path: String::new(),
             target_line: 0,
+            error: None,
         });
         let body = render_output(&output);
         assert_eq!(body, "no definition found");
+    }
+
+    #[test]
+    fn render_lsp_definition_output_query_failure_is_distinct_from_not_found() {
+        use crate::tools::types::LspDefinitionOutput;
+        let output = ToolOutput::LspDefinition(LspDefinitionOutput {
+            source_path: "src/main.rs".into(),
+            target_path: String::new(),
+            target_line: 0,
+            error: Some("rust-analyzer did not respond".into()),
+        });
+        let body = render_output(&output);
+        assert_eq!(body, "LSP failed: rust-analyzer did not respond");
+        assert!(
+            !body.contains("no definition found"),
+            "a query failure must never render as a not-found result"
+        );
+
+        let summary = render_compact_summary(&output);
+        assert_eq!(
+            summary,
+            "lsp_definition: LSP failed: rust-analyzer did not respond"
+        );
     }
 
     #[test]
@@ -1574,6 +1603,7 @@ mod tests {
             source_path: "src/main.rs".into(),
             target_path: "src/lib.rs".into(),
             target_line: 10,
+            error: None,
         });
         let result = format_tool_result("lsp_definition", &output);
         assert!(

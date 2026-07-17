@@ -125,7 +125,11 @@ fn handle_worker_reply(state: &mut AppState, reply: WorkerReply) {
             events::apply_runtime_event(state, RuntimeEvent::Failed { message: msg });
             state.is_busy = false;
         }
-        WorkerReply::ResetOk => state.is_busy = false,
+        WorkerReply::ResetOk => {
+            state.is_busy = false;
+            // A reset starts a fresh session; the old prompt-size indicator is stale.
+            state.context_pct = None;
+        }
         WorkerReply::ResetErr(e) => {
             state.add_system_message(format!("session reset failed: {e}"));
             state.is_busy = false;
@@ -143,6 +147,8 @@ fn handle_worker_reply(state: &mut AppState, reply: WorkerReply) {
             state.set_status("ready");
             state.add_system_message("current project sessions cleared; started fresh session");
             state.is_busy = false;
+            // Same as ResetOk: a fresh session invalidates the prompt-size indicator.
+            state.context_pct = None;
         }
         WorkerReply::ClearErr(e) => {
             state.set_status("error");
@@ -441,5 +447,37 @@ mod tests {
             WorkerCmd::Handle(RuntimeRequest::Approve) => {}
             other => panic!("expected Approve, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reset_ok_clears_stale_context_pct() {
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        state.set_context_pct(72);
+        state.is_busy = true;
+
+        handle_worker_reply(&mut state, WorkerReply::ResetOk);
+
+        assert!(!state.is_busy);
+        assert_eq!(
+            state.context_pct, None,
+            "reset starts a fresh session; the old prompt-size indicator must clear"
+        );
+    }
+
+    #[test]
+    fn clear_ok_clears_stale_context_pct() {
+        let harness = TestHarness::new();
+        let mut state = AppState::new(&harness.config, &harness.paths);
+        state.set_context_pct(72);
+        state.is_busy = true;
+
+        handle_worker_reply(&mut state, WorkerReply::ClearOk);
+
+        assert!(!state.is_busy);
+        assert_eq!(
+            state.context_pct, None,
+            "session clear starts a fresh session; the old prompt-size indicator must clear"
+        );
     }
 }

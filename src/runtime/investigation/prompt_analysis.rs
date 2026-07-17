@@ -657,14 +657,49 @@ fn path_from_what_is_in_query(text: &str) -> Option<String> {
 
 /// Heuristic check for whether a token resembles a file path.
 ///
-/// Allows common patterns (directories, extensions, README) without resolving
-/// or validating against the filesystem.
+/// Accepts separator-containing tokens ("src/tools/mod.rs", "src\\tui"),
+/// extension-suffixed tokens ("Cargo.toml"), dotfiles (".gitignore"), and the
+/// README special case — without resolving or validating against the filesystem.
+/// Anything containing whitespace or sentence punctuation (`?`, `!`) is rejected,
+/// so natural-language phrases that mention `/` or `.` are not misclassified.
+///
+/// Residual risk (accepted): whitespace-free NL fragments containing `/`
+/// (e.g. "either/or") still pass. Whitespace rejection plus extension/segment
+/// shape is sufficient here; full NL detection is out of scope.
 pub(crate) fn looks_like_file_path(path: &str) -> bool {
-    !path.is_empty()
-        && (path.contains('/')
-            || path.contains('\\')
-            || path.contains('.')
-            || path.eq_ignore_ascii_case("README"))
+    if path.is_empty()
+        || path.chars().any(char::is_whitespace)
+        || path.contains('?')
+        || path.contains('!')
+    {
+        return false;
+    }
+    if path.eq_ignore_ascii_case("README") {
+        return true;
+    }
+    if path.contains('/') || path.contains('\\') {
+        return true;
+    }
+    has_extension_like_suffix(path)
+}
+
+/// True for `<stem>.<ext>` where the stem is word-like and the extension is
+/// 1–6 alphanumerics ("Cargo.toml", "v1.2"), and for word-like dotfiles
+/// (".gitignore", ".env.local").
+fn has_extension_like_suffix(path: &str) -> bool {
+    fn is_path_word_char(c: char) -> bool {
+        c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')
+    }
+    if let Some(rest) = path.strip_prefix('.') {
+        return !rest.is_empty() && rest.chars().all(is_path_word_char);
+    }
+    let Some((stem, ext)) = path.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && stem.chars().all(is_path_word_char)
+        && (1..=6).contains(&ext.len())
+        && ext.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// Runtime-owned first-tool decision for RetrievalFirst turns.
@@ -979,6 +1014,45 @@ mod tests {
         assert!(user_requested_mutation(
             "Edit src/main.rs and change hello to hi"
         ));
+    }
+
+    #[test]
+    fn looks_like_file_path_accepts_real_paths() {
+        assert!(looks_like_file_path("src/tools/mod.rs"));
+        assert!(looks_like_file_path("README"));
+        assert!(looks_like_file_path("readme"));
+        assert!(looks_like_file_path("Cargo.toml"));
+        assert!(looks_like_file_path("task_service.py"));
+        assert!(looks_like_file_path(".gitignore"));
+        assert!(looks_like_file_path("src\\tui\\app.rs"));
+        assert!(looks_like_file_path("sandbox/"));
+        assert!(looks_like_file_path("main.rs"));
+    }
+
+    #[test]
+    fn looks_like_file_path_rejects_natural_language() {
+        // Incident 6 repro: NL agent target containing a trailing-slash token.
+        assert!(!looks_like_file_path(
+            "Explain the purpose of the sandbox/ project"
+        ));
+        assert!(!looks_like_file_path("how does the sandbox/ project work"));
+        assert!(!looks_like_file_path(
+            "what does main.rs do in context of the project"
+        ));
+        assert!(!looks_like_file_path("compare v1.2 and v2.0 behavior"));
+        assert!(!looks_like_file_path("did it work?"));
+        assert!(!looks_like_file_path("ship it!"));
+        assert!(!looks_like_file_path("done."));
+        assert!(!looks_like_file_path("e.g."));
+        assert!(!looks_like_file_path(""));
+    }
+
+    #[test]
+    fn looks_like_file_path_known_residual_nl_fragments() {
+        // Accepted residual risk (documented on the function): whitespace-free
+        // NL fragments with a separator or extension shape still pass.
+        assert!(looks_like_file_path("either/or"));
+        assert!(looks_like_file_path("v1.2"));
     }
 
     #[test]

@@ -292,6 +292,76 @@ fn agent_run_with_file_target_seeds_read_file_as_first_tool() {
 }
 
 #[test]
+fn agent_run_with_file_target_counts_seeded_read_as_direct_evidence() {
+    use std::fs;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/foo.rs"), "fn main() {}\n").unwrap();
+
+    // A single response: the answer following the seeded read must be admitted
+    // directly. Before the seeded path was registered as the requested read, the
+    // read was classified Candidate, evidence gates rejected it, and a correction
+    // round consumed a second (here missing) backend response.
+    let mut rt = make_runtime_in(vec!["src/foo.rs defines fn main."], tmp.path());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::AgentRun {
+            ability: "investigate".into(),
+            target: Some("src/foo.rs".into()),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "seeded read of an explicitly-named target must count as Direct evidence; \
+         got: {answer_source:?}"
+    );
+    let snapshot = rt.messages_snapshot();
+    assert!(
+        !snapshot
+            .iter()
+            .any(|m| m.content.starts_with("[runtime:correction]")),
+        "no correction round must fire for an explicitly-named file target"
+    );
+}
+
+#[test]
+fn agent_run_with_natural_language_target_does_not_seed_read_file() {
+    // Incident 6 repro: an NL target containing a '/' token used to be
+    // misclassified as a file path and seeded as a read_file call.
+    let tmp = TempDir::new().unwrap();
+    let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::AgentRun {
+            ability: "investigate".into(),
+            target: Some("how does the sandbox/ project work".into()),
+        },
+    );
+
+    let first_tool = events.iter().find_map(|e| {
+        if let RuntimeEvent::ToolCallStarted { name } = e {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    });
+    assert_ne!(
+        first_tool,
+        Some("read_file"),
+        "natural-language target must not seed a read_file call; events: {events:?}"
+    );
+}
+
+#[test]
 fn agent_run_with_directory_target_does_not_seed_read_file() {
     let tmp = TempDir::new().unwrap();
     let mut rt = make_runtime_in(Vec::<String>::new(), tmp.path());
