@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::runtime::ResolvedToolInput;
-use crate::runtime::{classify_shell_tier, ShellTier};
+use crate::runtime::{check_shell_command_scope, classify_shell_tier, ShellTier};
 
 use crate::tools::pending::{PendingAction, RiskLevel};
 use crate::tools::types::{
@@ -38,7 +38,7 @@ impl Tool for ShellTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell",
-            description: "Run a shell command. Commands are tiered by safety: read-only commands (ls, find, cat, grep, etc.) should use [shell_read: ...] instead. Filesystem mutations (mkdir, rmdir, cp, mv) require approval and are reversible. Arbitrary execution (bash, rm, unknown programs) requires approval, is irreversible, and requires /exec on. For pipes, globs, or redirects use bash -c via /exec on.",
+            description: "Run a shell command. Commands are tiered by safety: read-only commands (ls, find, cat, grep, etc.) should use [shell_read: ...] instead. Filesystem mutations (mkdir, rmdir, cp, mv) require approval and are reversible. Arbitrary execution (bash, rm, unknown programs) requires approval, is irreversible, and requires /exec on. For pipes, globs, or redirects use bash -c via /exec on. Arguments are confined to the project root: a command whose argument points at an existing path outside the root is rejected — use mcp::filesystem tools for those instead.",
             input_hint: "[shell: mkdir build]",
             execution_kind: ExecutionKind::RequiresApproval,
             default_risk: Some(RiskLevel::High),
@@ -79,6 +79,11 @@ impl Tool for ShellTool {
     }
 
     fn execute_approved(&self, payload: &str) -> Result<ToolOutput, ToolError> {
+        // Approval-time revalidation: resolve() checked scope when the approval was
+        // requested, but the filesystem can change before the user answers — a token
+        // that named nothing then could be a symlink out of the root by now.
+        check_shell_command_scope(&self.project_root, payload)?;
+
         let mut parts = payload.split_whitespace();
         let Some(program) = parts.next() else {
             return Err(ToolError::InvalidInput(
@@ -341,6 +346,46 @@ mod tests {
 
         assert_eq!(output.exit_code, -1);
         assert!(output.timed_out);
+    }
+
+    /// Approval-time revalidation: resolve() cannot cover the window between the
+    /// approval request and the user answering it. A token that named nothing at
+    /// resolve time must still be rejected if it points outside the root by the time
+    /// the approved command actually runs.
+    #[cfg(unix)]
+    #[test]
+    fn execute_approved_rejects_operand_that_escaped_after_approval() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let tool = tool_in(&dir);
+
+        let outside_file = outside.path().join("secret.txt");
+        fs::write(&outside_file, "secret\n").unwrap();
+
+        // Stands in for the filesystem changing between approval and execution.
+        std::os::unix::fs::symlink(&outside_file, dir.path().join("link.txt")).unwrap();
+
+        let err = tool.execute_approved("cp link.txt copied.txt").unwrap_err();
+
+        assert!(
+            matches!(err, ToolError::InvalidInput(ref msg) if msg.contains("escapes project root")),
+            "expected an escapes-root rejection, got: {err:?}"
+        );
+        assert!(
+            !dir.path().join("copied.txt").exists(),
+            "command must not have run"
+        );
+    }
+
+    #[test]
+    fn execute_approved_permits_in_root_operands() {
+        let dir = TempDir::new().unwrap();
+        let tool = tool_in(&dir);
+        fs::write(dir.path().join("source.txt"), "content\n").unwrap();
+
+        tool.execute_approved("cp source.txt dest.txt").unwrap();
+
+        assert!(dir.path().join("dest.txt").exists());
     }
 
     #[cfg(unix)]

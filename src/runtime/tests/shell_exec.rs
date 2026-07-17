@@ -123,6 +123,74 @@ fn post_seed_shell_read_sets_answer_phase() {
     );
 }
 
+/// Slice 50.2: the NL-seeded shell path builds a ToolInput directly from the user's
+/// prompt, with no model and no approval in the loop. It must be confined by the same
+/// resolver check as the model-emitted path — this test exercises the seeded path
+/// specifically rather than assuming the shared resolve() covers it.
+#[test]
+fn nl_seeded_shell_read_is_confined_to_project_root() {
+    let tmp = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let secret = outside.path().join("secret.txt");
+    fs::write(&secret, "out-of-root contents\n").unwrap();
+
+    let mut rt = make_runtime_in(vec!["I cannot read that path."], tmp.path());
+
+    let _events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: format!("run cat {}", secret.display()),
+        },
+    );
+
+    // The resolver rejection reaches the model as a tool_error in the conversation,
+    // not as a RuntimeEvent, so assert against the message snapshot.
+    let snapshot = rt.messages_snapshot();
+    let conversation = snapshot
+        .iter()
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        conversation.contains("=== tool_error: shell_read ===")
+            && conversation.contains("escapes project root"),
+        "seeded out-of-root shell_read must be rejected by the resolver; conversation: {conversation}"
+    );
+    assert!(
+        !conversation.contains("out-of-root contents"),
+        "contents outside the project root must never reach the conversation: {conversation}"
+    );
+}
+
+/// The seeded path must still run normally for in-root operands — the confinement
+/// check must not break the seed itself.
+#[test]
+fn nl_seeded_shell_read_still_runs_for_in_root_operand() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/foo.rs"), "fn main() {}\n").unwrap();
+
+    let mut rt = make_runtime_in(vec!["Here are the files in src."], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "run the shell command: ls src/".to_string(),
+        },
+    );
+
+    let started = tool_call_started_names(&events);
+    assert!(
+        started.iter().any(|n| n == "shell_read"),
+        "in-root seeded shell_read must still dispatch; started tools: {started:?}"
+    );
+    assert!(
+        !format!("{events:?}").contains("escapes project root"),
+        "in-root seeded command must not be rejected; got: {events:?}"
+    );
+}
+
 /// Bug fix E: shell seed must fire even when the command argument is a snake_case
 /// identifier (e.g. "rm test_dir"). Previously, prompt_requires_investigation saw
 /// "test_dir" as a code identifier and set investigation_required=true, which

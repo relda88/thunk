@@ -13,5 +13,6 @@ pub(crate) use project_snapshot::{
     ProjectStructureSnapshotCache, MAX_SNAPSHOT_NODES,
 };
 pub use resolved_input::ResolvedToolInput;
+pub(crate) use resolver::check_shell_command_scope;
 #[allow(unused_imports)]
 pub use resolver::{resolve, PathResolutionError};

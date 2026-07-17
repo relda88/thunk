@@ -19,6 +19,7 @@ mod types;
 pub(crate) use index::{SymbolConfidence, SymbolKind};
 pub(crate) use investigation::shell_tier::{classify_shell_tier, ShellTier};
 pub use orchestration::Runtime;
+pub(crate) use project::check_shell_command_scope;
 pub use project::ProjectRoot;
 pub use project::ResolvedToolInput;
 #[allow(unused_imports)]

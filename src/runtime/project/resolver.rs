@@ -92,12 +92,18 @@ pub fn resolve(
             search: search.clone(),
             replace: replace.clone(),
         }),
-        ToolInput::Shell { command } => Ok(ResolvedToolInput::Shell {
-            command: command.clone(),
-        }),
-        ToolInput::ShellRead { command } => Ok(ResolvedToolInput::ShellRead {
-            command: command.clone(),
-        }),
+        ToolInput::Shell { command } => {
+            check_shell_command_scope(root.path(), command)?;
+            Ok(ResolvedToolInput::Shell {
+                command: command.clone(),
+            })
+        }
+        ToolInput::ShellRead { command } => {
+            check_shell_command_scope(root.path(), command)?;
+            Ok(ResolvedToolInput::ShellRead {
+                command: command.clone(),
+            })
+        }
         ToolInput::GitStatus => Ok(ResolvedToolInput::GitStatus),
         ToolInput::GitDiff => Ok(ResolvedToolInput::GitDiff { path: None }),
         ToolInput::GitLog => Ok(ResolvedToolInput::GitLog),
@@ -131,6 +137,77 @@ pub fn resolve(
             args: args.clone(),
         }),
     }
+}
+
+/// Rejects a shell command whose argument tokens resolve to real paths outside the
+/// project root.
+///
+/// The shell tools spawn their program directly with the project root as cwd, but pass
+/// every token after the program name through verbatim. Without this check a Tier-1
+/// `cat /etc/passwd` reaches further than `read_file` ever can.
+///
+/// Each token except the program name is resolved strictly relative to the project
+/// root, with three outcomes:
+/// - resolves inside the root — permitted
+/// - resolves to nothing — permitted; flags (`-n`), sed scripts (`s/foo/bar/p`), and
+///   search patterns name no file, so there is nothing to disclose
+/// - resolves to a real path outside the root — `EscapesRoot`, rejecting the whole
+///   command before any part of it is spawned
+///
+/// Token 0 is skipped: an absolute program path (`/usr/bin/cat`) is legitimate and is
+/// not an operand. `classify_shell_tier` routes metacharacters to Tier 3 before any
+/// tool sees them, so tokens here are always literal and unexpanded.
+pub(crate) fn check_shell_command_scope(
+    root: &Path,
+    command: &str,
+) -> Result<(), PathResolutionError> {
+    for token in command.split_whitespace().skip(1) {
+        check_shell_token_scope(root, token)?;
+    }
+    Ok(())
+}
+
+/// Resolves one shell argument token against the project root.
+///
+/// Deliberately narrower than `resolve_read_path`: it does not fall back to
+/// `find_unique_file_in_project`. The spawned process interprets its operands relative
+/// to its cwd, so a project-wide filename walk would validate a different file than the
+/// one actually opened — `sed -i s/foo/bar/ file.txt` would be checked against whichever
+/// `file.txt` the walk happened to find. Confinement must check the path that will be
+/// used, not a same-named path elsewhere in the tree.
+fn check_shell_token_scope(root: &Path, raw: &str) -> Result<(), PathResolutionError> {
+    let raw_path = Path::new(raw);
+    let candidate = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        root.join(raw_path)
+    };
+
+    // Canonicalize resolves `..` and symlinks, so both relative escapes and symlink
+    // escapes land on their real target. A token that names nothing on disk cannot
+    // disclose anything, so a canonicalize failure is permitted rather than rejected.
+    let Ok(canonical) = fs::canonicalize(&candidate) else {
+        return Ok(());
+    };
+
+    #[cfg(target_os = "windows")]
+    let canonical = {
+        let s = canonical.to_string_lossy();
+        if s.starts_with("\\\\?\\") {
+            std::path::PathBuf::from(&s[4..])
+        } else {
+            canonical
+        }
+    };
+
+    if relative_display(&canonical, root).is_none() {
+        return Err(PathResolutionError::EscapesRoot {
+            raw: raw.to_string(),
+            root: root.to_path_buf(),
+        });
+    }
+
+    Ok(())
 }
 
 const MAX_FILENAME_SEARCH_NODES: usize = 500;
@@ -715,6 +792,177 @@ mod tests {
             tool_error.to_string(),
             "invalid tool input: path escapes project root: '../secret.txt' is outside /project — for paths outside the project, use [mcp::filesystem::list_directory: /full/path] or other mcp::filesystem tools instead."
         );
+    }
+
+    // ── shell command scope ──────────────────────────────────────────────────
+
+    fn shell_scope(root: &ProjectRoot, command: &str) -> Result<(), PathResolutionError> {
+        check_shell_command_scope(root.path(), command)
+    }
+
+    #[test]
+    fn shell_absolute_operand_outside_root_is_rejected() {
+        let (_dir, root) = make_root();
+        let outside = temp_dir();
+        let secret = outside.path().join("passwd");
+        write_file(&secret, "root:x:0:0\n");
+        let raw = secret.display().to_string();
+
+        let err = shell_scope(&root, &format!("cat {raw}")).unwrap_err();
+
+        assert!(matches!(
+            err,
+            PathResolutionError::EscapesRoot { raw: actual, .. } if actual == raw
+        ));
+    }
+
+    #[test]
+    fn shell_relative_escape_operand_is_rejected() {
+        let (_dir, root) = make_root();
+        let outside_file = root.path().parent().unwrap().join("shell_escape.txt");
+        write_file(&outside_file, "outside\n");
+
+        let err = shell_scope(&root, "cat ../shell_escape.txt").unwrap_err();
+
+        assert!(matches!(err, PathResolutionError::EscapesRoot { .. }));
+        fs::remove_file(outside_file).unwrap();
+    }
+
+    #[test]
+    fn shell_symlink_operand_pointing_outside_root_is_rejected() {
+        let (_dir, root) = make_root();
+        let outside = temp_dir();
+        let outside_file = outside.path().join("outside.txt");
+        write_file(&outside_file, "outside\n");
+        symlink_file(&outside_file, &root.path().join("link.txt"));
+
+        let err = shell_scope(&root, "cat link.txt").unwrap_err();
+
+        assert!(matches!(err, PathResolutionError::EscapesRoot { .. }));
+    }
+
+    /// The main risk of a heavy-handed confinement check: operands that merely look
+    /// path-shaped but name nothing on disk must stay permitted.
+    #[test]
+    fn shell_non_path_operands_are_permitted() {
+        let (_dir, root) = make_root();
+        write_file(&root.path().join("file.txt"), "foo\n");
+
+        // sed script fragment: contains slashes, resolves to nothing.
+        shell_scope(&root, "sed -n s/foo/bar/p file.txt").unwrap();
+        // grep pattern + flags.
+        shell_scope(&root, "grep -rn fn main src/").unwrap();
+        // find primaries and a quoted glob that matches no literal path.
+        shell_scope(&root, "find . -name '*.rs'").unwrap();
+        // wc flags.
+        shell_scope(&root, "wc -l file.txt").unwrap();
+    }
+
+    #[test]
+    fn shell_operand_inside_root_is_permitted() {
+        let (_dir, root) = make_root();
+        write_file(&root.path().join("src/main.rs"), "fn main() {}\n");
+
+        shell_scope(&root, "cat src/main.rs").unwrap();
+        shell_scope(
+            &root,
+            &format!("cat {}", root.path().join("src/main.rs").display()),
+        )
+        .unwrap();
+    }
+
+    /// Token 0 is the program, not an operand — an absolute program path outside the
+    /// root (the normal case for any system binary) must not be rejected.
+    #[test]
+    fn shell_absolute_program_path_is_not_treated_as_operand() {
+        let (_dir, root) = make_root();
+        fs::create_dir_all(root.path().join("src")).unwrap();
+
+        shell_scope(&root, "/bin/ls src").unwrap();
+    }
+
+    #[test]
+    fn shell_commands_with_no_operands_are_permitted() {
+        let (_dir, root) = make_root();
+
+        shell_scope(&root, "pwd").unwrap();
+        shell_scope(&root, "whoami").unwrap();
+    }
+
+    /// Shell argument confinement resolves strictly relative to the root — it must not
+    /// inherit resolve_read_path's project-wide bare-filename walk, which would validate
+    /// a different file than the spawned process actually opens.
+    #[test]
+    fn shell_bare_filename_does_not_trigger_project_wide_walk() {
+        let (_dir, root) = make_root();
+        write_file(&root.path().join("deep/nested/only.txt"), "content\n");
+
+        // `cat only.txt` from the root cwd names root/only.txt, which does not exist.
+        // The walk would have found deep/nested/only.txt and validated that instead.
+        shell_scope(&root, "cat only.txt").unwrap();
+
+        // Contrast: resolve_read_path does perform the walk for the same raw string.
+        let walked = resolve_read_path(&root, "only.txt").unwrap();
+        assert_eq!(walked.display(), "deep/nested/only.txt");
+    }
+
+    #[test]
+    fn resolve_rejects_shell_read_escaping_operand() {
+        let (_dir, root) = make_root();
+        let outside = temp_dir();
+        let secret = outside.path().join("secret.txt");
+        write_file(&secret, "secret\n");
+
+        let err = resolve(
+            &root,
+            &ToolInput::ShellRead {
+                command: format!("cat {}", secret.display()),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PathResolutionError::EscapesRoot { .. }));
+    }
+
+    /// Tier 2/3 must be confined at resolve() time — before an approval prompt is ever
+    /// built, so the user is never asked to approve an out-of-root command.
+    #[test]
+    fn resolve_rejects_shell_escaping_operand_before_approval() {
+        let (_dir, root) = make_root();
+        let outside = temp_dir();
+        let target = outside.path().join("target.txt");
+        write_file(&target, "data\n");
+
+        let err = resolve(
+            &root,
+            &ToolInput::Shell {
+                command: format!("cp {} stolen.txt", target.display()),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PathResolutionError::EscapesRoot { .. }));
+    }
+
+    #[test]
+    fn resolve_permits_in_root_shell_commands() {
+        let (_dir, root) = make_root();
+        fs::create_dir_all(root.path().join("src")).unwrap();
+
+        resolve(
+            &root,
+            &ToolInput::ShellRead {
+                command: "ls src".to_string(),
+            },
+        )
+        .unwrap();
+        resolve(
+            &root,
+            &ToolInput::Shell {
+                command: "mkdir build".to_string(),
+            },
+        )
+        .unwrap();
     }
 
     #[test]

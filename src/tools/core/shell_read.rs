@@ -36,7 +36,7 @@ impl Tool for ShellReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "shell_read",
-            description: "Run a read-only shell command (ls, find, cat, grep, wc, head, tail, sed without -i). No pipes, globs, or redirects — use bash -c via /exec on for those. Commands that are not read-only are rejected.",
+            description: "Run a read-only shell command (ls, find, cat, grep, wc, head, tail, sed without -i). No pipes, globs, or redirects — use bash -c via /exec on for those. Commands that are not read-only are rejected. Arguments are confined to the project root: a command whose argument points at an existing path outside the root is rejected — use mcp::filesystem tools for those instead.",
             input_hint: "[shell_read: ls src/]",
             execution_kind: ExecutionKind::Immediate,
             default_risk: None,
