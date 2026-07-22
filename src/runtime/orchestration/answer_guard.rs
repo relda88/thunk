@@ -7,7 +7,9 @@ use super::super::super::protocol::response_text::*;
 use super::super::super::protocol::tool_codec;
 use super::super::super::trace::trace_runtime_decision;
 use super::super::super::types::{AnswerSource, RuntimeEvent, RuntimeTerminalReason};
-use super::super::engine_guards::{extract_claimed_paths, is_definition_only_usage_answer};
+use super::super::engine_guards::{
+    extract_claimed_paths, is_definition_only_usage_answer, is_evidence_disconnected_response,
+};
 use super::super::telemetry::{
     trace_insufficient_evidence_terminal, GenerationRoundCause, GenerationRoundLabel,
 };
@@ -449,5 +451,61 @@ impl Runtime {
         }
 
         None
+    }
+
+    // Slice 50.5: generic evidence-disconnected-answer catch-all.
+    //
+    // This is called as a final sibling check AFTER check_evidence_and_admission_gates
+    // returns None, not folded into that function's body. The five checks above are all
+    // more specific (unread-path citation, definition-only-vs-usage mismatch, etc.) and
+    // must take precedence — this is only reached once none of them found anything to
+    // object to, so it exists purely to catch a bare refusal or degenerate non-answer that
+    // falls through all of them.
+    //
+    // Gated strictly on state.answer_phase.is_some(): that flag is the runtime's only
+    // signal that evidence was actually gathered this turn (a read, list, or shell_read
+    // completed — see the six answer_phase assignment sites in engine.rs). Without it there
+    // is nothing for the answer to be "disconnected" from — a plain Direct answer to a
+    // question like "How are you?" must never be touched by this check, and answer_phase
+    // being None is exactly what tells us we're in that case.
+    //
+    // The runtime cannot tell a genuine in-scope refusal apart from an evidence-discarding
+    // one by pattern alone — there is no separate grounding/confidence signal available
+    // (the model is a stateless text emitter). So instead of trying to classify the refusal,
+    // the correction message asks the model to say specifically why it's declining. A model
+    // that names a real reason will no longer match the phrase list on retry and passes
+    // through cleanly; only a bare, reason-free refusal repeats and hits the terminal below.
+    pub(super) fn check_evidence_disconnected_answer(
+        &mut self,
+        state: &mut TurnState,
+        response: &str,
+        on_event: &mut dyn FnMut(RuntimeEvent),
+    ) -> Option<TurnSignal> {
+        if state.answer_phase.is_none() {
+            return None;
+        }
+        if !is_evidence_disconnected_response(response) {
+            return None;
+        }
+
+        state.evidence_disconnected_answer_violations += 1;
+        self.conversation.discard_last_if_assistant();
+        if state.evidence_disconnected_answer_violations == 1 {
+            self.conversation
+                .push_user(EVIDENCE_DISCONNECTED_CORRECTION.to_string());
+            state.next_round_label = GenerationRoundLabel::CorrectionRetry;
+            state.next_round_cause = GenerationRoundCause::EvidenceDisconnectedCorrection;
+            return Some(TurnSignal::Continue);
+        }
+
+        self.finish_with_runtime_answer(
+            repeated_evidence_disconnected_answer_final_answer(),
+            AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::EvidenceDisconnectedAnswer,
+                rounds: state.tool_rounds,
+            },
+            on_event,
+        );
+        Some(TurnSignal::Finish)
     }
 }

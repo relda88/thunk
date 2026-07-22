@@ -102,6 +102,7 @@ pub enum RuntimeTerminalReasonDto {
     InsufficientEvidence,
     ExecDisabled,
     McpInProjectRedirect,
+    EvidenceDisconnectedAnswer,
 }
 
 impl From<RuntimeTerminalReason> for RuntimeTerminalReasonDto {
@@ -129,6 +130,7 @@ impl From<RuntimeTerminalReason> for RuntimeTerminalReasonDto {
             RuntimeTerminalReason::InsufficientEvidence => Self::InsufficientEvidence,
             RuntimeTerminalReason::ExecDisabled => Self::ExecDisabled,
             RuntimeTerminalReason::McpInProjectRedirect => Self::McpInProjectRedirect,
+            RuntimeTerminalReason::EvidenceDisconnectedAnswer => Self::EvidenceDisconnectedAnswer,
         }
     }
 }

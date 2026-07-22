@@ -40,6 +40,7 @@ pub(crate) enum GenerationRoundCause {
     ReadRequestToolRequired,
     SearchBeforeAnsweringCorrection,
     ReadBeforeAnsweringCorrection,
+    EvidenceDisconnectedCorrection,
 }
 
 impl GenerationRoundCause {
@@ -58,6 +59,7 @@ impl GenerationRoundCause {
             Self::ReadRequestToolRequired => "read_request_tool_required",
             Self::SearchBeforeAnsweringCorrection => "search_before_answering",
             Self::ReadBeforeAnsweringCorrection => "read_before_answering",
+            Self::EvidenceDisconnectedCorrection => "evidence_disconnected_correction",
         }
     }
 }

@@ -88,6 +88,12 @@ pub enum RuntimeTerminalReason {
     /// An mcp::filesystem mutation tool targeted a path inside the project root.
     /// Redirect the model to use native write_file/edit_file instead.
     McpInProjectRedirect,
+    /// Evidence was successfully retrieved this turn (a read, list, or shell_read
+    /// completed), but the model's response was a bare refusal or degenerate non-answer
+    /// disconnected from that evidence, repeated after one correction attempt. Distinct
+    /// from `InsufficientEvidence`, which means no evidence was ever found — here evidence
+    /// existed and synthesis simply failed to use it.
+    EvidenceDisconnectedAnswer,
 }
 
 /// How much of the diff to show.

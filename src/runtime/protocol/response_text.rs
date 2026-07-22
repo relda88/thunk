@@ -302,6 +302,23 @@ pub(crate) fn non_candidate_read_terminal_answer() -> &'static str {
     "I could not continue because the model attempted to read a file that was not in the search results."
 }
 
+/// Injected once when the model produces a canned refusal or degenerate response after
+/// evidence was already gathered this turn (see check_evidence_disconnected_answer in
+/// answer_guard.rs). This is the first place in the codebase that asks the model to
+/// articulate a specific reason for declining, rather than just detecting that it declined —
+/// the runtime has no signal to distinguish a genuine in-scope refusal from an
+/// evidence-discarding one, so the fix is to make the model say which one it is.
+pub(crate) const EVIDENCE_DISCONNECTED_CORRECTION: &str =
+    "[runtime:correction] You retrieved evidence this turn, but your response does not use \
+     it. Either answer the question using what you found, or if you genuinely cannot \
+     answer, state specifically what information is missing or why the request is out of \
+     scope. Do not repeat a generic refusal with no reason.";
+
+pub(crate) fn repeated_evidence_disconnected_answer_final_answer() -> &'static str {
+    "I could not continue because the model retrieved evidence this turn but repeatedly \
+     produced a refusal or non-answer disconnected from it, with no reason given."
+}
+
 /// Strips any `[thunk: current context]...[/thunk: current context]` block from `text`.
 /// Defense-in-depth: recency injection is suppressed on synthesis surfaces, but if a block
 /// leaks into an admitted answer (e.g. via a non-AnswerOnly surface), this removes it before

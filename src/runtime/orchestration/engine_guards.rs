@@ -79,3 +79,52 @@ pub(crate) fn is_definition_only_usage_answer(text: &str) -> bool {
         || lower.contains(" is declared in ")
         || lower.contains(" are declared in ")
 }
+
+/// Canned, content-free refusal openers. Deliberately short and specific: each entry is a
+/// multi-word phrase shaped like the *opening* of a boilerplate decline, not a fragment that
+/// could plausibly appear mid-sentence in a substantive answer (e.g. a caveat like "although I
+/// cannot assist with deploying this, the code shows..."). A false positive here blocks a
+/// legitimate answer, which is strictly worse than missing some refusal phrasing — see
+/// Phase 50 slice 50.5 risk framing.
+const EVIDENCE_DISCONNECTED_REFUSAL_PHRASES: &[&str] = &[
+    "i cannot assist with that",
+    "i can't assist with that",
+    "i cannot assist with this",
+    "i can't assist with this",
+    "i'm unable to assist with that",
+    "i am unable to assist with that",
+    "i cannot help with that",
+    "i can't help with that",
+    "i don't have the ability to",
+    "i do not have the ability to",
+    "as an ai language model",
+];
+
+/// Below this many trimmed characters, a response is treated as degenerate rather than a
+/// genuine terse answer. Deliberately very low: "Done." (5 chars) is this codebase's own
+/// standard terse confirmation after evidence/mutation and appears throughout the test
+/// suite, so the threshold must sit strictly below it — this only catches truly empty or
+/// near-empty output (e.g. "", "." ), not a short-but-real answer.
+const EVIDENCE_DISCONNECTED_MIN_LEN: usize = 4;
+
+/// True when `response` looks like a content-free non-answer: either a canned refusal opener
+/// with no connection to whatever was retrieved, or output too short to be a real answer.
+///
+/// This is intentionally phrase-based rather than a content-overlap check against the tool
+/// results: the model is a stateless text emitter with no separate grounding/confidence
+/// signal, so there is nothing more structural to check against (see Phase 50.5
+/// investigation §6). It is also intentionally silent on *why* a decline is happening — it
+/// cannot distinguish a genuine in-scope refusal from an evidence-discarding one by pattern
+/// alone. That distinction is handled by the correction message the caller injects on first
+/// violation, which asks the model to name a reason; only a bare, reason-free refusal or
+/// empty output should ever match this function twice in a row.
+pub(crate) fn is_evidence_disconnected_response(response: &str) -> bool {
+    let trimmed = response.trim();
+    if trimmed.chars().count() < EVIDENCE_DISCONNECTED_MIN_LEN {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    EVIDENCE_DISCONNECTED_REFUSAL_PHRASES
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+}

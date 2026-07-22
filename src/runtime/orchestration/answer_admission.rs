@@ -22,7 +22,8 @@ impl Runtime {
             // correction text back without the [runtime:correction] prefix.
             let is_correction_echo = response.trim_start().starts_with("[runtime:correction]")
                 || response.contains("The file was already read this turn")
-                || response.contains("Evidence is already ready from the file");
+                || response.contains("Evidence is already ready from the file")
+                || response.contains("your response does not use it");
             if is_correction_echo {
                 self.conversation.discard_last_if_assistant();
                 if state.post_answer_phase_correction_echo_retries == 0 {

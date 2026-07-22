@@ -898,3 +898,311 @@ fn usage_lookup_dispatches_definition_site_candidate_after_usage_exhausted() {
         "turn must complete with a model answer after all reads: {answer_source:?}"
     );
 }
+
+// ── Slice 50.5: answer admission content validation ───────────────────────────
+//
+// A model refusal/non-answer that ignores evidence already gathered this turn must
+// not be silently admitted as the final answer. These tests exercise
+// check_evidence_disconnected_answer (answer_guard.rs), gated on answer_phase.is_some().
+
+#[test]
+fn bare_refusal_after_evidence_retries_then_terminates() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/main.rs"),
+        "fn main() { println!(\"hello\"); }\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: main]",
+            "[read_file: src/main.rs]",
+            "I cannot assist with that.",
+            "I cannot assist with that.",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "display the structure".into(),
+        },
+    );
+
+    let answer_ready_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, RuntimeEvent::AnswerReady(_)))
+        .collect();
+    assert_eq!(
+        answer_ready_events.len(),
+        1,
+        "exactly one AnswerReady must be emitted, after the retry: {events:?}"
+    );
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::EvidenceDisconnectedAnswer,
+                ..
+            })
+        ),
+        "repeated bare refusal after evidence must terminate with EvidenceDisconnectedAnswer: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let all_user: String = snapshot
+        .iter()
+        .filter(|m| m.role == crate::llm::backend::Role::User)
+        .map(|m| m.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        all_user
+            .matches("You retrieved evidence this turn, but your response does not use it")
+            .count(),
+        1,
+        "the evidence-disconnected correction must be injected exactly once before the terminal: {all_user}"
+    );
+
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_ne!(
+        last_assistant,
+        Some("I cannot assist with that."),
+        "the bare refusal must be discarded, not admitted verbatim"
+    );
+}
+
+#[test]
+fn list_dir_evidence_then_bare_refusal_is_corrected_not_admitted() {
+    // Incident-1 repro: a seeded list_dir (DirectoryListing retrieval intent) succeeds,
+    // then the model produces a bare canned refusal disconnected from that evidence.
+    // Before this slice this text was admitted verbatim as the final answer.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("sandbox")).unwrap();
+    fs::write(tmp.path().join("sandbox/main.py"), "def main(): pass\n").unwrap();
+
+    let mut rt = make_runtime_in(
+        vec!["I cannot assist with that.", "I cannot assist with that."],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "explore sandbox/".into(),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::EvidenceDisconnectedAnswer,
+                ..
+            })
+        ),
+        "bare refusal after seeded list_dir evidence must no longer be silently admitted: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_ne!(
+        last_assistant,
+        Some("I cannot assist with that."),
+        "the bare refusal must never be the admitted final answer"
+    );
+}
+
+#[test]
+fn legitimate_short_factual_answer_after_evidence_is_not_flagged() {
+    // The single most important test in this slice: a short, substantive answer that
+    // happens to be brief must pass through completely unaffected by the new check.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/main.rs"),
+        "fn main() { println!(\"hello\"); }\n",
+    )
+    .unwrap();
+
+    let final_answer = "The current branch is dev.";
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: main]",
+            "[read_file: src/main.rs]",
+            final_answer,
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "display the structure".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must not fail: {events:?}");
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::ToolAssisted { .. })),
+        "a legitimate short factual answer after evidence must not be treated as a refusal: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_eq!(
+        last_assistant,
+        Some(final_answer),
+        "the legitimate short answer must be admitted verbatim, not discarded"
+    );
+}
+
+#[test]
+fn direct_no_evidence_refusal_shaped_answer_is_unaffected() {
+    // Boundary test for the answer_phase.is_some() gate: even a response that matches the
+    // refusal-phrase list must be admitted unchanged when no evidence was gathered this
+    // turn (zero tool calls, answer_phase stays None) — there is nothing for it to be
+    // "disconnected" from. This must never regress the Direct-answer path (see also
+    // scenarios.rs::non_identifier_question_allows_direct_unchanged).
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let refusal = "I cannot assist with that.";
+    let mut rt = make_runtime_in(vec![refusal], tmp.path());
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "How are you?".into(),
+        },
+    );
+
+    assert!(!has_failed(&events), "must not fail: {events:?}");
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(answer_source, Some(AnswerSource::Direct)),
+        "a refusal-shaped Direct answer with no evidence gathered must pass through as Direct: {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    assert!(
+        !snapshot
+            .iter()
+            .any(|m| m.content.starts_with("[runtime:correction]")),
+        "no correction must fire when answer_phase is None"
+    );
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_eq!(
+        last_assistant,
+        Some(refusal),
+        "the response must be admitted verbatim when there is no evidence to be disconnected from"
+    );
+}
+
+#[test]
+fn model_echoing_evidence_disconnected_correction_is_caught_by_correction_echo() {
+    // A model that parrots back a fragment of the new correction text (rather than
+    // producing a fresh refusal) must be caught by check_correction_echo, which runs
+    // before check_evidence_disconnected_answer and owns its own retry-then-terminal path.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/main.rs"),
+        "fn main() { println!(\"hello\"); }\n",
+    )
+    .unwrap();
+
+    let echo = "Well, your response does not use it, so I'm stuck.";
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: main]",
+            "[read_file: src/main.rs]",
+            echo,
+            echo,
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "display the structure".into(),
+        },
+    );
+
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::RepeatedToolAfterAnswerPhase,
+                ..
+            })
+        ),
+        "echoing the new correction text must be caught by check_correction_echo, not fall through to a fresh evidence-disconnected violation: {answer_source:?}"
+    );
+}

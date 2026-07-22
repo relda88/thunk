@@ -2260,6 +2260,9 @@ impl Runtime {
         if let Some(s) = self.check_evidence_and_admission_gates(ctx, state, &response, on_event) {
             return s;
         }
+        if let Some(s) = self.check_evidence_disconnected_answer(state, &response, on_event) {
+            return s;
+        }
         let source = if state.tool_rounds == 0 {
             if state.seeded_tool_executed {
                 AnswerSource::ToolAssisted { rounds: 1 }
