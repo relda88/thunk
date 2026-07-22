@@ -104,31 +104,17 @@ impl ModelBackend for OllamaBackend {
         on_event(BackendEvent::StatusChanged(BackendStatus::Generating));
 
         let reader = std::io::BufReader::new(response.into_reader());
-        let mut token_count = 0usize;
-        for line in reader.lines() {
-            let line = line.map_err(|e| AppError::Runtime(format!("Ollama read error: {e}")))?;
+        let outcome = drive_ollama_ndjson_stream(reader.lines(), on_event)?;
+        // `done_seen` is the only in-band completion signal Ollama's NDJSON format offers (there is
+        // no per-line finish_reason equivalent, and no documented mid-stream error field) — a stream
+        // that ends without it is a truncation, not a genuinely short response.
+        let mut completed = outcome.done_seen;
 
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let Ok(obj) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-
-            if let Some(content) = obj["message"]["content"].as_str() {
-                if !content.is_empty() {
-                    token_count += 1;
-                    on_event(BackendEvent::TextDelta(content.to_string()));
-                }
-            }
-
-            if obj["done"].as_bool() == Some(true) {
-                break;
-            }
-        }
-
-        if token_count == 0 {
+        if outcome.token_count == 0 {
+            // Pre-existing recovery path for streams that report zero content (independent of
+            // done_seen — preserved as-is). This fallback is itself a single blocking, non-streaming
+            // request: if the send/read below succeeds, the full response body was received in one
+            // piece, so it is its own completion signal regardless of the streaming attempt's outcome.
             let mut fallback_body = body.clone();
             fallback_body["stream"] = json!(false);
             let fallback_response = agent
@@ -149,11 +135,69 @@ impl ModelBackend for OllamaBackend {
                     }
                 }
             }
+            completed = true;
+        }
+
+        if !completed {
+            return Err(AppError::Runtime(
+                "Ollama stream ended before a done: true completion signal was received"
+                    .to_string(),
+            ));
         }
 
         on_event(BackendEvent::Finished);
         Ok(())
     }
+}
+
+/// Outcome of driving one Ollama NDJSON stream: whether the terminal `done: true` line was
+/// observed, and how many non-empty content deltas were emitted.
+struct OllamaStreamOutcome {
+    done_seen: bool,
+    token_count: usize,
+}
+
+/// Drives an Ollama NDJSON stream: parses one JSON object per line, emits `TextDelta` events for
+/// non-empty content, and reports whether the terminal `done: true` line was observed.
+///
+/// Does not itself return `Err` for a missing `done: true` — the caller decides completion because
+/// it also needs to fold in the non-streaming fallback request's outcome (see `generate()`), which
+/// this function has no knowledge of.
+fn drive_ollama_ndjson_stream(
+    lines: impl Iterator<Item = std::io::Result<String>>,
+    on_event: &mut dyn FnMut(BackendEvent),
+) -> Result<OllamaStreamOutcome> {
+    let mut done_seen = false;
+    let mut token_count = 0usize;
+
+    for line in lines {
+        let line = line.map_err(|e| AppError::Runtime(format!("Ollama read error: {e}")))?;
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let Ok(obj) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+
+        if let Some(content) = obj["message"]["content"].as_str() {
+            if !content.is_empty() {
+                token_count += 1;
+                on_event(BackendEvent::TextDelta(content.to_string()));
+            }
+        }
+
+        if obj["done"].as_bool() == Some(true) {
+            done_seen = true;
+            break;
+        }
+    }
+
+    Ok(OllamaStreamOutcome {
+        done_seen,
+        token_count,
+    })
 }
 
 #[cfg(test)]
@@ -237,5 +281,56 @@ mod tests {
                 "PromptAssembled must precede StatusChanged"
             );
         }
+    }
+
+    fn lines_of(raw: &[&str]) -> std::vec::IntoIter<std::io::Result<String>> {
+        raw.iter()
+            .map(|s| Ok(s.to_string()))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    #[test]
+    fn clean_stream_with_done_true_succeeds() {
+        let lines = lines_of(&[
+            r#"{"message":{"content":"hi"},"done":false}"#,
+            r#"{"message":{"content":""},"done":true}"#,
+        ]);
+        let mut events = Vec::new();
+        let outcome = drive_ollama_ndjson_stream(lines, &mut |e| events.push(e)).unwrap();
+        assert!(outcome.done_seen, "done: true must be recorded");
+        assert_eq!(outcome.token_count, 1);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, BackendEvent::TextDelta(t) if t == "hi")));
+    }
+
+    #[test]
+    fn eof_without_done_true_is_not_marked_done() {
+        let lines = lines_of(&[r#"{"message":{"content":"hi"},"done":false}"#]);
+        let mut events = Vec::new();
+        let outcome = drive_ollama_ndjson_stream(lines, &mut |e| events.push(e)).unwrap();
+        assert!(
+            !outcome.done_seen,
+            "stream ending without done: true must not be recorded as complete"
+        );
+        assert_eq!(
+            outcome.token_count, 1,
+            "content already streamed is still preserved"
+        );
+    }
+
+    #[test]
+    fn malformed_line_then_done_true_succeeds() {
+        let lines = lines_of(&[
+            "not valid json",
+            r#"{"message":{"content":"ok"},"done":true}"#,
+        ]);
+        let mut events = Vec::new();
+        let outcome = drive_ollama_ndjson_stream(lines, &mut |e| events.push(e)).unwrap();
+        assert!(
+            outcome.done_seen,
+            "a single malformed line must still be skipped, not fatal"
+        );
     }
 }
