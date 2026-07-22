@@ -371,6 +371,10 @@ pub enum RuntimeEvent {
         evidence: Vec<String>,
         /// Files that import the mutation target — informational only, never gates approval.
         impact: Vec<String>,
+        /// Why this action is being proposed, when it wasn't directly requested by the user
+        /// (e.g. a runtime-initiated test_command run). None for ordinary model-proposed
+        /// mutations — the approval prompt degrades gracefully with no reason row.
+        reason: Option<String>,
     },
     /// Fired when multiple mutating tools in a single turn require grouped approval.
     /// The turn is paused until RuntimeRequest::Approve or Reject is received.
@@ -380,6 +384,8 @@ pub enum RuntimeEvent {
         evidence: Vec<String>,
         /// Files that import the mutation target — informational only, never gates approval.
         impact: Vec<String>,
+        /// Why this transaction is being proposed. See `ApprovalRequired::reason`.
+        reason: Option<String>,
     },
     AnswerReady(AnswerSource),
     Failed {

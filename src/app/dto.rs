@@ -188,11 +188,13 @@ pub enum RuntimeEventDto {
         pending: PendingActionDto,
         evidence: Vec<String>,
         impact: Vec<String>,
+        reason: Option<String>,
     },
     TransactionApprovalRequired {
         actions: Vec<PendingActionDto>,
         evidence: Vec<String>,
         impact: Vec<String>,
+        reason: Option<String>,
     },
     AnswerReady {
         source: AnswerSourceDto,
@@ -249,19 +251,23 @@ impl TryFrom<RuntimeEvent> for RuntimeEventDto {
                 pending,
                 evidence,
                 impact,
+                reason,
             } => Self::ApprovalRequired {
                 pending: pending.into(),
                 evidence,
                 impact,
+                reason,
             },
             RuntimeEvent::TransactionApprovalRequired {
                 actions,
                 evidence,
                 impact,
+                reason,
             } => Self::TransactionApprovalRequired {
                 actions: actions.into_iter().map(Into::into).collect(),
                 evidence,
                 impact,
+                reason,
             },
             RuntimeEvent::AnswerReady(source) => Self::AnswerReady {
                 source: source.into(),

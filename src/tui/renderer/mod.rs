@@ -136,6 +136,7 @@ impl Renderer {
                 + a.evidence.len().min(4) as u16
                 + a.preview.len().min(4) as u16
                 + if a.impact.is_empty() { 0 } else { 1 }
+                + if a.reason.is_none() { 0 } else { 1 }
                 + 1
         });
         let plan_rows: u16 = state
@@ -626,6 +627,12 @@ impl Renderer {
             offset += 1;
         }
 
+        if let Some(ref reason) = approval.reason {
+            let display: String = format!("  ↳ {reason}").chars().take(w as usize).collect();
+            self.paint(cur, 0, first_row + offset, &display, w, dim);
+            offset += 1;
+        }
+
         self.paint(
             cur,
             0,
@@ -930,6 +937,7 @@ mod tests {
             preview: vec![],
             transaction_files: vec![],
             impact: vec![],
+            reason: None,
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -967,6 +975,7 @@ mod tests {
             preview: vec![],
             transaction_files: vec![],
             impact: vec![],
+            reason: None,
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -1002,6 +1011,7 @@ mod tests {
             preview: vec![],
             transaction_files: vec![],
             impact: vec![],
+            reason: None,
         });
         let mut renderer = Renderer::new(80, 24);
         let mut out = Vec::<u8>::new();
@@ -1023,6 +1033,90 @@ mod tests {
     }
 
     #[test]
+    fn approval_widget_renders_reason_row_when_present() {
+        // 80×24 with a reason and no evidence/impact: approval_rows = 1+0+0+0+0+0+1+1 = 3
+        // first_row = 24 - (3+1+1) = 19; reason row = 19 + 1 (offset after label) = 20.
+        use crate::tui::state::{ApprovalRisk, PendingApprovalState};
+        let (_dir, mut state) = make_state();
+        let reason_text = "proposing because src/foo.rs was modified";
+        state.pending_approval = Some(PendingApprovalState {
+            tool_name: "shell".to_string(),
+            summary: "run".to_string(),
+            risk: ApprovalRisk::Low,
+            irreversible: false,
+            evidence: vec![],
+            preview: vec![],
+            transaction_files: vec![],
+            impact: vec![],
+            reason: Some(reason_text.to_string()),
+        });
+        let mut renderer = Renderer::new(80, 24);
+        let mut out = Vec::<u8>::new();
+        renderer
+            .render(&mut state, &mut out, DirtySections::ALL)
+            .unwrap();
+
+        let expected = format!("  ↳ {reason_text}");
+        let rendered: String = (0..expected.chars().count())
+            .map(|i| {
+                renderer
+                    .rendered_cell_text(i as u16, 20)
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
+            .collect();
+        assert_eq!(
+            rendered, expected,
+            "reason row must render the reason text at row 20"
+        );
+    }
+
+    #[test]
+    fn approval_widget_absent_reason_skips_reason_row() {
+        // No reason: approval_rows = 2 (label + controls) -> label at row 20.
+        // With reason: approval_rows = 3 -> label shifts to row 19, no blank gap.
+        use crate::tui::state::{ApprovalRisk, PendingApprovalState};
+
+        let render_with_reason = |reason: Option<String>| {
+            let (_dir, mut state) = make_state();
+            state.pending_approval = Some(PendingApprovalState {
+                tool_name: "shell".to_string(),
+                summary: "run".to_string(),
+                risk: ApprovalRisk::Low,
+                irreversible: false,
+                evidence: vec![],
+                preview: vec![],
+                transaction_files: vec![],
+                impact: vec![],
+                reason,
+            });
+            let mut renderer = Renderer::new(80, 24);
+            let mut out = Vec::<u8>::new();
+            renderer
+                .render(&mut state, &mut out, DirtySections::ALL)
+                .unwrap();
+            renderer
+        };
+
+        let without = render_with_reason(None);
+        let with = render_with_reason(Some(
+            "proposing because src/foo.rs was modified".to_string(),
+        ));
+
+        assert_eq!(
+            without.rendered_cell_style(0, 20),
+            without.theme.chip_accent(),
+            "label must be at row 20 when reason is absent"
+        );
+        assert_eq!(
+            with.rendered_cell_style(0, 19),
+            with.theme.chip_accent(),
+            "label must shift to row 19 when reason is present (one extra row, no gap)"
+        );
+    }
+
+    #[test]
     fn approval_rows_accounts_for_evidence_count() {
         // 2 evidence entries → approval_rows = 4 → separator at row 17
         // 0 evidence entries → approval_rows = 2 → separator at row 19
@@ -1039,6 +1133,7 @@ mod tests {
                 preview: vec![],
                 transaction_files: vec![],
                 impact: vec![],
+                reason: None,
             });
             let mut renderer = Renderer::new(80, 24);
             let mut out = Vec::<u8>::new();

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::core::config::{Config, InvestigationDepth, RetrievalConfig};
+use crate::core::config::{path_in_source_dirs, Config, InvestigationDepth, RetrievalConfig};
 use crate::llm::backend::ModelBackend;
 use crate::runtime::index::EmbeddingProvider;
 use crate::storage::index::store::SymbolRecord;
@@ -174,6 +174,12 @@ pub struct Runtime {
     /// (display-only, no correction loop). When false, verification runs synchronously
     /// with the correction loop. Defaults to true.
     deferred_verify: bool,
+    /// Project-relative path(s) touched by the most recently completed edit_file/write_file
+    /// mutation (single action or transaction). Empty when the most recent handled request
+    /// was not a mutation (chat turn, read-only command, fs-watch rebuild). Consumed by
+    /// `verify_context()` — cleared after being read so a later non-mutating request doesn't
+    /// re-trigger deferred verification for a stale mutation.
+    last_mutation_paths: Vec<String>,
     /// Session-scoped exec mode. When true, Tier-3 arbitrary shell commands are
     /// allowed through the approval gate. Resets to false on session reset.
     /// Controlled via /exec on|off.
@@ -336,6 +342,7 @@ impl Runtime {
             prompt_physics,
             verify_command: config.project.verify_command.clone(),
             deferred_verify: true,
+            last_mutation_paths: Vec::new(),
             exec_enabled: false,
             dnd_enabled: false,
             last_proactive_at: None,
@@ -445,12 +452,45 @@ impl Runtime {
         self
     }
 
+    #[cfg(test)]
+    pub fn with_test_command(mut self, cmd: Option<String>) -> Self {
+        self.config.project.test_command = cmd;
+        self
+    }
+
     /// Returns the verify command and project root path for background execution.
-    /// None when no verify command is configured.
-    pub fn verify_context(&self) -> Option<(String, std::path::PathBuf)> {
+    /// None when no verify command is configured, when the most recently handled
+    /// request was not an approved edit_file/write_file mutation (chat turn, /status,
+    /// fs-watch-triggered RebuildFile, etc.), or when the touched path(s) fall outside
+    /// `config.project.source_dirs`. Consumes the tracked mutation path(s): each call
+    /// answers for the request that just completed, not any prior one.
+    pub fn verify_context(&mut self) -> Option<(String, std::path::PathBuf)> {
+        let paths = std::mem::take(&mut self.last_mutation_paths);
+        if paths.is_empty() {
+            return None;
+        }
+        let source_dirs = &self.config.project.source_dirs;
+        if !paths.iter().any(|p| path_in_source_dirs(p, source_dirs)) {
+            return None;
+        }
         self.verify_command
             .as_ref()
             .map(|cmd| (cmd.clone(), self.project_root.as_path_buf()))
+    }
+
+    /// Returns `abs_path`'s path relative to the project root, using `/` separators.
+    /// None when `abs_path` is not under the project root.
+    /// `abs_path` is canonicalized first (falling back to the raw path if that fails,
+    /// e.g. the file was deleted after the mutation) because `project_root.path()` is
+    /// always canonical, and on macOS `/tmp`/`/var` resolve to `/private/...` — an
+    /// un-canonicalized abs_path would silently fail the prefix strip.
+    fn relative_project_path(&self, abs_path: &str) -> Option<String> {
+        let path = std::path::Path::new(abs_path);
+        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        canonical
+            .strip_prefix(self.project_root.path())
+            .ok()
+            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
     }
 
     #[cfg(test)]
@@ -1006,6 +1046,7 @@ impl Runtime {
                                                 pending,
                                                 evidence,
                                                 impact: vec![],
+                                                reason: None,
                                             });
                                             return;
                                         }
@@ -1121,6 +1162,8 @@ impl Runtime {
                 self.invalidate_project_snapshot_if_needed(&output);
                 if matches!(tool_name.as_str(), "edit_file" | "write_file") {
                     if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload) {
+                        self.last_mutation_paths =
+                            self.relative_project_path(&abs_path).into_iter().collect();
                         self.rebuild_index_for_file(std::path::Path::new(&abs_path), on_event);
                         if let Some(ref rel_path) = single_rel_path {
                             if let Some(store) = &self.symbol_store {
@@ -1283,56 +1326,68 @@ impl Runtime {
                     if let Some(verify_cmd) = self.verify_command.clone() {
                         if let Some(abs_path) = extract_absolute_path_from_payload(&pending.payload)
                         {
-                            if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
-                                if self.max_correction_attempts > 0
-                                    && self.correction_attempts < self.max_correction_attempts
+                            let in_scope = self
+                                .relative_project_path(&abs_path)
+                                .map(|rel| {
+                                    path_in_source_dirs(&rel, &self.config.project.source_dirs)
+                                })
+                                .unwrap_or(false);
+                            if in_scope {
+                                if let Some(combined) =
+                                    self.run_verify_command(&verify_cmd, on_event)
                                 {
-                                    // Correction attempt: inject a correction prompt and
-                                    // re-enter the turn loop. The [runtime:correction]
-                                    // prefix is mandatory — it suppresses TurnContext
-                                    // surface/intent re-classification (engine.rs ~line 1641).
-                                    self.correction_attempts += 1;
-                                    on_event(RuntimeEvent::SystemMessage(format!(
-                                        "{verify_cmd}: failed — requesting correction \
+                                    if self.max_correction_attempts > 0
+                                        && self.correction_attempts < self.max_correction_attempts
+                                    {
+                                        // Correction attempt: inject a correction prompt and
+                                        // re-enter the turn loop. The [runtime:correction]
+                                        // prefix is mandatory — it suppresses TurnContext
+                                        // surface/intent re-classification (engine.rs ~line 1641).
+                                        self.correction_attempts += 1;
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "{verify_cmd}: failed — requesting correction \
                                          (attempt {}/{})",
-                                        self.correction_attempts, self.max_correction_attempts
-                                    )));
-                                    let correction_prompt = format!(
-                                        "[runtime:correction] {verify_cmd} failed after \
+                                            self.correction_attempts, self.max_correction_attempts
+                                        )));
+                                        let correction_prompt = format!(
+                                            "[runtime:correction] {verify_cmd} failed after \
                                          editing {}:\n{}\n\nEmit a corrective \
                                          [edit_file: ...] that fixes the error. \
                                          Do not include any other content.",
-                                        abs_path,
-                                        combined.trim()
-                                    );
-                                    self.conversation.push_user(correction_prompt);
-                                    on_event(RuntimeEvent::ActivityChanged(Activity::Processing));
-                                    self.run_turns(0, on_event);
-                                    if self.pending_action.is_some() {
-                                        // Corrective edit is pending approval — suspend
-                                        // here and let the next Approve call continue.
+                                            abs_path,
+                                            combined.trim()
+                                        );
+                                        self.conversation.push_user(correction_prompt);
+                                        on_event(RuntimeEvent::ActivityChanged(
+                                            Activity::Processing,
+                                        ));
+                                        self.run_turns(0, on_event);
+                                        if self.pending_action.is_some() {
+                                            // Corrective edit is pending approval — suspend
+                                            // here and let the next Approve call continue.
+                                            return;
+                                        }
+                                        // Model responded with prose instead of an edit.
+                                        // run_turns already called finish_with_runtime_answer
+                                        // for the prose answer, so we must not call it again.
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "{verify_cmd}: failed after {} correction \
+                                         attempt(s) — manual fix required\n{}",
+                                            self.correction_attempts,
+                                            combined.trim()
+                                        )));
+                                        self.correction_attempts = 0;
                                         return;
+                                    } else {
+                                        // Corrections disabled or max attempts reached.
+                                        on_event(RuntimeEvent::SystemMessage(format!(
+                                            "{verify_cmd}: failed after {} correction \
+                                         attempt(s) — manual fix required\n{}",
+                                            self.correction_attempts,
+                                            combined.trim()
+                                        )));
+                                        self.correction_attempts = 0;
                                     }
-                                    // Model responded with prose instead of an edit.
-                                    // run_turns already called finish_with_runtime_answer
-                                    // for the prose answer, so we must not call it again.
-                                    on_event(RuntimeEvent::SystemMessage(format!(
-                                        "{verify_cmd}: failed after {} correction \
-                                         attempt(s) — manual fix required\n{}",
-                                        self.correction_attempts,
-                                        combined.trim()
-                                    )));
-                                    self.correction_attempts = 0;
-                                    return;
-                                } else {
-                                    // Corrections disabled or max attempts reached.
-                                    on_event(RuntimeEvent::SystemMessage(format!(
-                                        "{verify_cmd}: failed after {} correction \
-                                         attempt(s) — manual fix required\n{}",
-                                        self.correction_attempts,
-                                        combined.trim()
-                                    )));
-                                    self.correction_attempts = 0;
                                 }
                             }
                         }
@@ -1344,29 +1399,40 @@ impl Runtime {
                     on_event,
                 );
                 if matches!(tool_name.as_str(), "edit_file" | "write_file") {
+                    let rel_path = extract_absolute_path_from_payload(&pending.payload)
+                        .and_then(|abs| self.relative_project_path(&abs));
+                    let in_scope = rel_path
+                        .as_deref()
+                        .map(|rel| path_in_source_dirs(rel, &self.config.project.source_dirs))
+                        .unwrap_or(false);
                     let test_cmd = self.config.project.test_command.clone();
-                    if let Some(cmd) = test_cmd {
-                        let input = ToolInput::Shell { command: cmd };
-                        if let Ok(resolved) = resolve(&self.project_root, &input) {
-                            match self.registry.dispatch(resolved) {
-                                Ok(ToolRunResult::Approval(pending)) => {
-                                    self.pending_action =
-                                        Some(PendingApprovalStage::AwaitingPreCheck(
-                                            PendingTransaction::single(pending.clone()),
+                    if in_scope {
+                        if let Some(cmd) = test_cmd {
+                            let reason =
+                                rel_path.map(|rel| format!("proposing because {rel} was modified"));
+                            let input = ToolInput::Shell { command: cmd };
+                            if let Ok(resolved) = resolve(&self.project_root, &input) {
+                                match self.registry.dispatch(resolved) {
+                                    Ok(ToolRunResult::Approval(pending)) => {
+                                        self.pending_action =
+                                            Some(PendingApprovalStage::AwaitingPreCheck(
+                                                PendingTransaction::single(pending.clone()),
+                                            ));
+                                        on_event(RuntimeEvent::ApprovalRequired {
+                                            pending,
+                                            evidence: vec![],
+                                            impact: vec![],
+                                            reason,
+                                        });
+                                    }
+                                    Ok(ToolRunResult::Immediate(output)) => {
+                                        self.invalidate_project_snapshot_if_needed(&output);
+                                        self.commit_tool_results(tool_codec::format_tool_result(
+                                            "shell", &output,
                                         ));
-                                    on_event(RuntimeEvent::ApprovalRequired {
-                                        pending,
-                                        evidence: vec![],
-                                        impact: vec![],
-                                    });
+                                    }
+                                    Err(_) => {}
                                 }
-                                Ok(ToolRunResult::Immediate(output)) => {
-                                    self.invalidate_project_snapshot_if_needed(&output);
-                                    self.commit_tool_results(tool_codec::format_tool_result(
-                                        "shell", &output,
-                                    ));
-                                }
-                                Err(_) => {}
                             }
                         }
                     }
@@ -1589,6 +1655,17 @@ impl Runtime {
                 .trim_tool_exchanges_if_needed(self.context_policy.trim_threshold);
         }
 
+        // Track every touched path for the deferred verify path (verify_context()) and
+        // for the any-in-scope check below. Transactions lean more permissive than single
+        // mutations: verify fires if ANY touched file is in scope, not all of them.
+        self.last_mutation_paths = tx
+            .actions
+            .iter()
+            .filter(|a| matches!(a.tool_name.as_str(), "edit_file" | "write_file"))
+            .filter_map(|a| extract_absolute_path_from_payload(&a.payload))
+            .filter_map(|abs| self.relative_project_path(&abs))
+            .collect();
+
         let n = tx.actions.len();
         let final_answer = format!("{n} edit(s) applied successfully.");
 
@@ -1596,12 +1673,18 @@ impl Runtime {
         // Correction loop is intentionally skipped for transactions.
         // When deferred_verify is true, the background thread handles this instead.
         if !self.deferred_verify {
-            if let Some(verify_cmd) = self.verify_command.clone() {
-                if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
-                    on_event(RuntimeEvent::SystemMessage(format!(
-                        "{verify_cmd}: failed after transaction — manual fix required\n{}",
-                        combined.trim()
-                    )));
+            let any_in_scope = self
+                .last_mutation_paths
+                .iter()
+                .any(|p| path_in_source_dirs(p, &self.config.project.source_dirs));
+            if any_in_scope {
+                if let Some(verify_cmd) = self.verify_command.clone() {
+                    if let Some(combined) = self.run_verify_command(&verify_cmd, on_event) {
+                        on_event(RuntimeEvent::SystemMessage(format!(
+                            "{verify_cmd}: failed after transaction — manual fix required\n{}",
+                            combined.trim()
+                        )));
+                    }
                 }
             }
         }
@@ -2106,6 +2189,7 @@ impl Runtime {
                     pending,
                     evidence,
                     impact,
+                    reason: None,
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
                 return TurnSignal::Finish;
@@ -2133,6 +2217,7 @@ impl Runtime {
                     actions,
                     evidence,
                     impact: vec![],
+                    reason: None,
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
                 return TurnSignal::Finish;

@@ -119,8 +119,9 @@ impl AppContext {
     }
 
     /// Returns the verify command and project root for background thread execution.
-    /// None when no verify command is configured.
-    pub fn verify_context(&self) -> Option<(String, std::path::PathBuf)> {
+    /// None when no verify command is configured, no mutation preceded this call, or
+    /// the mutated path(s) are out of scope. See `Runtime::verify_context`.
+    pub fn verify_context(&mut self) -> Option<(String, std::path::PathBuf)> {
         self.runtime.verify_context()
     }
 

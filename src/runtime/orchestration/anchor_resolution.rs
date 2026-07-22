@@ -101,6 +101,7 @@ impl Runtime {
                     pending,
                     evidence: vec![],
                     impact: vec![],
+                    reason: None,
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
@@ -121,6 +122,7 @@ impl Runtime {
                     actions,
                     evidence: vec![],
                     impact: vec![],
+                    reason: None,
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }
@@ -233,6 +235,7 @@ impl Runtime {
                     pending,
                     evidence: vec![],
                     impact: vec![],
+                    reason: None,
                 });
                 on_event(RuntimeEvent::ActivityChanged(Activity::Idle));
             }

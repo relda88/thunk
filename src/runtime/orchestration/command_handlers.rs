@@ -204,6 +204,7 @@ impl Runtime {
                     pending,
                     evidence: vec![],
                     impact: vec![],
+                    reason: None,
                 });
             }
             Err(e) => {
@@ -444,6 +445,7 @@ impl Runtime {
                     pending,
                     evidence: vec![],
                     impact: vec![],
+                    reason: None,
                 });
             }
             Ok(ToolRunResult::Immediate(_)) => {

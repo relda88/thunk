@@ -49,6 +49,15 @@ function EvidenceRow({ evidence }: { evidence: string[] }) {
   )
 }
 
+function ReasonRow({ reason }: { reason: string | null }) {
+  if (!reason) return null
+  return (
+    <div className="text-sm mb-2">
+      <span className="text-text-muted">{reason}</span>
+    </div>
+  )
+}
+
 export default function ApprovalDialog({ dialog, onClose }: Props) {
   async function doApprove() {
     onClose()
@@ -84,6 +93,7 @@ export default function ApprovalDialog({ dialog, onClose }: Props) {
             <PendingActionCard pending={dialog.pending} />
             <EvidenceRow evidence={dialog.evidence} />
             <ImpactRow impact={dialog.impact} />
+            <ReasonRow reason={dialog.reason} />
             <div className="flex gap-2 mt-3">
               <ApproveBtn label="Approve" onClick={doApprove} />
               <RejectBtn label="Reject" onClick={doReject} />
@@ -105,6 +115,7 @@ export default function ApprovalDialog({ dialog, onClose }: Props) {
               </div>
             ))}
             <ImpactRow impact={dialog.impact} />
+            <ReasonRow reason={dialog.reason} />
             <div className="flex gap-2 mt-3">
               <ApproveBtn label="Approve all" onClick={doApprove} />
               <RejectBtn label="Reject" onClick={doReject} />

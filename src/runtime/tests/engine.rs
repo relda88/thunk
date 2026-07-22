@@ -1941,7 +1941,9 @@ fn non_cargo_verify_passes_raw_output_unchanged() {
     use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
-    let data_file = tmp.path().join("data.txt");
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let data_file = src_dir.join("data.txt");
     fs::write(&data_file, "hello world\n").unwrap();
 
     let abs_path = data_file.to_string_lossy().into_owned();

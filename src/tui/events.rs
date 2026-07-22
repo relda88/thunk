@@ -75,6 +75,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             pending,
             evidence,
             impact,
+            reason,
         } => {
             let risk = match pending.risk {
                 RiskLevel::High => ApprovalRisk::High,
@@ -92,6 +93,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
                 preview,
                 transaction_files: vec![],
                 impact,
+                reason,
             });
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("awaiting approval");
@@ -100,6 +102,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
             actions,
             evidence,
             impact,
+            reason,
         } => {
             let first = &actions[0];
             let risk = match first.risk {
@@ -119,6 +122,7 @@ pub(super) fn apply_runtime_event(state: &mut AppState, event: RuntimeEvent) {
                 preview,
                 transaction_files,
                 impact,
+                reason,
             });
             state.mark_dirty(DirtySections::INPUT);
             state.set_status("awaiting approval");
@@ -266,6 +270,7 @@ mod tests {
                 pending: make_pending("shell", RiskLevel::High),
                 evidence: vec!["src/main.rs:10".to_string()],
                 impact: vec![],
+                reason: None,
             },
         );
 
@@ -292,6 +297,7 @@ mod tests {
                 pending: make_pending("edit_file", RiskLevel::Medium),
                 evidence: vec![],
                 impact: vec![],
+                reason: None,
             },
         );
 
@@ -316,6 +322,7 @@ mod tests {
                 pending,
                 evidence: vec![],
                 impact: vec![],
+                reason: None,
             },
         );
 
@@ -333,6 +340,7 @@ mod tests {
                 pending: make_pending("edit_file", RiskLevel::Medium),
                 evidence: vec![],
                 impact: vec![],
+                reason: None,
             },
         );
 
@@ -370,6 +378,7 @@ mod tests {
                 pending: make_pending("shell", RiskLevel::High),
                 evidence: vec![],
                 impact: vec![],
+                reason: None,
             },
         );
         assert!(state.pending_approval.is_some());
@@ -390,6 +399,7 @@ mod tests {
                 pending: make_pending("edit_file", RiskLevel::Medium),
                 evidence: vec![],
                 impact: vec![],
+                reason: None,
             },
         );
         assert!(state.pending_approval.is_some());

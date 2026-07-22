@@ -61,6 +61,10 @@ pub(crate) struct PendingApprovalState {
     /// Files that import the mutation target — informational only, never gates approval.
     /// Empty when no importers are known or index is unavailable.
     pub(crate) impact: Vec<String>,
+    /// Why this action is being proposed, when it wasn't directly requested by the user
+    /// (e.g. a runtime-initiated test_command run). None for ordinary model-proposed
+    /// mutations — rendering must degrade gracefully with no reason row.
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -581,6 +585,7 @@ mod tests {
             preview: vec![],
             transaction_files: vec![],
             impact: vec![],
+            reason: None,
         });
         assert!(state.pending_approval.is_some());
 

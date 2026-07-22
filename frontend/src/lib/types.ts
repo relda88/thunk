@@ -47,8 +47,8 @@ export type RuntimeEventDto =
   | { type: 'answer_ready'; source: AnswerSourceDto | null }
   | { type: 'activity_changed'; activity: ActivityDto }
   | { type: 'context_usage'; prompt_tokens: number; context_window_tokens: number }
-  | { type: 'approval_required'; pending: PendingActionDto; evidence: string[]; impact: string[] }
-  | { type: 'transaction_approval_required'; actions: PendingActionDto[]; impact: string[] }
+  | { type: 'approval_required'; pending: PendingActionDto; evidence: string[]; impact: string[]; reason: string | null }
+  | { type: 'transaction_approval_required'; actions: PendingActionDto[]; impact: string[]; reason: string | null }
   | { type: 'plan_approval_required'; goal: string; steps: [string, string][] }
   | { type: 'plan_approval_cleared' }
   | { type: 'memory_proposal_required'; fact: string; category: string; scope: string | null; source: string; delete: boolean }
@@ -56,8 +56,8 @@ export type RuntimeEventDto =
   | { type: 'reset_ok' }
 
 export type DialogState =
-  | { kind: 'mutation'; pending: PendingActionDto; evidence: string[]; impact: string[] }
-  | { kind: 'transaction'; actions: PendingActionDto[]; impact: string[] }
+  | { kind: 'mutation'; pending: PendingActionDto; evidence: string[]; impact: string[]; reason: string | null }
+  | { kind: 'transaction'; actions: PendingActionDto[]; impact: string[]; reason: string | null }
   | { kind: 'plan'; goal: string; steps: [string, string][] }
   | { kind: 'memory'; fact: string; category: string; scope: string | null; source: string; delete: boolean }
 

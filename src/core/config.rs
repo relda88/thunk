@@ -130,6 +130,10 @@ fn default_lsp_extensions() -> Vec<String> {
     vec!["rs".into()]
 }
 
+fn default_source_dirs() -> Vec<String> {
+    vec!["src".into()]
+}
+
 /// Per-project settings that customize runtime behavior for a specific codebase.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -146,6 +150,12 @@ pub struct ProjectConfig {
     /// and presents it for user approval. 0 = corrections disabled.
     #[serde(default = "default_two")]
     pub max_correction_attempts: u32,
+    /// Project-relative directories that `test_command` / `verify_command` are scoped to.
+    /// A mutation outside all of these directories does not trigger either command.
+    /// Defaults to `["src"]`. Matched by path component prefix, not string prefix —
+    /// see `path_in_source_dirs`.
+    #[serde(default = "default_source_dirs")]
+    pub source_dirs: Vec<String>,
 }
 
 impl Default for ProjectConfig {
@@ -154,8 +164,25 @@ impl Default for ProjectConfig {
             test_command: None,
             verify_command: None,
             max_correction_attempts: 2,
+            source_dirs: default_source_dirs(),
         }
     }
+}
+
+/// Returns true when `rel_path` falls under one of `source_dirs`, matched by path
+/// component prefix (e.g. `src` matches `src/foo.rs` but not `src-old/foo.rs`).
+/// `rel_path` and `source_dirs` entries may use either `/` or `\` separators.
+pub fn path_in_source_dirs(rel_path: &str, source_dirs: &[String]) -> bool {
+    let path_components: Vec<&str> = rel_path
+        .split(['/', '\\'])
+        .filter(|c| !c.is_empty())
+        .collect();
+    source_dirs.iter().any(|dir| {
+        let dir_components: Vec<&str> = dir.split(['/', '\\']).filter(|c| !c.is_empty()).collect();
+        !dir_components.is_empty()
+            && path_components.len() >= dir_components.len()
+            && path_components[..dir_components.len()] == dir_components[..]
+    })
 }
 
 /// LSP provider configuration
@@ -590,7 +617,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        validate_command_names, AllowedCommandTool, Config, CustomCommandDef, LlamaCppConfig,
+        path_in_source_dirs, validate_command_names, AllowedCommandTool, Config, CustomCommandDef,
+        LlamaCppConfig,
     };
 
     fn parse_config(toml: &str) -> Config {
@@ -744,6 +772,66 @@ mod tests {
         assert_eq!(cfg.lsp.timeout_ms, 5000);
         assert_eq!(cfg.lsp.startup_timeout_ms, 30000);
         assert!(cfg.lsp.rust_analyzer_path.is_none());
+    }
+
+    #[test]
+    fn project_source_dirs_default_to_src() {
+        let cfg = parse_config("[app]\nname = \"thunk\"");
+        assert_eq!(cfg.project.source_dirs, vec!["src".to_string()]);
+    }
+
+    #[test]
+    fn project_source_dirs_deserializes_correctly() {
+        let cfg = parse_config(
+            r#"
+            [project]
+            source_dirs = ["src", "lib"]
+        "#,
+        );
+        assert_eq!(
+            cfg.project.source_dirs,
+            vec!["src".to_string(), "lib".to_string()]
+        );
+    }
+
+    #[test]
+    fn path_in_source_dirs_exact_match() {
+        let dirs = vec!["src".to_string()];
+        assert!(path_in_source_dirs("src/foo.rs", &dirs));
+    }
+
+    #[test]
+    fn path_in_source_dirs_nested_path() {
+        let dirs = vec!["src".to_string()];
+        assert!(path_in_source_dirs(
+            "src/runtime/orchestration/engine.rs",
+            &dirs
+        ));
+    }
+
+    #[test]
+    fn path_in_source_dirs_rejects_sibling_directory() {
+        let dirs = vec!["src".to_string()];
+        assert!(!path_in_source_dirs("src-old/foo.rs", &dirs));
+    }
+
+    #[test]
+    fn path_in_source_dirs_rejects_root_level_file() {
+        let dirs = vec!["src".to_string()];
+        assert!(!path_in_source_dirs("README.md", &dirs));
+    }
+
+    #[test]
+    fn path_in_source_dirs_matches_any_of_multiple_dirs() {
+        let dirs = vec!["src".to_string(), "lib".to_string()];
+        assert!(path_in_source_dirs("lib/foo.rs", &dirs));
+        assert!(!path_in_source_dirs("docs/foo.md", &dirs));
+    }
+
+    #[test]
+    fn path_in_source_dirs_handles_backslash_separators() {
+        let dirs = vec!["src".to_string()];
+        assert!(path_in_source_dirs("src\\runtime\\engine.rs", &dirs));
     }
 
     #[test]

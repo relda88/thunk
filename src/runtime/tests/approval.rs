@@ -1193,3 +1193,339 @@ fn edit_file_approval_has_empty_impact_when_no_importers() {
         "expected empty impact for file with no importers"
     );
 }
+
+// ---- Slice 50.3: source_dirs scoping for test_command / verify_command ----------------
+
+#[test]
+fn verify_out_of_scope_mutation_does_not_fire() {
+    // A mutation to a root-level throwaway file (not under any configured source_dirs)
+    // must not trigger verify_command, even with the sync verify path enabled. This is
+    // the literal original incident this slice fixes.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let throwaway = tmp.path().join("scratch.txt");
+    fs::write(&throwaway, "old content\n").unwrap();
+
+    let abs_path = throwaway.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00old content\x00new content");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("echo should-not-run".into()))
+        .with_deferred_verify(false)
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "write_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let fired = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("should-not-run")));
+    assert!(
+        !fired,
+        "verify_command must not fire for an out-of-scope mutation: {events:?}"
+    );
+}
+
+#[test]
+fn verify_transaction_fires_if_any_touched_file_is_in_scope() {
+    // Transactions lean more permissive than single mutations: verify fires if ANY
+    // touched file is under a configured source_dir, even if others are not.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    fs::write(src_dir.join("in_scope.py"), "old_a\n").unwrap();
+    fs::write(tmp.path().join("out_of_scope.py"), "old_b\n").unwrap();
+
+    let two_edits = "[edit_file]\npath: src/in_scope.py\n---search---\nold_a\n---replace---\nnew_a\n[/edit_file]\n\
+         [edit_file]\npath: out_of_scope.py\n---search---\nold_b\n---replace---\nnew_b\n[/edit_file]";
+
+    let mut rt = make_runtime_in(vec![two_edits], tmp.path())
+        .with_verify_command(Some("echo transaction-verify-marker".into()))
+        .with_deferred_verify(false);
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "edit both files".into(),
+        },
+    );
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let fired = events.iter().any(
+        |e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("transaction-verify-marker")),
+    );
+    assert!(
+        fired,
+        "verify_command must fire when any transaction file is in scope: {events:?}"
+    );
+}
+
+#[test]
+fn verify_transaction_all_out_of_scope_does_not_fire() {
+    // When every file touched by a transaction is outside all configured source_dirs,
+    // verify_command must not fire.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("file_a.py"), "old_a\n").unwrap();
+    fs::write(tmp.path().join("file_b.py"), "old_b\n").unwrap();
+
+    let two_edits =
+        "[edit_file]\npath: file_a.py\n---search---\nold_a\n---replace---\nnew_a\n[/edit_file]\n\
+         [edit_file]\npath: file_b.py\n---search---\nold_b\n---replace---\nnew_b\n[/edit_file]";
+
+    let mut rt = make_runtime_in(vec![two_edits], tmp.path())
+        .with_verify_command(Some("echo transaction-verify-marker".into()))
+        .with_deferred_verify(false);
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "edit both files".into(),
+        },
+    );
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let fired = events.iter().any(
+        |e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("transaction-verify-marker")),
+    );
+    assert!(
+        !fired,
+        "verify_command must not fire when no transaction file is in scope: {events:?}"
+    );
+}
+
+#[test]
+fn test_command_fires_for_in_scope_mutation_with_reason() {
+    // An in-scope edit_file mutation with test_command configured must produce an
+    // ApprovalRequired for the shell command, with a reason naming the modified file.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let main_rs = src_dir.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_test_command(Some("cargo test".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+
+    let shell_approval = events.iter().find_map(|e| match e {
+        RuntimeEvent::ApprovalRequired {
+            pending, reason, ..
+        } if pending.tool_name == "shell" => Some(reason.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        shell_approval,
+        Some(Some(
+            "proposing because src/main.rs was modified".to_string()
+        )),
+        "test_command approval must carry a reason naming the modified file: {events:?}"
+    );
+}
+
+#[test]
+fn test_command_skipped_for_out_of_scope_mutation() {
+    // A mutation to a root-level file outside all configured source_dirs must not
+    // trigger test_command at all.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let throwaway = tmp.path().join("scratch.txt");
+    fs::write(&throwaway, "old content\n").unwrap();
+
+    let abs_path = throwaway.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00old content\x00new content");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_test_command(Some("cargo test".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "write_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let shell_approval_fired = events.iter().any(|e| {
+        matches!(e, RuntimeEvent::ApprovalRequired { pending, .. } if pending.tool_name == "shell")
+    });
+    assert!(
+        !shell_approval_fired,
+        "test_command must not fire for an out-of-scope mutation: {events:?}"
+    );
+}
+
+// ---- Slice 50.3: deferred verify_context() mutation-gate + scoping --------------------
+
+#[test]
+fn verify_context_none_after_chat_only_turn() {
+    // A turn with no tool call at all must leave verify_context() returning None,
+    // even with a verify_command configured (deferred_verify defaults to true).
+    let mut rt = make_runtime(vec!["hello there"]).with_verify_command(Some("cargo check".into()));
+    collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "say hi".into(),
+        },
+    );
+    assert!(
+        rt.verify_context().is_none(),
+        "verify_context must be None after a chat-only turn"
+    );
+}
+
+#[test]
+fn verify_context_none_after_rebuild_file_with_no_prior_mutation() {
+    // A filesystem-watcher-triggered rebuild with no preceding user-initiated mutation
+    // must not produce a verify_context.
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("cargo check".into()));
+    rt.rebuild_file(&tmp.path().join("src/main.rs"));
+    assert!(
+        rt.verify_context().is_none(),
+        "verify_context must be None after a fs-watch rebuild with no prior mutation"
+    );
+}
+
+#[test]
+fn verify_context_some_after_in_scope_mutation() {
+    // An approved in-scope edit_file mutation must produce a verify_context on the
+    // next call, even though deferred_verify defaults to true (the sync verify path
+    // never ran, but the deferred path must still see the mutation).
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let main_rs = src_dir.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("cargo check".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+    collect_events(&mut rt, RuntimeRequest::Approve);
+
+    assert!(
+        rt.verify_context().is_some(),
+        "verify_context must be Some after an in-scope mutation"
+    );
+}
+
+#[test]
+fn verify_context_none_after_out_of_scope_mutation() {
+    // The literal original incident: an approved mutation to a root-level throwaway
+    // file (outside all configured source_dirs) must not produce a verify_context.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let throwaway = tmp.path().join("scratch.txt");
+    fs::write(&throwaway, "old content\n").unwrap();
+    let abs_path = throwaway.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00old content\x00new content");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("cargo check".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "write_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+    collect_events(&mut rt, RuntimeRequest::Approve);
+
+    assert!(
+        rt.verify_context().is_none(),
+        "verify_context must be None after an out-of-scope mutation"
+    );
+}
+
+#[test]
+fn verify_context_does_not_refire_after_fs_watch_rebuild_following_mutation() {
+    // Reproduces the originally-reported fs-watch double-fire: after an in-scope
+    // mutation is consumed once by verify_context() (simulating the WorkerCmd::Handle
+    // check), a subsequent fs-watch-triggered RebuildFile for the same file must not
+    // cause verify_context() to fire again.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let main_rs = src_dir.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("cargo check".into()))
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+    collect_events(&mut rt, RuntimeRequest::Approve);
+
+    assert!(
+        rt.verify_context().is_some(),
+        "first verify_context call after the mutation must be Some"
+    );
+
+    // Simulate the fs-watcher noticing the same file changed and triggering a rebuild.
+    rt.rebuild_file(&main_rs);
+    assert!(
+        rt.verify_context().is_none(),
+        "verify_context must not re-fire for a fs-watch rebuild after the mutation was already consumed"
+    );
+}

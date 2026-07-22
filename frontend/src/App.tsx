@@ -166,11 +166,11 @@ export default function App() {
         }
 
         case 'approval_required':
-          setDialog({ kind: 'mutation', pending: payload.pending, evidence: payload.evidence, impact: payload.impact })
+          setDialog({ kind: 'mutation', pending: payload.pending, evidence: payload.evidence, impact: payload.impact, reason: payload.reason })
           break
 
         case 'transaction_approval_required':
-          setDialog({ kind: 'transaction', actions: payload.actions, impact: payload.impact })
+          setDialog({ kind: 'transaction', actions: payload.actions, impact: payload.impact, reason: payload.reason })
           break
 
         case 'plan_approval_required':
