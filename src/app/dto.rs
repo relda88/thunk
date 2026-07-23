@@ -103,6 +103,7 @@ pub enum RuntimeTerminalReasonDto {
     ExecDisabled,
     McpInProjectRedirect,
     EvidenceDisconnectedAnswer,
+    RepeatedMalformedBracketCall,
 }
 
 impl From<RuntimeTerminalReason> for RuntimeTerminalReasonDto {
@@ -131,6 +132,9 @@ impl From<RuntimeTerminalReason> for RuntimeTerminalReasonDto {
             RuntimeTerminalReason::ExecDisabled => Self::ExecDisabled,
             RuntimeTerminalReason::McpInProjectRedirect => Self::McpInProjectRedirect,
             RuntimeTerminalReason::EvidenceDisconnectedAnswer => Self::EvidenceDisconnectedAnswer,
+            RuntimeTerminalReason::RepeatedMalformedBracketCall => {
+                Self::RepeatedMalformedBracketCall
+            }
         }
     }
 }

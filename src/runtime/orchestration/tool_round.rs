@@ -900,8 +900,25 @@ pub(crate) fn run_tool_round(
                 let parts: Vec<&str> = name.splitn(3, "::").collect();
                 let server = parts.get(1).copied().unwrap_or("").to_string();
                 let bare_tool = parts.get(2).copied().unwrap_or("").to_string();
-                let parsed_args: serde_json::Value =
-                    serde_json::from_str(args).unwrap_or_else(|_| serde_json::json!({}));
+
+                // Malformed JSON args must never be silently coerced into `{}` and
+                // presented as a normal-looking approval prompt — the user would be
+                // approving a call that doesn't match what the model actually requested.
+                // Mirrors the resolve() Err handling above: surface a visible tool_error
+                // and let the model see it and retry, rather than building a PendingAction
+                // (and never dispatch anything for it in this round).
+                let parsed_args: serde_json::Value = match serde_json::from_str(args) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let error = format!("malformed JSON args for {name}: {e}");
+                        on_event(RuntimeEvent::ToolCallFinished {
+                            name: name.clone(),
+                            summary: None,
+                        });
+                        accumulated.push_str(&tool_codec::format_tool_error(&name, &error));
+                        continue;
+                    }
+                };
 
                 // Reverse MCP intercept: if the model calls an mcp::filesystem mutation tool
                 // targeting a path inside the project root, redirect to the native tools.
@@ -1651,6 +1668,38 @@ mod tests {
         assert!(mcp_action_reversible("list_files"));
         assert!(mcp_action_reversible("read_record"));
     }
+
+    // Fix 4 (Slice 50.6): malformed JSON args for an MCP/dynamic tool call must surface as
+    // a visible tool_error, never a silently-substituted `{}` presented as a normal-looking
+    // approval prompt.
+    #[test]
+    fn malformed_mcp_json_args_surface_as_tool_error_not_approval() {
+        let (_dir, root, registry) = temp_root();
+
+        let outcome = run_round(
+            &root,
+            &registry,
+            vec![ToolInput::DynamicTool {
+                name: "mcp::testserver::do_thing".to_string(),
+                args: "{not valid json".to_string(),
+            }],
+            ToolSurface::MutationEnabled,
+            false,
+        );
+
+        let ToolRoundOutcome::Completed { results, .. } = outcome else {
+            panic!("malformed args must not produce an approval prompt");
+        };
+        assert!(
+            results.contains("=== tool_error: mcp::testserver::do_thing ==="),
+            "malformed args must surface as a visible tool_error: {results}"
+        );
+        assert!(
+            results.contains("malformed JSON args"),
+            "error message must describe the malformed-args failure: {results}"
+        );
+    }
+
     use crate::core::config::LspConfig;
     use crate::runtime::ProjectRoot;
     use crate::tools::types::FileContentsOutput;

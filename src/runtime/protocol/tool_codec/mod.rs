@@ -14,7 +14,7 @@ mod tool_renderer;
 pub(crate) use tool_detector::is_tool_call_message;
 pub use tool_detector::{
     contains_edit_attempt, contains_fabricated_exchange, contains_malformed_block,
-    detected_malformed_mutation_tool,
+    detected_malformed_bracket_call, detected_malformed_mutation_tool,
 };
 pub use tool_parser::parse_all_tool_inputs;
 pub(crate) use tool_renderer::render_output;

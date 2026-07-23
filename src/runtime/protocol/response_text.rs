@@ -319,6 +319,24 @@ pub(crate) fn repeated_evidence_disconnected_answer_final_answer() -> &'static s
      produced a refusal or non-answer disconnected from it, with no reason given."
 }
 
+/// Injected when the model attempts a recognized tool by name but the bracket syntax does
+/// not match the required "[name: args]" form — missing colon, wrong case, a space before
+/// the colon, or an unrecoverable missing closing bracket. See
+/// `tool_codec::detected_malformed_bracket_call`.
+pub(crate) fn malformed_bracket_call_correction(tool_name: &str) -> String {
+    format!(
+        "[runtime:correction] Your bracket syntax for `{tool_name}` was malformed and could \
+         not be parsed. The exact required form is [{tool_name}: args] — the tag, the tool \
+         name, a colon, the argument, then the closing bracket, all on one line with no \
+         other text. Emit the corrected call now with no other text."
+    )
+}
+
+pub(crate) fn repeated_malformed_bracket_call_final_answer() -> &'static str {
+    "I could not continue because the model repeatedly produced malformed single-line tool \
+     call syntax."
+}
+
 /// Strips any `[thunk: current context]...[/thunk: current context]` block from `text`.
 /// Defense-in-depth: recency injection is suppressed on synthesis surfaces, but if a block
 /// leaks into an admitted answer (e.g. via a non-AnswerOnly surface), this removes it before

@@ -44,9 +44,92 @@ pub fn parse_all_tool_inputs(text: &str, dynamic_names: &[&str]) -> Vec<ToolInpu
     all.into_iter().map(|(_, input)| input).collect()
 }
 
+/// Native tool names usable in the "[name: args]" single-line call form. Kept in sync
+/// with `scan_bracket_calls`'s `named_tools` — reused by the malformed bracket-call
+/// detector (tool_detector.rs) to recognize a failed attempt at a known tool without
+/// duplicating the scanning grammar itself.
+pub(super) const NATIVE_SINGLE_LINE_TOOL_NAMES: &[&str] = &[
+    "read_file",
+    "list_dir",
+    "search_code",
+    "write_file",
+    "shell",
+    "shell_read",
+];
+
+/// Native no-argument tool names usable in the "[name]" static call form (no colon).
+/// Kept in sync with `scan_static_bracket_calls`'s `static_tools`.
+pub(super) const NATIVE_STATIC_TOOL_NAMES: &[&str] = &[
+    "git_status",
+    "git_diff",
+    "git_diff_staged",
+    "git_log",
+    "git_branch",
+];
+
+/// Finds the byte offset of the closing `]` that matches the opening bracket of the call
+/// currently being scanned, starting the scan at `start` (the position right after the
+/// call's `:`). Nested `[`/`]` pairs inside the argument (e.g. a path literal containing
+/// brackets) are tracked by depth so the first `]` encountered while already "inside" a
+/// nested pair is treated as closing that nested pair, not the call itself. Without this,
+/// a naive first-`]` scan mistakes a nested closing bracket for the call's own close and
+/// silently truncates the argument (see "[read_file: src/[foo].rs]" — a naive scan would
+/// capture "src/[foo" and leave "].rs]" as garbage trailing text).
+/// Returns None when no `]` at the call's own depth exists anywhere in the rest of the text.
+pub(super) fn find_bracket_close(text: &str, start: usize) -> Option<usize> {
+    let mut depth: usize = 0;
+    for (i, ch) in text[start..].char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                if depth == 0 {
+                    return Some(start + i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Returns true when the byte range `[start, end)` is the only non-whitespace content on
+/// its line — i.e. everything before `start` on that line is either whitespace or the
+/// tail end of an adjacent call (ends with `]`), and everything after `end` is either
+/// whitespace or the start of another adjacent call (starts with `[`).
+///
+/// format_instructions() tells the model "your ENTIRE response must be the call tag only —
+/// no prose" for any turn that needs a tool; every parser test in this file that mixes a
+/// call with surrounding narration (see `parses_multiple_bracket_calls_in_response`) keeps
+/// each individual call alone on its own line, never embedded mid-sentence. That established
+/// convention is the signal used here: a bracket call sharing its line with other text (e.g.
+/// "Use the syntax [read_file: <path>] to read a file") is illustrative prose describing the
+/// syntax, not a real invocation, and must not be executed.
+///
+/// This must NOT require the call to be the ONLY thing on the line: back-to-back calls with
+/// no separator (e.g. `[list_dir: /a][list_dir: .]`, exercised by
+/// cycle_detection_allows_retry_after_tool_error) are legitimate, tested multi-call
+/// responses — only free-form prose sharing the line is excluded, not adjacent calls.
+/// This is a deliberate, narrow trade-off: text that happens to end in an unrelated `]`
+/// (e.g. a citation like "See docs[1]") immediately before a real call would pass this
+/// check too, but that is a much rarer shape than embedded prose and is judged an
+/// acceptable false-negative given the regression risk of a stricter rule.
+pub(super) fn is_line_isolated(text: &str, start: usize, end: usize) -> bool {
+    let line_start = text[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let line_end = text[end..]
+        .find('\n')
+        .map(|i| end + i)
+        .unwrap_or(text.len());
+
+    let prefix = text[line_start..start].trim_end();
+    let suffix = text[end..line_end].trim_start();
+
+    (prefix.is_empty() || prefix.ends_with(']')) && (suffix.is_empty() || suffix.starts_with('['))
+}
+
 /// Returns the byte ranges (start, exclusive end) of markdown code fence blocks (``` ... ```).
 /// Used to exclude tool syntax inside fences from being treated as real invocations.
-fn code_fence_ranges(text: &str) -> Vec<(usize, usize)> {
+pub(super) fn code_fence_ranges(text: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let mut pos = 0;
     while pos < text.len() {
@@ -95,10 +178,13 @@ fn scan_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
             let open_abs = search_start + rel;
             let after_colon = open_abs + prefix.len();
 
-            let Some(bracket_rel) = text[after_colon..].find(']') else {
-                break;
+            // A single malformed occurrence (no closing bracket at this call's own depth)
+            // must not stop later, well-formed occurrences of the same tool name from being
+            // found — skip past just this occurrence rather than exiting the whole scan.
+            let Some(bracket_abs) = find_bracket_close(text, after_colon) else {
+                search_start = after_colon;
+                continue;
             };
-            let bracket_abs = after_colon + bracket_rel;
 
             let arg_text = &text[after_colon..bracket_abs];
             // Reject if a newline appears before ]
@@ -108,8 +194,10 @@ fn scan_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
             }
 
             let arg = arg_text.trim();
-            if let Some(input) = make_bracket_input(tool_name, arg) {
-                results.push((open_abs, input));
+            if is_line_isolated(text, open_abs, bracket_abs + 1) {
+                if let Some(input) = make_bracket_input(tool_name, arg) {
+                    results.push((open_abs, input));
+                }
             }
             search_start = bracket_abs + 1;
         }
@@ -136,10 +224,13 @@ pub(crate) fn scan_dynamic_bracket_calls(
             let open_abs = search_start + rel;
             let after_colon = open_abs + prefix.len();
 
-            let Some(bracket_rel) = text[after_colon..].find(']') else {
-                break;
+            // Same fix as scan_bracket_calls: a missing (or nested-mismatched) closing
+            // bracket must only skip this occurrence, not stop scanning for this dynamic
+            // tool name entirely — see find_bracket_close's doc comment.
+            let Some(bracket_abs) = find_bracket_close(text, after_colon) else {
+                search_start = after_colon;
+                continue;
             };
-            let bracket_abs = after_colon + bracket_rel;
 
             let arg_text = &text[after_colon..bracket_abs];
             if arg_text.contains('\n') {
@@ -147,13 +238,15 @@ pub(crate) fn scan_dynamic_bracket_calls(
                 continue;
             }
 
-            results.push((
-                open_abs,
-                ToolInput::DynamicTool {
-                    name: name.to_string(),
-                    args: arg_text.trim().to_string(),
-                },
-            ));
+            if is_line_isolated(text, open_abs, bracket_abs + 1) {
+                results.push((
+                    open_abs,
+                    ToolInput::DynamicTool {
+                        name: name.to_string(),
+                        args: arg_text.trim().to_string(),
+                    },
+                ));
+            }
             search_start = bracket_abs + 1;
         }
     }
@@ -177,7 +270,9 @@ fn scan_static_bracket_calls(text: &str) -> Vec<(usize, ToolInput)> {
                 break;
             };
             let open_abs = search_start + rel;
-            results.push((open_abs, input.clone()));
+            if is_line_isolated(text, open_abs, open_abs + tag.len()) {
+                results.push((open_abs, input.clone()));
+            }
             search_start = open_abs + tag.len();
         }
     }
@@ -846,6 +941,39 @@ mod tests {
     #[test]
     fn returns_empty_on_no_tool_calls() {
         assert!(parse_all_tool_inputs("Just a normal response.", &[]).is_empty());
+    }
+
+    // Fix 1 (Slice 50.6): a missing closing bracket must not suppress later,
+    // well-formed calls to the same tool name in the same response.
+
+    #[test]
+    fn malformed_call_without_close_does_not_suppress_later_well_formed_call() {
+        let text = "[read_file: unterminated\n[read_file: real.rs]";
+        let calls = parse_all_tool_inputs(text, &[]);
+        assert_eq!(
+            calls.len(),
+            1,
+            "the later well-formed call must still be recognized: {calls:?}"
+        );
+        assert!(matches!(&calls[0], ToolInput::ReadFile { path } if path == "real.rs"));
+    }
+
+    // Fix 2 (Slice 50.6): nested brackets in an argument must not truncate the argument at
+    // the first (wrong) closing bracket, and a genuinely unclosed call must fall through
+    // cleanly (no result) rather than capturing garbage.
+
+    #[test]
+    fn nested_bracket_argument_parses_full_path() {
+        let text = "[read_file: src/[foo].rs]";
+        let calls = parse_all_tool_inputs(text, &[]);
+        assert_eq!(calls.len(), 1, "{calls:?}");
+        assert!(matches!(&calls[0], ToolInput::ReadFile { path } if path == "src/[foo].rs"));
+    }
+
+    #[test]
+    fn genuinely_unclosed_bracket_produces_no_result_not_corruption() {
+        let text = "[read_file: unterminated with no closing bracket anywhere";
+        assert!(parse_all_tool_inputs(text, &[]).is_empty());
     }
 
     // [write_file] blocks

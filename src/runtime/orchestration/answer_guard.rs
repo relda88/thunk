@@ -104,6 +104,38 @@ impl Runtime {
             return Some(TurnSignal::Finish);
         }
 
+        // Single-line bracket call for a recognized tool name (native or MCP) that does not
+        // match the required "[name: args]" grammar — missing colon, wrong case, a space
+        // before the colon, or an unrecoverable missing closing bracket. Mirrors the block-
+        // form handling above, but for the single-line call shape instead.
+        let dynamic_names: Vec<&str> = self
+            .discovered_tools
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        if let Some(tool_name) =
+            tool_codec::detected_malformed_bracket_call(response, &dynamic_names)
+        {
+            state.escalation.malformed_bracket_call_violations += 1;
+            self.conversation.discard_last_if_assistant();
+            if state.escalation.malformed_bracket_call_violations == 1 {
+                self.conversation
+                    .push_user(malformed_bracket_call_correction(&tool_name));
+                state.next_round_label = GenerationRoundLabel::CorrectionRetry;
+                state.next_round_cause = GenerationRoundCause::MalformedBracketCallCorrection;
+                return Some(TurnSignal::Continue);
+            }
+            self.finish_with_runtime_answer(
+                repeated_malformed_bracket_call_final_answer(),
+                AnswerSource::RuntimeTerminal {
+                    reason: RuntimeTerminalReason::RepeatedMalformedBracketCall,
+                    rounds: state.tool_rounds,
+                },
+                on_event,
+            );
+            return Some(TurnSignal::Finish);
+        }
+
         None
     }
 

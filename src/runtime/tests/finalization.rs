@@ -989,6 +989,91 @@ fn bare_refusal_after_evidence_retries_then_terminates() {
     );
 }
 
+// ── Slice 50.6: tool-call parser and malformed-args robustness ──────────────
+//
+// End-to-end confirmation of the original incident repro: an unparsed bracket-call
+// fragment left as literal answer text after evidence was gathered this turn. Before
+// this slice, "[mcp::filesystem::list_allowed_directories]" (missing colon) passed all of
+// 50.5's evidence-disconnected checks (length >= 4, no refusal phrase match) and was
+// admitted verbatim. This exercises the same code path (check_protocol_violations →
+// detected_malformed_bracket_call) with a native tool name instead of a live MCP tool,
+// since MCP tool discovery requires a real configured server process — no such test
+// harness exists in this codebase (confirmed during investigation) and standing one up is
+// out of scope for this slice. The detection logic for the exact MCP incident string is
+// covered directly at the unit level in tool_detector.rs
+// (dynamic_mcp_name_missing_colon_is_detected).
+#[test]
+fn unparsed_bracket_call_after_evidence_retries_then_terminates_as_malformed_bracket_call() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/main.rs"),
+        "fn main() { println!(\"hello\"); }\n",
+    )
+    .unwrap();
+
+    let mut rt = make_runtime_in(
+        vec![
+            "[search_code: main]",
+            "[read_file: src/main.rs]",
+            "[read_file]",
+            "[read_file]",
+        ],
+        tmp.path(),
+    );
+
+    let events = collect_events(
+        &mut rt,
+        RuntimeRequest::Submit {
+            text: "display the structure".into(),
+        },
+    );
+
+    let answer_ready_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, RuntimeEvent::AnswerReady(_)))
+        .collect();
+    assert_eq!(
+        answer_ready_events.len(),
+        1,
+        "exactly one AnswerReady must be emitted, after the retry: {events:?}"
+    );
+    let answer_source = events.iter().find_map(|e| {
+        if let RuntimeEvent::AnswerReady(src) = e {
+            Some(src.clone())
+        } else {
+            None
+        }
+    });
+    assert!(
+        matches!(
+            answer_source,
+            Some(AnswerSource::RuntimeTerminal {
+                reason: RuntimeTerminalReason::RepeatedMalformedBracketCall,
+                ..
+            })
+        ),
+        "an unparsed malformed bracket call left as literal answer text must not be admitted \
+         verbatim, and must not be swallowed by the unrelated evidence-disconnected check: \
+         {answer_source:?}"
+    );
+
+    let snapshot = rt.messages_snapshot();
+    let last_assistant = snapshot
+        .iter()
+        .rev()
+        .find(|m| m.role == crate::llm::backend::Role::Assistant)
+        .map(|m| m.content.as_str());
+    assert_ne!(
+        last_assistant,
+        Some("[read_file]"),
+        "the unparsed bracket fragment must be discarded, not admitted verbatim"
+    );
+}
+
 #[test]
 fn list_dir_evidence_then_bare_refusal_is_corrected_not_admitted() {
     // Incident-1 repro: a seeded list_dir (DirectoryListing retrieval intent) succeeds,

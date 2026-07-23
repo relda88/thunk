@@ -22,6 +22,7 @@ pub(crate) struct EngineLocalEscalation {
     pub(crate) fabricated_tool_result_violations: usize,
     pub(crate) malformed_tool_syntax_violations: usize,
     pub(crate) garbled_edit_repair_violations: usize,
+    pub(crate) malformed_bracket_call_violations: usize,
 }
 
 pub(crate) enum TurnSignal {
@@ -152,5 +153,6 @@ mod tests {
         assert_eq!(e.fabricated_tool_result_violations, 0);
         assert_eq!(e.malformed_tool_syntax_violations, 0);
         assert_eq!(e.garbled_edit_repair_violations, 0);
+        assert_eq!(e.malformed_bracket_call_violations, 0);
     }
 }

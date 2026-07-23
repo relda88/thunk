@@ -94,6 +94,11 @@ pub enum RuntimeTerminalReason {
     /// from `InsufficientEvidence`, which means no evidence was ever found — here evidence
     /// existed and synthesis simply failed to use it.
     EvidenceDisconnectedAnswer,
+    /// The model repeatedly emitted a single-line bracket call for a recognized tool name
+    /// (native or MCP) that did not match the required "[name: args]" syntax — missing
+    /// colon, wrong case, a space before the colon, or an unrecoverable missing closing
+    /// bracket — after one correction attempt.
+    RepeatedMalformedBracketCall,
 }
 
 /// How much of the diff to show.
