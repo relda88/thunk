@@ -1394,14 +1394,36 @@ pub(crate) fn run_tool_round(
                     };
                 }
                 // Collect any consecutive edit_file/write_file approvals from remaining calls
-                // into a transaction. ToolCallStarted fires for each during collection;
-                // ToolCallFinished fires during execute_transaction() after approval.
+                // into a transaction. For each call successfully added to tx_actions,
+                // ToolCallFinished is deferred to execute_transaction()/handle_reject() after
+                // approval/rejection. For any call that ends collection early (wrong type,
+                // resolve/dispatch failure), ToolCallFinished fires immediately below instead —
+                // it will never reach tx_actions, so nothing downstream would fire it otherwise.
                 let mut tx_actions = vec![pending];
                 for remaining in calls_iter.by_ref() {
+                    // Every ToolCallStarted must be paired with a terminal event — the loop
+                    // still stops collecting on the same conditions as before, but neither
+                    // "wrong call type" nor "resolve/dispatch failure" may exit silently.
+                    // A non-edit/write call ends collection immediately: fire its Started/
+                    // Finished pair back to back with an explanatory error, then break.
+                    // Routing it back through the outer dispatch loop is out of scope here.
                     if !matches!(
                         remaining,
                         ToolInput::EditFile { .. } | ToolInput::WriteFile { .. }
                     ) {
+                        let r_name = remaining.tool_name().to_string();
+                        on_event(RuntimeEvent::ToolCallStarted {
+                            name: r_name.clone(),
+                        });
+                        on_event(RuntimeEvent::ToolCallFinished {
+                            name: r_name.clone(),
+                            summary: None,
+                        });
+                        accumulated.push_str(&tool_codec::format_tool_error(
+                            &r_name,
+                            "cannot be included in the current edit/write transaction; \
+                             call it in a separate round",
+                        ));
                         break;
                     }
                     let r_name = remaining.tool_name().to_string();
@@ -1413,9 +1435,42 @@ pub(crate) fn run_tool_round(
                             Ok(ToolRunResult::Approval(r_pending)) => {
                                 tx_actions.push(r_pending);
                             }
-                            _ => break,
+                            Ok(_) => {
+                                on_event(RuntimeEvent::ToolCallFinished {
+                                    name: r_name.clone(),
+                                    summary: None,
+                                });
+                                accumulated.push_str(&tool_codec::format_tool_error(
+                                    &r_name,
+                                    "did not return an approval-required result while \
+                                     collecting an edit/write transaction",
+                                ));
+                                break;
+                            }
+                            Err(e) => {
+                                on_event(RuntimeEvent::ToolCallFinished {
+                                    name: r_name.clone(),
+                                    summary: None,
+                                });
+                                accumulated.push_str(&tool_codec::format_tool_error(
+                                    &r_name,
+                                    &e.to_string(),
+                                ));
+                                break;
+                            }
                         },
-                        Err(_) => break,
+                        Err(e) => {
+                            let tool_error: ToolError = e.into();
+                            on_event(RuntimeEvent::ToolCallFinished {
+                                name: r_name.clone(),
+                                summary: None,
+                            });
+                            accumulated.push_str(&tool_codec::format_tool_error(
+                                &r_name,
+                                &tool_error.to_string(),
+                            ));
+                            break;
+                        }
                     }
                 }
                 if tx_actions.len() == 1 {
@@ -1788,6 +1843,285 @@ mod tests {
             false,
             &mut |_| {},
         )
+    }
+
+    fn run_round_with_events(
+        root: &ProjectRoot,
+        registry: &ToolRegistry,
+        calls: Vec<ToolInput>,
+        tool_surface: ToolSurface,
+    ) -> (ToolRoundOutcome, Vec<RuntimeEvent>) {
+        let mut last_call_key = None;
+        let mut search_budget = SearchBudget::new();
+        let mut investigation = InvestigationState::new();
+        let mut lsp = LspManager::new(&LspConfig::default(), std::path::Path::new("."));
+        let mut reads_this_turn = HashSet::new();
+        let mut anchors = AnchorState::default();
+        let mut requested_read_completed = false;
+        let mut disallowed_tool_attempts = 0usize;
+        let mut weak_search_query_attempts = 0usize;
+        let mut events: Vec<RuntimeEvent> = Vec::new();
+
+        let outcome = run_tool_round(
+            root,
+            registry,
+            calls,
+            &mut last_call_key,
+            &mut search_budget,
+            &mut investigation,
+            &mut lsp,
+            &mut reads_this_turn,
+            &mut anchors,
+            tool_surface,
+            &mut disallowed_tool_attempts,
+            &mut weak_search_query_attempts,
+            true,
+            false,
+            InvestigationMode::General,
+            None,
+            &mut requested_read_completed,
+            None,
+            None,
+            None,
+            &RetrievalConfig::default(),
+            &HashSet::new(),
+            false,
+            &mut |e| events.push(e),
+        );
+        (outcome, events)
+    }
+
+    // Slice 50.8, Bug 1: a non-edit/write call encountered while collecting a transaction
+    // must not be silently dropped. It still ends collection (unchanged), but must fire a
+    // paired ToolCallStarted/ToolCallFinished with a visible explanatory tool_error, and the
+    // resulting transaction must contain only the calls genuinely collected before it.
+    #[test]
+    fn transaction_collection_non_edit_write_call_fires_paired_events_and_stops_collection() {
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("a.py"), "old_a\n").unwrap();
+        fs::write(root.path().join("b.py"), "old_b\n").unwrap();
+
+        let (outcome, events) = run_round_with_events(
+            &root,
+            &registry,
+            vec![
+                ToolInput::EditFile {
+                    path: "a.py".into(),
+                    search: "old_a".into(),
+                    replace: "new_a".into(),
+                },
+                ToolInput::EditFile {
+                    path: "b.py".into(),
+                    search: "old_b".into(),
+                    replace: "new_b".into(),
+                },
+                ToolInput::ReadFile {
+                    path: "a.py".into(),
+                },
+            ],
+            ToolSurface::MutationEnabled,
+        );
+
+        let ToolRoundOutcome::TransactionRequired {
+            accumulated,
+            actions,
+        } = outcome
+        else {
+            panic!("expected a transaction with the two collected edits: events={events:?}");
+        };
+        assert_eq!(
+            actions.len(),
+            2,
+            "the rejected read_file call must not appear in the transaction"
+        );
+        assert!(actions.iter().all(|a| a.tool_name == "edit_file"));
+
+        let started = events
+            .iter()
+            .filter(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "read_file"))
+            .count();
+        let finished = events
+            .iter()
+            .filter(|e| {
+                matches!(e, RuntimeEvent::ToolCallFinished { name, summary: None } if name == "read_file")
+            })
+            .count();
+        assert_eq!(
+            started, 1,
+            "read_file must get exactly one ToolCallStarted: {events:?}"
+        );
+        assert_eq!(
+            finished, 1,
+            "read_file must get a matching ToolCallFinished: {events:?}"
+        );
+        assert!(
+            accumulated.contains("=== tool_error: read_file ===")
+                && accumulated.contains("cannot be included in the current edit/write transaction"),
+            "must surface a visible explanatory tool_error: {accumulated}"
+        );
+    }
+
+    // Slice 50.8, Bug 2 (resolve() failure branch): a resolve() failure for a
+    // second-or-later call while collecting a transaction must not break silently —
+    // it must fire a matching ToolCallFinished before stopping collection.
+    #[test]
+    fn transaction_collection_resolve_failure_fires_paired_events_and_stops_collection() {
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("a.py"), "old_a\n").unwrap();
+
+        let (outcome, events) = run_round_with_events(
+            &root,
+            &registry,
+            vec![
+                ToolInput::EditFile {
+                    path: "a.py".into(),
+                    search: "old_a".into(),
+                    replace: "new_a".into(),
+                },
+                ToolInput::EditFile {
+                    path: "../outside.py".into(),
+                    search: "whatever".into(),
+                    replace: "new".into(),
+                },
+            ],
+            ToolSurface::MutationEnabled,
+        );
+
+        let ToolRoundOutcome::ApprovalRequired {
+            accumulated,
+            pending,
+        } = outcome
+        else {
+            panic!("only the first edit should be collected: events={events:?}");
+        };
+        assert_eq!(pending.tool_name, "edit_file");
+
+        let started = events
+            .iter()
+            .filter(|e| matches!(e, RuntimeEvent::ToolCallStarted { name } if name == "edit_file"))
+            .count();
+        let finished = events
+            .iter()
+            .filter(|e| {
+                matches!(e, RuntimeEvent::ToolCallFinished { name, summary: None } if name == "edit_file")
+            })
+            .count();
+        assert_eq!(
+            started, 2,
+            "both edit_file calls must get ToolCallStarted: {events:?}"
+        );
+        assert_eq!(
+            finished, 1,
+            "only the failed second edit_file gets an immediate ToolCallFinished \
+             (the first is deferred to handle_approve/reject): {events:?}"
+        );
+        assert!(accumulated.contains("=== tool_error: edit_file ==="));
+        assert!(
+            accumulated.contains("escapes project root"),
+            "resolve() failure detail must be surfaced, not a generic message: {accumulated}"
+        );
+    }
+
+    // Slice 50.8, Bug 2 (dispatch() failure branch): a dispatch() failure (Err) for a
+    // second-or-later call while collecting a transaction must not break silently —
+    // it must fire a matching ToolCallFinished before stopping collection.
+    #[test]
+    fn transaction_collection_dispatch_failure_fires_paired_events_and_stops_collection() {
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("a.py"), "old_a\n").unwrap();
+        fs::write(root.path().join("b.py"), "unrelated content\n").unwrap();
+
+        let (outcome, events) = run_round_with_events(
+            &root,
+            &registry,
+            vec![
+                ToolInput::EditFile {
+                    path: "a.py".into(),
+                    search: "old_a".into(),
+                    replace: "new_a".into(),
+                },
+                ToolInput::EditFile {
+                    path: "b.py".into(),
+                    search: "does_not_exist".into(),
+                    replace: "new".into(),
+                },
+            ],
+            ToolSurface::MutationEnabled,
+        );
+
+        let ToolRoundOutcome::ApprovalRequired {
+            accumulated,
+            pending,
+        } = outcome
+        else {
+            panic!("only the first edit should be collected: events={events:?}");
+        };
+        assert_eq!(pending.tool_name, "edit_file");
+
+        let finished = events
+            .iter()
+            .filter(|e| {
+                matches!(e, RuntimeEvent::ToolCallFinished { name, summary: None } if name == "edit_file")
+            })
+            .count();
+        assert_eq!(
+            finished, 1,
+            "only the failed second edit_file gets an immediate ToolCallFinished: {events:?}"
+        );
+        assert!(accumulated.contains("=== tool_error: edit_file ==="));
+        assert!(
+            accumulated.contains("search text not found"),
+            "dispatch() failure detail must be surfaced, not a generic message: {accumulated}"
+        );
+    }
+
+    // Slice 50.8 regression guard: homogeneous two-edit_file transactions (the only
+    // shape existing transaction tests exercise) must be completely unaffected — no
+    // spurious events, no change to which actions end up in the transaction.
+    #[test]
+    fn transaction_collection_homogeneous_batch_unaffected() {
+        let (_dir, root, registry) = temp_root();
+        fs::write(root.path().join("a.py"), "old_a\n").unwrap();
+        fs::write(root.path().join("b.py"), "old_b\n").unwrap();
+
+        let (outcome, events) = run_round_with_events(
+            &root,
+            &registry,
+            vec![
+                ToolInput::EditFile {
+                    path: "a.py".into(),
+                    search: "old_a".into(),
+                    replace: "new_a".into(),
+                },
+                ToolInput::EditFile {
+                    path: "b.py".into(),
+                    search: "old_b".into(),
+                    replace: "new_b".into(),
+                },
+            ],
+            ToolSurface::MutationEnabled,
+        );
+
+        let ToolRoundOutcome::TransactionRequired {
+            accumulated,
+            actions,
+        } = outcome
+        else {
+            panic!("expected a transaction with both edits: events={events:?}");
+        };
+        assert_eq!(actions.len(), 2);
+        assert!(
+            accumulated.is_empty(),
+            "a fully homogeneous batch must not surface any tool_error: {accumulated}"
+        );
+        let error_events = events
+            .iter()
+            .filter(|e| matches!(e, RuntimeEvent::ToolCallFinished { summary: None, .. }))
+            .count();
+        assert_eq!(
+            error_events, 0,
+            "no ToolCallFinished{{summary: None}} should fire for a clean homogeneous batch: {events:?}"
+        );
     }
 
     #[test]
