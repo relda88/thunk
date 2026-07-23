@@ -1529,3 +1529,186 @@ fn verify_context_does_not_refire_after_fs_watch_rebuild_following_mutation() {
         "verify_context must not re-fire for a fs-watch rebuild after the mutation was already consumed"
     );
 }
+
+// ---- Slice 50.7: verification result integrity (exit-status-blind "ok" reporting) -----------
+
+#[test]
+fn cargo_nonzero_exit_with_no_parseable_diagnostics_reports_failure() {
+    // A manifest-level failure (invalid Cargo.toml) makes `cargo check --message-format=json`
+    // exit non-zero without emitting any parseable "compiler-message" JSON diagnostics —
+    // this is the exact gap Slice 50.7 closes: previously, empty parsed diagnostics always
+    // collapsed to "ok" regardless of exit status.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(tmp.path().join("Cargo.toml"), "this is not valid toml [[[").unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    let main_rs = src.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("cargo check".into()))
+        .with_deferred_verify(false)
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not panic: {events:?}");
+
+    let ok_msg = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.trim() == "cargo check: ok"));
+    assert!(
+        !ok_msg,
+        "a non-zero exit with no parseable diagnostics must never report 'ok': {events:?}"
+    );
+    let failure_msg = events.iter().any(
+        |e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("manual fix required")),
+    );
+    assert!(
+        failure_msg,
+        "a non-zero exit with no parseable diagnostics must be reported as a failure: {events:?}"
+    );
+}
+
+#[test]
+fn cargo_zero_exit_empty_diagnostics_still_reports_ok() {
+    // Regression guard for the legitimate success case: a clean edit that both exits 0 and
+    // parses to zero diagnostics must still report "ok" after the exit-status fix.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"verify-ok-test\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let src = tmp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    let main_rs = src.join("main.rs");
+    fs::write(&main_rs, "fn main() {}\n").unwrap();
+
+    let abs_path = main_rs.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00fn main() {{}}\x00fn main() {{ let _x = 1; }}");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("cargo check".into()))
+        .with_deferred_verify(false)
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let ok_msg = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.trim() == "cargo check: ok"));
+    assert!(
+        ok_msg,
+        "a zero exit with no diagnostics must still report 'ok': {events:?}"
+    );
+}
+
+#[test]
+fn non_cargo_zero_exit_empty_output_reports_ok() {
+    // New coverage for the success side of the non-cargo branch: a command that exits 0
+    // with no output must report "ok". Uses the "true" command, which always exits 0 and
+    // produces no stdout/stderr.
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let data_file = src_dir.join("data.txt");
+    fs::write(&data_file, "hello world\n").unwrap();
+
+    let abs_path = data_file.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00hello world\x00hello there");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("true".into()))
+        .with_deferred_verify(false)
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let ok_msg = events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.trim() == "true: ok"));
+    assert!(
+        ok_msg,
+        "a zero-exit command with empty output must report 'ok': {events:?}"
+    );
+}
+
+#[test]
+fn verify_spawn_error_reports_unavailable_distinct_from_failure() {
+    // A verify_command referencing a nonexistent binary must fail to spawn and report
+    // "unavailable" — a category that must stay distinct from the new exit-status-based
+    // "failed" category (spawn errors are not "ran and exited non-zero").
+    use std::fs;
+    use tempfile::TempDir;
+
+    let tmp = TempDir::new().unwrap();
+    let src_dir = tmp.path().join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let data_file = src_dir.join("data.txt");
+    fs::write(&data_file, "hello world\n").unwrap();
+
+    let abs_path = data_file.to_string_lossy().into_owned();
+    let payload = format!("{abs_path}\x00hello world\x00hello there");
+
+    let mut rt = make_runtime_in(Vec::<&str>::new(), tmp.path())
+        .with_verify_command(Some("definitely-not-a-real-command-xyz".into()))
+        .with_deferred_verify(false)
+        .with_max_correction_attempts(0);
+    rt.set_pending_for_test(PendingAction {
+        tool_name: "edit_file".into(),
+        summary: format!("edit {abs_path}"),
+        risk: RiskLevel::Low,
+        reversible: true,
+        payload,
+    });
+
+    let events = collect_events(&mut rt, RuntimeRequest::Approve);
+    assert!(!has_failed(&events), "approve must not fail: {events:?}");
+    let unavailable_msg = events.iter().any(|e| {
+        matches!(e, RuntimeEvent::SystemMessage(msg) if msg.trim() == "definitely-not-a-real-command-xyz: unavailable")
+    });
+    assert!(
+        unavailable_msg,
+        "a spawn error must report 'unavailable', not a generic failure: {events:?}"
+    );
+    let conflated_with_failure = events.iter().any(
+        |e| matches!(e, RuntimeEvent::SystemMessage(msg) if msg.contains("manual fix required")),
+    );
+    assert!(
+        !conflated_with_failure,
+        "spawn errors must not be conflated with the exit-status failure category: {events:?}"
+    );
+}

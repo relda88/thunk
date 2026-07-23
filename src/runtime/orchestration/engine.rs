@@ -2444,8 +2444,21 @@ impl Runtime {
     }
 
     /// Runs `cmd` in the project root. Returns `None` on success or spawn error (both already
-    /// emitted via `on_event`). Returns `Some(combined_output)` on non-zero exit so the caller
-    /// can build a failure message; on success also resets `correction_attempts`.
+    /// emitted via `on_event`). Returns `Some(combined_output)` on failure so the caller can
+    /// build a failure message; on success also resets `correction_attempts`.
+    ///
+    /// "ok" requires both a zero exit status AND no failure-indicating output — for cargo/ruff
+    /// that means the process exited 0 and no diagnostics were parsed; a non-zero exit with no
+    /// parseable diagnostics (workspace/manifest error, linker failure, build-script panic, ICE,
+    /// or a crash/traceback that isn't valid diagnostic JSON) is a failure, reported with the raw
+    /// combined output since no structured diagnostic is available. For other commands, "ok"
+    /// requires a zero exit AND empty combined output — a zero exit with non-empty output is
+    /// still a failure (preserves the pre-existing non-empty-output-means-failure behavior).
+    ///
+    /// Slice 50.7 note: this logic is duplicated in `src/tui/worker.rs` (`WorkerCmd::Handle` and
+    /// `WorkerCmd::RebuildFile` closures) because `deferred_verify` defaults to `true` in
+    /// production and this synchronous path only runs in tests. Keep the three copies identical
+    /// until a future slice consolidates them into one shared function.
     fn run_verify_command(
         &mut self,
         cmd: &str,
@@ -2476,6 +2489,7 @@ impl Runtime {
             .output()
         {
             Ok(out) => {
+                let status_ok = out.status.success();
                 let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
                 combined.push_str(&String::from_utf8_lossy(&out.stderr));
                 if combined.len() > 4000 {
@@ -2490,26 +2504,33 @@ impl Runtime {
                 let output_for_correction = if is_cargo {
                     let diagnostics = crate::runtime::diagnostics::parse_diagnostics(&combined);
                     if diagnostics.is_empty() {
-                        on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
-                        self.correction_attempts = 0;
-                        return None;
+                        if status_ok {
+                            on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                            self.correction_attempts = 0;
+                            return None;
+                        }
+                        combined
+                    } else {
+                        crate::runtime::diagnostics::format_diagnostics(&diagnostics)
                     }
-                    crate::runtime::diagnostics::format_diagnostics(&diagnostics)
                 } else if is_ruff {
                     let diagnostics =
                         crate::runtime::diagnostics::parse_ruff_diagnostics(&combined);
                     if diagnostics.is_empty() {
-                        on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
-                        self.correction_attempts = 0;
-                        return None;
+                        if status_ok {
+                            on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                            self.correction_attempts = 0;
+                            return None;
+                        }
+                        combined
+                    } else {
+                        crate::runtime::diagnostics::format_diagnostics(&diagnostics)
                     }
-                    crate::runtime::diagnostics::format_diagnostics(&diagnostics)
+                } else if status_ok && combined.trim().is_empty() {
+                    on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
+                    self.correction_attempts = 0;
+                    return None;
                 } else {
-                    if combined.trim().is_empty() {
-                        on_event(RuntimeEvent::SystemMessage(format!("{cmd}: ok")));
-                        self.correction_attempts = 0;
-                        return None;
-                    }
                     combined
                 };
                 Some(output_for_correction)

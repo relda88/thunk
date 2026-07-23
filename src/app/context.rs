@@ -212,6 +212,14 @@ impl AppContext {
             log,
         })
     }
+
+    /// Test-only accessor for driving the wrapped `Runtime` directly (e.g. seeding a
+    /// pending approval via `Runtime::set_pending_for_test`) without going through a
+    /// full Submit turn. Mirrors `Runtime::set_pending_for_test`'s test-only scope.
+    #[cfg(test)]
+    pub(crate) fn runtime_mut(&mut self) -> &mut Runtime {
+        &mut self.runtime
+    }
 }
 
 /// Defines labels for requests and events for logging purposes.
