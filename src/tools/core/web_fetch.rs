@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::net::ToSocketAddrs;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 
 use crate::runtime::ResolvedToolInput;
 use crate::tools::types::{
@@ -87,19 +87,32 @@ fn extract_host(url: &str) -> Option<String> {
     }
 }
 
-fn is_private_ip(addr: std::net::IpAddr) -> bool {
+fn is_private_ip(addr: IpAddr) -> bool {
     match addr {
-        std::net::IpAddr::V4(a) => {
-            let o = a.octets();
-            o[0] == 127
-                || o[0] == 10
-                || (o[0] == 172 && (16..=31).contains(&o[1]))
-                || (o[0] == 192 && o[1] == 168)
-                || (o[0] == 169 && o[1] == 254)
-                || o == [0, 0, 0, 0]
+        IpAddr::V4(a) => is_private_ipv4(a),
+        IpAddr::V6(a) => {
+            // ::ffff:a.b.c.d addresses must be checked as their embedded
+            // IPv4 address, not against the IPv6-only rules below.
+            if let Some(mapped) = a.to_ipv4_mapped() {
+                return is_private_ipv4(mapped);
+            }
+            a.is_loopback()
+                || a.is_multicast()
+                || a.is_unicast_link_local() // fe80::/10 (stable stdlib; correct /10 boundary, unlike a hand-rolled segment check)
+                || a.is_unique_local() // fc00::/7 (ULA)
         }
-        std::net::IpAddr::V6(a) => a.is_loopback() || a.segments()[0] == 0xfe80,
     }
+}
+
+fn is_private_ipv4(a: Ipv4Addr) -> bool {
+    let o = a.octets();
+    a.is_private() // RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+        || a.is_loopback() // 127.0.0.0/8
+        || a.is_link_local() // 169.254.0.0/16
+        || a.is_broadcast() // 255.255.255.255
+        || a.is_multicast() // 224.0.0.0/4
+        || o[0] == 0 // 0.0.0.0/8, "this network" — not just the all-zero address
+        || (o[0] == 100 && (64..=127).contains(&o[1])) // 100.64.0.0/10 CGNAT; Ipv4Addr::is_shared() is unstable, so this is a manual range check
 }
 
 fn validate_url(url: &str) -> Result<(), ToolError> {
@@ -111,11 +124,16 @@ fn validate_url(url: &str) -> Result<(), ToolError> {
     let host = extract_host(url).ok_or_else(|| {
         ToolError::InvalidInput("web_fetch: could not parse host from URL".into())
     })?;
-    let addrs = (host.as_str(), 80_u16)
-        .to_socket_addrs()
-        .map_err(|e| ToolError::InvalidInput(format!("web_fetch: DNS resolution failed: {e}")))?;
-    for addr in addrs {
-        if is_private_ip(addr.ip()) {
+    // Only a literal IP in the URL can be checked here without performing a
+    // DNS lookup. A hostname is deliberately NOT resolved in this function:
+    // resolving it here and again inside fetch_url would be two independent
+    // resolutions of the same name, reopening the DNS-rebinding TOCTOU
+    // window this guard exists to close. Hostnames are validated exactly
+    // once, at actual connect time, by SsrfGuardResolver in fetch_url —
+    // that is the single point of truth for hostname-based validation,
+    // covering both the initial connection and every redirect hop.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_private_ip(ip) {
             return Err(ToolError::InvalidInput(
                 "web_fetch: private/loopback addresses not permitted".into(),
             ));
@@ -124,10 +142,56 @@ fn validate_url(url: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
+/// Rejects the entire resolution if any candidate address is private/blocked.
+/// Must not silently filter down to just the public addresses: if a
+/// hostname resolves to a mix of public and private addresses, filtering
+/// would let an attacker win a race by controlling which address ureq
+/// happens to connect to first.
+fn validate_resolved_addrs(addrs: &[SocketAddr], netloc: &str) -> std::io::Result<()> {
+    if addrs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("web_fetch: no addresses resolved for {netloc}"),
+        ));
+    }
+    if addrs.iter().any(|a| is_private_ip(a.ip())) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("web_fetch: private/loopback address blocked for {netloc}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Custom DNS resolver installed on the ureq Agent used by fetch_url.
+///
+/// ureq's connect_host() (src/stream.rs in the ureq crate) is the sole
+/// TCP-connect function for both the initial request AND every redirect hop
+/// — each redirect rebuilds a Unit for the new location and re-enters
+/// connect_host, which calls this resolver again for the new host before
+/// opening a socket. Installing the guard here, rather than as a one-time
+/// pre-check, makes it the single enforcement point for every address
+/// actually connected to, including redirect targets, without needing to
+/// disable redirects (`.redirects(0)`) or re-implement following them
+/// manually.
+struct SsrfGuardResolver;
+
+impl ureq::Resolver for SsrfGuardResolver {
+    fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
+        let addrs: Vec<SocketAddr> = netloc.to_socket_addrs()?.collect();
+        validate_resolved_addrs(&addrs, netloc)?;
+        Ok(addrs)
+    }
+}
+
 fn fetch_url(url: &str) -> Result<(u16, String), ToolError> {
     let url = url.to_string();
     let handle = std::thread::spawn(move || {
-        ureq::get(&url)
+        let agent = ureq::AgentBuilder::new()
+            .resolver(SsrfGuardResolver)
+            .build();
+        agent
+            .get(&url)
             .timeout(std::time::Duration::from_secs(10))
             .call()
     });
@@ -358,6 +422,149 @@ mod tests {
     fn public_ip_allowed() {
         assert!(!is_private_ip("1.1.1.1".parse().unwrap()));
         assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_checked_as_embedded_v4() {
+        assert!(is_private_ip("::ffff:127.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("::ffff:10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("::ffff:169.254.1.1".parse().unwrap()));
+        assert!(!is_private_ip("::ffff:8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv6_ula_blocked() {
+        assert!(is_private_ip("fc00::1".parse().unwrap()));
+        assert!(is_private_ip(
+            "fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()
+        ));
+        assert!(!is_private_ip("fe00::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn cgnat_range_blocked() {
+        assert!(is_private_ip("100.64.0.0".parse().unwrap()));
+        assert!(is_private_ip("100.64.0.1".parse().unwrap()));
+        assert!(is_private_ip("100.127.255.255".parse().unwrap()));
+        assert!(!is_private_ip("100.63.255.255".parse().unwrap()));
+        assert!(!is_private_ip("100.128.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn broadcast_blocked() {
+        assert!(is_private_ip("255.255.255.255".parse().unwrap()));
+    }
+
+    #[test]
+    fn multicast_blocked() {
+        assert!(is_private_ip("224.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("239.255.255.255".parse().unwrap()));
+        assert!(is_private_ip("ff02::1".parse().unwrap()));
+        assert!(is_private_ip("ff0e::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn full_this_network_range_blocked() {
+        assert!(is_private_ip("0.0.0.0".parse().unwrap()));
+        assert!(is_private_ip("0.1.2.3".parse().unwrap()));
+        assert!(is_private_ip("0.255.255.255".parse().unwrap()));
+    }
+
+    #[test]
+    fn ipv6_link_local_full_slash10_range_blocked() {
+        // Previously the check was `segments()[0] == 0xfe80` exact equality,
+        // which missed most of fe80::/10 (0xFE80..=0xFEBF). These two cases
+        // are exactly what that bug missed.
+        assert!(is_private_ip("fe90::1".parse().unwrap()));
+        assert!(is_private_ip(
+            "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()
+        ));
+        assert!(is_private_ip("fe80::1".parse().unwrap()));
+        assert!(!is_private_ip("fec0::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn multi_homed_resolution_rejects_if_any_private() {
+        let public: SocketAddr = "1.1.1.1:80".parse().unwrap();
+        let private: SocketAddr = "10.0.0.5:80".parse().unwrap();
+        let err = validate_resolved_addrs(&[public, private], "mixed.test:80").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn multi_homed_resolution_rejects_regardless_of_order() {
+        let public: SocketAddr = "8.8.8.8:80".parse().unwrap();
+        let private: SocketAddr = "192.168.1.1:80".parse().unwrap();
+        // private-first ordering must be rejected identically to private-last —
+        // the check must not just look at addrs[0].
+        let err = validate_resolved_addrs(&[private, public], "mixed.test:80").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn multi_homed_resolution_allows_all_public() {
+        let a: SocketAddr = "1.1.1.1:80".parse().unwrap();
+        let b: SocketAddr = "8.8.8.8:80".parse().unwrap();
+        assert!(validate_resolved_addrs(&[a, b], "public.test:80").is_ok());
+    }
+
+    /// Test-only resolver: identical to `SsrfGuardResolver` except it treats
+    /// one exact `SocketAddr` (the loopback-bound local test server started
+    /// below) as pre-trusted, since a real "public" host isn't available in
+    /// a sandboxed test run. Every other address — including the redirect
+    /// target — goes through the real `validate_resolved_addrs` guard.
+    struct TestExceptResolver {
+        allow_exact: SocketAddr,
+    }
+
+    impl ureq::Resolver for TestExceptResolver {
+        fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
+            let addrs: Vec<SocketAddr> = netloc.to_socket_addrs()?.collect();
+            if addrs == [self.allow_exact] {
+                return Ok(addrs);
+            }
+            validate_resolved_addrs(&addrs, netloc)?;
+            Ok(addrs)
+        }
+    }
+
+    #[test]
+    fn redirect_to_private_ip_is_blocked() {
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = std::io::Read::read(&mut stream, &mut buf);
+                // 169.254.169.254 is the canonical cloud-metadata SSRF
+                // target; it's already blocked as link-local even before
+                // this slice's other fixes, so this isolates redirect-hop
+                // enforcement specifically.
+                let response =
+                    "HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/\r\nContent-Length: 0\r\n\r\n";
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        let agent = ureq::AgentBuilder::new()
+            .resolver(TestExceptResolver { allow_exact: addr })
+            .build();
+
+        let err = agent
+            .get(&format!("http://127.0.0.1:{}/", addr.port()))
+            .timeout(std::time::Duration::from_secs(5))
+            .call()
+            .expect_err("redirect to a private/link-local address must be rejected");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("private/loopback address blocked"),
+            "expected the redirect target to be rejected by the resolver guard, got: {msg}"
+        );
     }
 
     #[test]
